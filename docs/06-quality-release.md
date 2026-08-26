@@ -188,6 +188,8 @@ The deterministic source/evidence gate is `pnpm release:readiness`. CI invokes `
 
 `pnpm benchmark:performance` runs the content-free deterministic diagnostic in [`scripts/performance-benchmark.mjs`](../scripts/performance-benchmark.mjs). It checks key-to-commit p50/p95 (35/50 ms), cold/warm keyboard open p95 (400/150 ms), long-press false activation (0.1%), and ordinary tap drop (0.1%) for both platforms. It is intended to catch contract regressions locally; its fixture result is never a physical-device or production performance proof, and the readiness gate keeps that evidence `not_proven`.
 
+The TypeScript-authoritative shortcut snapshot/binding vectors are in [`fixtures/shortcut-golden-vectors.json`](../fixtures/shortcut-golden-vectors.json). `pnpm shortcuts:vectors:check` regenerates the vectors in memory and byte-compares them, then validates schema version, QWERTY key normalization, canonical snapshot digest, duplicate physical-key conflict, and local-route authority. This proves shared contract consistency only; iOS/Android native consumption and cross-process runtime interoperability remain `not_proven`.
+
 Each candidate must bind:
 
 - source commit and clean tree;

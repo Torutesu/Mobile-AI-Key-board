@@ -7,8 +7,10 @@
   "scripts": {
     "build": "tsc -b --pretty false",
     "test": "pnpm -r test && pnpm test:release",
-    "test:release": "node --test scripts/test/*.test.mjs",
+    "test:release": "node --test scripts/test/*.test.mjs && pnpm shortcuts:vectors:check",
     "benchmark:performance": "node scripts/performance-benchmark.mjs",
+    "shortcuts:vectors:generate": "pnpm build && node scripts/generate-shortcut-vectors.mjs",
+    "shortcuts:vectors:check": "pnpm build && node scripts/generate-shortcut-vectors.mjs --check",
     "release:readiness": "node scripts/release-readiness.mjs",
     "typecheck": "tsc -b --pretty false",
     "check": "pnpm build && pnpm test"

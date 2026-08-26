@@ -1,0 +1,679 @@
+{
+  "schema_version": "mobile-ai-keyboard.shortcut-golden.v1",
+  "authority": "typescript-contracts",
+  "native_consumption_status": "not_proven",
+  "canonicalization": "RFC8785-like canonicalJson from packages/contracts",
+  "vectors": [
+    {
+      "id": "valid_local_snapshot",
+      "kind": "shortcut_snapshot",
+      "input": {
+        "schema_version": 1,
+        "snapshot_id": "ss_1234567890abcdef",
+        "generation": 1,
+        "user_subject_hash": null,
+        "device_id": "dev_1234567890abcdef",
+        "layout": {
+          "schema_version": 1,
+          "layout_id": "layout_1234567890abcdef",
+          "user_id": "usr_1234567890abcdef",
+          "device_id": "dev_1234567890abcdef",
+          "revision": 1,
+          "key_binding_ids": [
+            "bind_1234567890abcdef"
+          ],
+          "palette_binding_ids": [],
+          "long_press_duration_ms": 450,
+          "cancellation_distance": 10,
+          "command_position": "leading",
+          "overflow_enabled": true,
+          "updated_at": "2026-08-26T00:00:00.000Z"
+        },
+        "bindings": [
+          {
+            "schema_version": 1,
+            "binding_id": "bind_1234567890abcdef",
+            "user_id": "usr_1234567890abcdef",
+            "device_id": "dev_1234567890abcdef",
+            "skill_id": "skill_1234567890abcdef",
+            "version_id": "sv_1234567890abcdef",
+            "skill_version": 1,
+            "skill_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "trigger_key": {
+              "layout_id": "latin_qwerty_v1",
+              "key_code": "KeyH",
+              "display_label": "H",
+              "activation_gesture": "long_press"
+            },
+            "presentation": {
+              "icon_kind": "system",
+              "icon_value": "wand.and.stars",
+              "short_label": "翻訳",
+              "accessibility_label": "画面翻訳",
+              "accessibility_hint": "長押しで実行",
+              "tint_token": "accent"
+            },
+            "enabled": true,
+            "local_eligibility": "local",
+            "required_connection_ids": [],
+            "created_at": "2026-08-26T00:00:00.000Z",
+            "updated_at": "2026-08-26T00:00:00.000Z"
+          }
+        ],
+        "skills": [
+          {
+            "skill_id": "skill_1234567890abcdef",
+            "version_id": "sv_1234567890abcdef",
+            "skill_version": 1,
+            "skill_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "name": "翻訳",
+            "description": "選択範囲を翻訳",
+            "input_sources": [
+              "selection"
+            ],
+            "output_type": "insert_text",
+            "risk_ceiling": "R1",
+            "confirmation": "none",
+            "retention": "none",
+            "tool_summaries": [],
+            "execution_route": "keyboard_local"
+          }
+        ],
+        "connection_states": [],
+        "policy_epoch": 1,
+        "created_at": "2026-08-26T00:00:00.000Z",
+        "expires_at": null,
+        "tombstone_reason": null,
+        "content_digest": "sha256:d963bd630a1469a96c935e55406139584aef97d145e257db01f8fb48db06f01e"
+      },
+      "expected": {
+        "contract_valid": true,
+        "content_digest": "sha256:d963bd630a1469a96c935e55406139584aef97d145e257db01f8fb48db06f01e",
+        "rejection": null
+      }
+    },
+    {
+      "id": "schema_version_rejects_unknown_version",
+      "kind": "shortcut_snapshot",
+      "input": {
+        "schema_version": 2,
+        "snapshot_id": "ss_1234567890abcdef",
+        "generation": 1,
+        "user_subject_hash": null,
+        "device_id": "dev_1234567890abcdef",
+        "layout": {
+          "schema_version": 1,
+          "layout_id": "layout_1234567890abcdef",
+          "user_id": "usr_1234567890abcdef",
+          "device_id": "dev_1234567890abcdef",
+          "revision": 1,
+          "key_binding_ids": [
+            "bind_1234567890abcdef"
+          ],
+          "palette_binding_ids": [],
+          "long_press_duration_ms": 450,
+          "cancellation_distance": 10,
+          "command_position": "leading",
+          "overflow_enabled": true,
+          "updated_at": "2026-08-26T00:00:00.000Z"
+        },
+        "bindings": [
+          {
+            "schema_version": 1,
+            "binding_id": "bind_1234567890abcdef",
+            "user_id": "usr_1234567890abcdef",
+            "device_id": "dev_1234567890abcdef",
+            "skill_id": "skill_1234567890abcdef",
+            "version_id": "sv_1234567890abcdef",
+            "skill_version": 1,
+            "skill_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "trigger_key": {
+              "layout_id": "latin_qwerty_v1",
+              "key_code": "KeyH",
+              "display_label": "H",
+              "activation_gesture": "long_press"
+            },
+            "presentation": {
+              "icon_kind": "system",
+              "icon_value": "wand.and.stars",
+              "short_label": "翻訳",
+              "accessibility_label": "画面翻訳",
+              "accessibility_hint": "長押しで実行",
+              "tint_token": "accent"
+            },
+            "enabled": true,
+            "local_eligibility": "local",
+            "required_connection_ids": [],
+            "created_at": "2026-08-26T00:00:00.000Z",
+            "updated_at": "2026-08-26T00:00:00.000Z"
+          }
+        ],
+        "skills": [
+          {
+            "skill_id": "skill_1234567890abcdef",
+            "version_id": "sv_1234567890abcdef",
+            "skill_version": 1,
+            "skill_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "name": "翻訳",
+            "description": "選択範囲を翻訳",
+            "input_sources": [
+              "selection"
+            ],
+            "output_type": "insert_text",
+            "risk_ceiling": "R1",
+            "confirmation": "none",
+            "retention": "none",
+            "tool_summaries": [],
+            "execution_route": "keyboard_local"
+          }
+        ],
+        "connection_states": [],
+        "policy_epoch": 1,
+        "created_at": "2026-08-26T00:00:00.000Z",
+        "expires_at": null,
+        "tombstone_reason": null,
+        "content_digest": "sha256:d963bd630a1469a96c935e55406139584aef97d145e257db01f8fb48db06f01e"
+      },
+      "expected": {
+        "contract_valid": false,
+        "content_digest": null,
+        "rejection": "schema"
+      }
+    },
+    {
+      "id": "key_normalization_rejects_lowercase_physical_key",
+      "kind": "shortcut_snapshot",
+      "input": {
+        "schema_version": 1,
+        "snapshot_id": "ss_1234567890abcdef",
+        "generation": 1,
+        "user_subject_hash": null,
+        "device_id": "dev_1234567890abcdef",
+        "layout": {
+          "schema_version": 1,
+          "layout_id": "layout_1234567890abcdef",
+          "user_id": "usr_1234567890abcdef",
+          "device_id": "dev_1234567890abcdef",
+          "revision": 1,
+          "key_binding_ids": [
+            "bind_1234567890abcdef"
+          ],
+          "palette_binding_ids": [],
+          "long_press_duration_ms": 450,
+          "cancellation_distance": 10,
+          "command_position": "leading",
+          "overflow_enabled": true,
+          "updated_at": "2026-08-26T00:00:00.000Z"
+        },
+        "bindings": [
+          {
+            "schema_version": 1,
+            "binding_id": "bind_1234567890abcdef",
+            "user_id": "usr_1234567890abcdef",
+            "device_id": "dev_1234567890abcdef",
+            "skill_id": "skill_1234567890abcdef",
+            "version_id": "sv_1234567890abcdef",
+            "skill_version": 1,
+            "skill_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "trigger_key": {
+              "layout_id": "latin_qwerty_v1",
+              "key_code": "Keyh",
+              "display_label": "H",
+              "activation_gesture": "long_press"
+            },
+            "presentation": {
+              "icon_kind": "system",
+              "icon_value": "wand.and.stars",
+              "short_label": "翻訳",
+              "accessibility_label": "画面翻訳",
+              "accessibility_hint": "長押しで実行",
+              "tint_token": "accent"
+            },
+            "enabled": true,
+            "local_eligibility": "local",
+            "required_connection_ids": [],
+            "created_at": "2026-08-26T00:00:00.000Z",
+            "updated_at": "2026-08-26T00:00:00.000Z"
+          }
+        ],
+        "skills": [
+          {
+            "skill_id": "skill_1234567890abcdef",
+            "version_id": "sv_1234567890abcdef",
+            "skill_version": 1,
+            "skill_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "name": "翻訳",
+            "description": "選択範囲を翻訳",
+            "input_sources": [
+              "selection"
+            ],
+            "output_type": "insert_text",
+            "risk_ceiling": "R1",
+            "confirmation": "none",
+            "retention": "none",
+            "tool_summaries": [],
+            "execution_route": "keyboard_local"
+          }
+        ],
+        "connection_states": [],
+        "policy_epoch": 1,
+        "created_at": "2026-08-26T00:00:00.000Z",
+        "expires_at": null,
+        "tombstone_reason": null,
+        "content_digest": "sha256:d963bd630a1469a96c935e55406139584aef97d145e257db01f8fb48db06f01e"
+      },
+      "expected": {
+        "contract_valid": false,
+        "content_digest": null,
+        "rejection": "key_normalization"
+      }
+    },
+    {
+      "id": "digest_rejects_tampered_content",
+      "kind": "shortcut_snapshot",
+      "input": {
+        "schema_version": 1,
+        "snapshot_id": "ss_1234567890abcdef",
+        "generation": 1,
+        "user_subject_hash": null,
+        "device_id": "dev_1234567890abcdef",
+        "layout": {
+          "schema_version": 1,
+          "layout_id": "layout_1234567890abcdef",
+          "user_id": "usr_1234567890abcdef",
+          "device_id": "dev_1234567890abcdef",
+          "revision": 1,
+          "key_binding_ids": [
+            "bind_1234567890abcdef"
+          ],
+          "palette_binding_ids": [],
+          "long_press_duration_ms": 450,
+          "cancellation_distance": 10,
+          "command_position": "leading",
+          "overflow_enabled": true,
+          "updated_at": "2026-08-26T00:00:00.000Z"
+        },
+        "bindings": [
+          {
+            "schema_version": 1,
+            "binding_id": "bind_1234567890abcdef",
+            "user_id": "usr_1234567890abcdef",
+            "device_id": "dev_1234567890abcdef",
+            "skill_id": "skill_1234567890abcdef",
+            "version_id": "sv_1234567890abcdef",
+            "skill_version": 1,
+            "skill_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "trigger_key": {
+              "layout_id": "latin_qwerty_v1",
+              "key_code": "KeyH",
+              "display_label": "H",
+              "activation_gesture": "long_press"
+            },
+            "presentation": {
+              "icon_kind": "system",
+              "icon_value": "wand.and.stars",
+              "short_label": "翻訳",
+              "accessibility_label": "画面翻訳",
+              "accessibility_hint": "長押しで実行",
+              "tint_token": "accent"
+            },
+            "enabled": true,
+            "local_eligibility": "local",
+            "required_connection_ids": [],
+            "created_at": "2026-08-26T00:00:00.000Z",
+            "updated_at": "2026-08-26T00:00:00.000Z"
+          }
+        ],
+        "skills": [
+          {
+            "skill_id": "skill_1234567890abcdef",
+            "version_id": "sv_1234567890abcdef",
+            "skill_version": 1,
+            "skill_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "name": "翻訳",
+            "description": "選択範囲を翻訳",
+            "input_sources": [
+              "selection"
+            ],
+            "output_type": "insert_text",
+            "risk_ceiling": "R1",
+            "confirmation": "none",
+            "retention": "none",
+            "tool_summaries": [],
+            "execution_route": "keyboard_local"
+          }
+        ],
+        "connection_states": [],
+        "policy_epoch": 1,
+        "created_at": "2026-08-26T00:00:00.000Z",
+        "expires_at": null,
+        "tombstone_reason": null,
+        "content_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "expected": {
+        "contract_valid": false,
+        "content_digest": null,
+        "rejection": "digest"
+      }
+    },
+    {
+      "id": "duplicate_physical_key_conflict_rejects_distinct_bindings",
+      "kind": "shortcut_snapshot",
+      "input": {
+        "schema_version": 1,
+        "snapshot_id": "ss_1234567890abcdef",
+        "generation": 1,
+        "user_subject_hash": null,
+        "device_id": "dev_1234567890abcdef",
+        "layout": {
+          "schema_version": 1,
+          "layout_id": "layout_1234567890abcdef",
+          "user_id": "usr_1234567890abcdef",
+          "device_id": "dev_1234567890abcdef",
+          "revision": 1,
+          "key_binding_ids": [
+            "bind_1234567890abcdef",
+            "bind_abcdefabcdefabcd"
+          ],
+          "palette_binding_ids": [],
+          "long_press_duration_ms": 450,
+          "cancellation_distance": 10,
+          "command_position": "leading",
+          "overflow_enabled": true,
+          "updated_at": "2026-08-26T00:00:00.000Z"
+        },
+        "bindings": [
+          {
+            "schema_version": 1,
+            "binding_id": "bind_1234567890abcdef",
+            "user_id": "usr_1234567890abcdef",
+            "device_id": "dev_1234567890abcdef",
+            "skill_id": "skill_1234567890abcdef",
+            "version_id": "sv_1234567890abcdef",
+            "skill_version": 1,
+            "skill_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "trigger_key": {
+              "layout_id": "latin_qwerty_v1",
+              "key_code": "KeyH",
+              "display_label": "H",
+              "activation_gesture": "long_press"
+            },
+            "presentation": {
+              "icon_kind": "system",
+              "icon_value": "wand.and.stars",
+              "short_label": "翻訳",
+              "accessibility_label": "画面翻訳",
+              "accessibility_hint": "長押しで実行",
+              "tint_token": "accent"
+            },
+            "enabled": true,
+            "local_eligibility": "local",
+            "required_connection_ids": [],
+            "created_at": "2026-08-26T00:00:00.000Z",
+            "updated_at": "2026-08-26T00:00:00.000Z"
+          },
+          {
+            "schema_version": 1,
+            "binding_id": "bind_abcdefabcdefabcd",
+            "user_id": "usr_1234567890abcdef",
+            "device_id": "dev_1234567890abcdef",
+            "skill_id": "skill_abcdefabcdefabcd",
+            "version_id": "sv_abcdefabcdefabcd",
+            "skill_version": 1,
+            "skill_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "trigger_key": {
+              "layout_id": "latin_qwerty_v1",
+              "key_code": "KeyH",
+              "display_label": "H",
+              "activation_gesture": "long_press"
+            },
+            "presentation": {
+              "icon_kind": "system",
+              "icon_value": "wand.and.stars",
+              "short_label": "翻訳",
+              "accessibility_label": "画面翻訳",
+              "accessibility_hint": "長押しで実行",
+              "tint_token": "accent"
+            },
+            "enabled": true,
+            "local_eligibility": "local",
+            "required_connection_ids": [],
+            "created_at": "2026-08-26T00:00:00.000Z",
+            "updated_at": "2026-08-26T00:00:00.000Z"
+          }
+        ],
+        "skills": [
+          {
+            "skill_id": "skill_1234567890abcdef",
+            "version_id": "sv_1234567890abcdef",
+            "skill_version": 1,
+            "skill_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "name": "翻訳",
+            "description": "選択範囲を翻訳",
+            "input_sources": [
+              "selection"
+            ],
+            "output_type": "insert_text",
+            "risk_ceiling": "R1",
+            "confirmation": "none",
+            "retention": "none",
+            "tool_summaries": [],
+            "execution_route": "keyboard_local"
+          },
+          {
+            "skill_id": "skill_abcdefabcdefabcd",
+            "version_id": "sv_abcdefabcdefabcd",
+            "skill_version": 1,
+            "skill_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "name": "翻訳",
+            "description": "選択範囲を翻訳",
+            "input_sources": [
+              "selection"
+            ],
+            "output_type": "insert_text",
+            "risk_ceiling": "R1",
+            "confirmation": "none",
+            "retention": "none",
+            "tool_summaries": [],
+            "execution_route": "keyboard_local"
+          }
+        ],
+        "connection_states": [],
+        "policy_epoch": 1,
+        "created_at": "2026-08-26T00:00:00.000Z",
+        "expires_at": null,
+        "tombstone_reason": null,
+        "content_digest": "sha256:dc3cdd0abcd804f8742fbabc6cbb9e51b5c9af75af067eaa3bdc2f65693e77b9"
+      },
+      "expected": {
+        "contract_valid": false,
+        "content_digest": null,
+        "rejection": "duplicate_conflict"
+      }
+    },
+    {
+      "id": "local_route_authority_rejects_host_handoff",
+      "kind": "shortcut_snapshot",
+      "input": {
+        "schema_version": 1,
+        "snapshot_id": "ss_1234567890abcdef",
+        "generation": 1,
+        "user_subject_hash": null,
+        "device_id": "dev_1234567890abcdef",
+        "layout": {
+          "schema_version": 1,
+          "layout_id": "layout_1234567890abcdef",
+          "user_id": "usr_1234567890abcdef",
+          "device_id": "dev_1234567890abcdef",
+          "revision": 1,
+          "key_binding_ids": [
+            "bind_1234567890abcdef"
+          ],
+          "palette_binding_ids": [],
+          "long_press_duration_ms": 450,
+          "cancellation_distance": 10,
+          "command_position": "leading",
+          "overflow_enabled": true,
+          "updated_at": "2026-08-26T00:00:00.000Z"
+        },
+        "bindings": [
+          {
+            "schema_version": 1,
+            "binding_id": "bind_1234567890abcdef",
+            "user_id": "usr_1234567890abcdef",
+            "device_id": "dev_1234567890abcdef",
+            "skill_id": "skill_1234567890abcdef",
+            "version_id": "sv_1234567890abcdef",
+            "skill_version": 1,
+            "skill_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "trigger_key": {
+              "layout_id": "latin_qwerty_v1",
+              "key_code": "KeyH",
+              "display_label": "H",
+              "activation_gesture": "long_press"
+            },
+            "presentation": {
+              "icon_kind": "system",
+              "icon_value": "wand.and.stars",
+              "short_label": "翻訳",
+              "accessibility_label": "画面翻訳",
+              "accessibility_hint": "長押しで実行",
+              "tint_token": "accent"
+            },
+            "enabled": true,
+            "local_eligibility": "local",
+            "required_connection_ids": [],
+            "created_at": "2026-08-26T00:00:00.000Z",
+            "updated_at": "2026-08-26T00:00:00.000Z"
+          }
+        ],
+        "skills": [
+          {
+            "skill_id": "skill_1234567890abcdef",
+            "version_id": "sv_1234567890abcdef",
+            "skill_version": 1,
+            "skill_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "name": "翻訳",
+            "description": "選択範囲を翻訳",
+            "input_sources": [
+              "selection"
+            ],
+            "output_type": "insert_text",
+            "risk_ceiling": "R1",
+            "confirmation": "none",
+            "retention": "none",
+            "tool_summaries": [],
+            "execution_route": "host_handoff"
+          }
+        ],
+        "connection_states": [],
+        "policy_epoch": 1,
+        "created_at": "2026-08-26T00:00:00.000Z",
+        "expires_at": null,
+        "tombstone_reason": null,
+        "content_digest": "sha256:28fab9e5398dccd2f60f7780ec6b5194b3dd6b293419afb86d1139c275c5e620"
+      },
+      "expected": {
+        "contract_valid": false,
+        "content_digest": null,
+        "rejection": "local_route_authority"
+      }
+    },
+    {
+      "id": "local_route_authority_rejects_tools",
+      "kind": "shortcut_snapshot",
+      "input": {
+        "schema_version": 1,
+        "snapshot_id": "ss_1234567890abcdef",
+        "generation": 1,
+        "user_subject_hash": null,
+        "device_id": "dev_1234567890abcdef",
+        "layout": {
+          "schema_version": 1,
+          "layout_id": "layout_1234567890abcdef",
+          "user_id": "usr_1234567890abcdef",
+          "device_id": "dev_1234567890abcdef",
+          "revision": 1,
+          "key_binding_ids": [
+            "bind_1234567890abcdef"
+          ],
+          "palette_binding_ids": [],
+          "long_press_duration_ms": 450,
+          "cancellation_distance": 10,
+          "command_position": "leading",
+          "overflow_enabled": true,
+          "updated_at": "2026-08-26T00:00:00.000Z"
+        },
+        "bindings": [
+          {
+            "schema_version": 1,
+            "binding_id": "bind_1234567890abcdef",
+            "user_id": "usr_1234567890abcdef",
+            "device_id": "dev_1234567890abcdef",
+            "skill_id": "skill_1234567890abcdef",
+            "version_id": "sv_1234567890abcdef",
+            "skill_version": 1,
+            "skill_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "trigger_key": {
+              "layout_id": "latin_qwerty_v1",
+              "key_code": "KeyH",
+              "display_label": "H",
+              "activation_gesture": "long_press"
+            },
+            "presentation": {
+              "icon_kind": "system",
+              "icon_value": "wand.and.stars",
+              "short_label": "翻訳",
+              "accessibility_label": "画面翻訳",
+              "accessibility_hint": "長押しで実行",
+              "tint_token": "accent"
+            },
+            "enabled": true,
+            "local_eligibility": "local",
+            "required_connection_ids": [],
+            "created_at": "2026-08-26T00:00:00.000Z",
+            "updated_at": "2026-08-26T00:00:00.000Z"
+          }
+        ],
+        "skills": [
+          {
+            "skill_id": "skill_1234567890abcdef",
+            "version_id": "sv_1234567890abcdef",
+            "skill_version": 1,
+            "skill_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "name": "翻訳",
+            "description": "選択範囲を翻訳",
+            "input_sources": [
+              "selection"
+            ],
+            "output_type": "insert_text",
+            "risk_ceiling": "R1",
+            "confirmation": "none",
+            "retention": "none",
+            "tool_summaries": [
+              {
+                "operation": "calendar.availability.read",
+                "required_scopes": [
+                  "calendar.availability.read"
+                ],
+                "side_effect": "none"
+              }
+            ],
+            "execution_route": "keyboard_local"
+          }
+        ],
+        "connection_states": [],
+        "policy_epoch": 1,
+        "created_at": "2026-08-26T00:00:00.000Z",
+        "expires_at": null,
+        "tombstone_reason": null,
+        "content_digest": "sha256:0fe2311fa92498b303257a91ed87d287ce531380e0629a346c3a324002b09cf5"
+      },
+      "expected": {
+        "contract_valid": false,
+        "content_digest": null,
+        "rejection": "local_route_authority"
+      }
+    }
+  ]
+}

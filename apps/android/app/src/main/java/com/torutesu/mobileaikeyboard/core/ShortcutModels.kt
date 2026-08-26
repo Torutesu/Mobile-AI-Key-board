@@ -144,6 +144,24 @@ sealed interface ShortcutEditResult {
     data class Rejected(val reason: String) : ShortcutEditResult
 }
 
+enum class ShortcutConflictResolution { SWAP, REPLACE }
+
+data class ShortcutFixtureTestResult(val passed: Boolean, val summary: String, val output: String = "")
+
+/** Bounded local smoke test used before a binding can be persisted. */
+object ShortcutFixtureRunner {
+    fun run(binding: TriggerKeyBinding): ShortcutFixtureTestResult {
+        if (!ExecutableLocalSkills.isExecutable(binding)) return ShortcutFixtureTestResult(false, "このSkillはIMEで実行できません")
+        val input = "fixture input"
+        val result = when (binding.skillId) {
+            ExecutableLocalSkills.POLITE_REWRITE_ID -> LocalPoliteRewriteService().rewrite(input)
+            ExecutableLocalSkills.PUNCTUATION_POLISH_ID -> LocalPoliteRewriteService().polishPunctuation(input)
+            else -> return ShortcutFixtureTestResult(false, "このSkillは端末内fixtureにありません")
+        }
+        return ShortcutFixtureTestResult(true, "端末内fixture testに成功（外部送信なし）", result.rewritten)
+    }
+}
+
 /** Pure host-side editor. Every mutation produces one complete new snapshot. */
 object ShortcutRegistry {
     fun add(current: ShortcutSnapshot, binding: TriggerKeyBinding): ShortcutEditResult =
@@ -164,6 +182,41 @@ object ShortcutRegistry {
             it.map { existing -> if (existing.bindingId == bindingId) existing.copy(keyCode = normalized) else existing } to null
         }
 
+    /** Resolve an occupied target only when the caller explicitly chooses a policy. */
+    fun addWithResolution(current: ShortcutSnapshot, binding: TriggerKeyBinding, resolution: ShortcutConflictResolution): ShortcutEditResult =
+        mutate(current) {
+            val normalized = ShortcutKeyCode.normalize(binding.keyCode)
+            if (ShortcutKeyCode.parse(normalized) == null) return@mutate null to "unsupported_key"
+            if (it.any { existing -> existing.bindingId == binding.bindingId }) return@mutate null to "binding_id_conflict"
+            val occupant = it.firstOrNull { existing -> existing.enabled && existing.keyCode == normalized }
+            if (occupant == null) {
+                (it + binding.copy(layoutId = current.layoutId, keyCode = normalized, enabled = true, order = it.size)) to null
+            } else if (resolution == ShortcutConflictResolution.REPLACE) {
+                (it.filterNot { existing -> existing.bindingId == occupant.bindingId } + binding.copy(layoutId = current.layoutId, keyCode = normalized, enabled = true, order = it.size - 1)) to null
+            } else null to "swap_requires_existing_binding"
+        }
+
+    fun reassignWithResolution(current: ShortcutSnapshot, bindingId: String, keyCode: String, resolution: ShortcutConflictResolution): ShortcutEditResult =
+        mutate(current) {
+            val normalized = ShortcutKeyCode.normalize(keyCode)
+            if (ShortcutKeyCode.parse(normalized) == null) return@mutate null to "unsupported_key"
+            val target = it.firstOrNull { existing -> existing.bindingId == bindingId } ?: return@mutate null to "binding_not_found"
+            val occupant = it.firstOrNull { existing -> existing.enabled && existing.keyCode == normalized && existing.bindingId != bindingId }
+            if (occupant == null) {
+                it.map { existing -> if (existing.bindingId == bindingId) existing.copy(keyCode = normalized) else existing } to null
+            } else when (resolution) {
+                ShortcutConflictResolution.REPLACE -> it.filterNot { existing -> existing.bindingId == occupant.bindingId }
+                    .map { existing -> if (existing.bindingId == bindingId) existing.copy(keyCode = normalized) else existing } to null
+                ShortcutConflictResolution.SWAP -> it.map { existing ->
+                    when (existing.bindingId) {
+                        bindingId -> existing.copy(keyCode = normalized)
+                        occupant.bindingId -> existing.copy(keyCode = target.keyCode)
+                        else -> existing
+                    }
+                } to null
+            }
+        }
+
     fun remove(current: ShortcutSnapshot, bindingId: String): ShortcutEditResult =
         mutate(current) { list -> if (list.none { it.bindingId == bindingId }) null to "binding_not_found" else (list.filterNot { it.bindingId == bindingId }.mapIndexed { index, item -> item.copy(order = index) } to null) }
 
@@ -175,11 +228,14 @@ object ShortcutRegistry {
         val (nextBindings, error) = operation(current.bindings)
         if (nextBindings == null) return ShortcutEditResult.Rejected(error ?: "invalid")
         if (nextBindings.size > SHORTCUT_MAX_BINDINGS) return ShortcutEditResult.Rejected("quota")
+        // Keep ordering deterministic after every mutation, including conflict
+        // resolution, so stale or duplicated order values cannot persist.
+        val reindexedBindings = nextBindings.mapIndexed { index, binding -> binding.copy(order = index) }
         val next = ShortcutSnapshot(
             schemaVersion = current.schemaVersion,
             generation = current.generation + 1,
             layoutId = current.layoutId,
-            bindings = nextBindings,
+            bindings = reindexedBindings,
         )
         return ShortcutSnapshotValidator.validate(next)?.let { ShortcutEditResult.Rejected(it) }
             ?: ShortcutEditResult.Success(next)

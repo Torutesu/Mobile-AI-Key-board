@@ -13,6 +13,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -30,6 +31,9 @@ import androidx.compose.ui.unit.dp
 import com.torutesu.mobileaikeyboard.core.LATIN_QWERTY_V1
 import com.torutesu.mobileaikeyboard.core.ExecutableLocalSkills
 import com.torutesu.mobileaikeyboard.core.ShortcutEditResult
+import com.torutesu.mobileaikeyboard.core.ShortcutConflictResolution
+import com.torutesu.mobileaikeyboard.core.ShortcutFixtureRunner
+import com.torutesu.mobileaikeyboard.core.ShortcutFixtureTestResult
 import com.torutesu.mobileaikeyboard.core.ShortcutRegistry
 import com.torutesu.mobileaikeyboard.core.ShortcutSnapshot
 import com.torutesu.mobileaikeyboard.core.ShortcutKeyCode
@@ -86,7 +90,7 @@ fun ShortcutKeysDashboard(
             current = snapshot,
             editing = editing,
             onDismiss = { dialogOpen = false },
-            onPublish = { next -> if (onPublish(next)) dialogOpen = false },
+            onPublish = onPublish,
         )
     }
 }
@@ -119,13 +123,46 @@ private fun ShortcutPickerDialog(
     current: ShortcutSnapshot,
     editing: TriggerKeyBinding?,
     onDismiss: () -> Unit,
-    onPublish: (ShortcutSnapshot) -> Unit,
+    onPublish: (ShortcutSnapshot) -> Boolean,
 ) {
     var selectedSkill by remember(editing) { mutableStateOf(localSkillCandidates.firstOrNull { it.id == editing?.skillId }) }
     var selectedKey by remember(editing) { mutableStateOf(editing?.let { ShortcutKeyCode.displayLabel(it.keyCode) }) }
+    var fixtureResult by remember(editing) { mutableStateOf<ShortcutFixtureTestResult?>(null) }
+    var error by remember(editing) { mutableStateOf<String?>(null) }
+    var assigned by remember(editing) { mutableStateOf<String?>(null) }
+    var conflictBinding by remember(editing) { mutableStateOf<TriggerKeyBinding?>(null) }
     val occupiedByOther = current.bindings.filter { it.bindingId != editing?.bindingId && it.enabled }.map { ShortcutKeyCode.displayLabel(it.keyCode) }.toSet()
-    val validKey = selectedKey != null && selectedKey !in occupiedByOther
-    val valid = selectedKey != null && validKey && (editing != null || selectedSkill != null)
+    val valid = selectedKey != null && (editing != null || selectedSkill != null)
+    val candidate = selectedKey?.let { key ->
+        editing ?: selectedSkill?.let { skill ->
+            TriggerKeyBinding(
+                bindingId = "binding-${skill.id}",
+                skillId = skill.id,
+                skillVersion = skill.version,
+                skillDigest = skill.digest,
+                keyCode = key,
+                skillName = skill.name,
+                accessibleLabel = "${skill.name}、長押しで実行",
+            )
+        }
+    }?.let { it.copy(keyCode = ShortcutKeyCode.normalize(it.keyCode)) }
+    fun publishCandidate(resolution: ShortcutConflictResolution? = null) {
+        val selected = candidate ?: return
+        val result = if (editing == null) {
+            if (resolution == null) ShortcutRegistry.add(current, selected)
+            else ShortcutRegistry.addWithResolution(current, selected, resolution)
+        } else {
+            if (resolution == null) ShortcutRegistry.reassign(current, editing.bindingId, selected.keyCode)
+            else ShortcutRegistry.reassignWithResolution(current, editing.bindingId, selected.keyCode, resolution)
+        }
+        when (result) {
+            is ShortcutEditResult.Success -> if (onPublish(result.snapshot)) {
+                assigned = "${ShortcutKeyCode.displayLabel(selected.keyCode)}に${selected.skillName}を割り当てました（generation ${result.snapshot.generation}）"
+                conflictBinding = null
+            } else error = "保存に失敗しました。現在の設定は変更されていません。"
+            is ShortcutEditResult.Rejected -> error = "保存を停止しました（${result.reason}）。現在の設定は変更されていません。"
+        }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (editing == null) "割り当てるキーを選択" else "${editing.skillName}を再割当") },
@@ -133,9 +170,26 @@ private fun ShortcutPickerDialog(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (editing == null) {
                     Text("Skill", fontWeight = FontWeight.SemiBold)
-                    localSkillCandidates.forEach { skill ->
-                        FilterChip(selected = selectedSkill == skill, onClick = { selectedSkill = skill }, label = { Text(skill.name) })
+                    var query by remember { mutableStateOf("") }
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it; fixtureResult = null; error = null },
+                        modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Skill search" },
+                        label = { Text("Skillを検索") },
+                        singleLine = true,
+                    )
+                    val candidates = localSkillCandidates.filter { skill ->
+                        query.isBlank() || skill.name.contains(query, ignoreCase = true) || skill.id.contains(query, ignoreCase = true)
                     }
+                    candidates.forEach { skill ->
+                        FilterChip(
+                            selected = selectedSkill == skill,
+                            onClick = { selectedSkill = skill; fixtureResult = null; error = null },
+                            modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "${skill.name}、端末内実行可能" },
+                            label = { Text("${skill.name}（端末内）") },
+                        )
+                    }
+                    if (candidates.isEmpty()) Text("一致する実行可能なSkillがありません。", color = MaterialTheme.colorScheme.error)
                 }
                 Text("QWERTY", fontWeight = FontWeight.SemiBold)
                 // Five columns keeps every choice comfortably tappable on narrow phones.
@@ -145,38 +199,67 @@ private fun ShortcutPickerDialog(
                             val label = key.toString()
                             val occupied = label in occupiedByOther
                             OutlinedButton(
-                                onClick = { selectedKey = label },
-                                enabled = !occupied,
+                                onClick = { selectedKey = label; fixtureResult = null; error = null },
+                                // Occupied keys stay selectable so the user can
+                                // reach the explicit Swap/Replace decision.
+                                enabled = true,
                                 modifier = Modifier.weight(1f).heightIn(min = 48.dp).semantics {
                                     selected = selectedKey == label
                                     contentDescription = when {
+                                        occupied && selectedKey == label -> "$label、別のSkillで使用中、移動先として選択中"
                                         occupied -> "$label、別のSkillで使用中"
                                         selectedKey == label -> "$label、選択中"
                                         else -> "$label、割り当て可能"
                                     }
                                 },
                             ) {
-                                Text(if (occupied) "×" else label, color = if (selectedKey == label) Color(0xFF119CF3) else Color.Unspecified)
+                                Text(label, color = if (selectedKey == label) Color(0xFF119CF3) else Color.Unspecified)
                             }
                         }
                     }
                 }
-                if (!valid) Text("未選択または使用中のキーです。Addは無効です。", color = MaterialTheme.colorScheme.error)
+                if (selectedKey in occupiedByOther) Text("${selectedKey}は使用中です。保存時にSwapまたはReplaceを明示してください。", color = MaterialTheme.colorScheme.error)
+                if (valid) {
+                    Button(
+                        onClick = { fixtureResult = candidate?.let(ShortcutFixtureRunner::run); error = null },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                    ) { Text("端末内fixtureをテスト") }
+                } else Text("Skillとキーを選択してください。", color = MaterialTheme.colorScheme.error)
+                fixtureResult?.let { result ->
+                    Text(result.summary, color = if (result.passed) Color(0xFF18794E) else MaterialTheme.colorScheme.error)
+                    if (result.passed) Text("Preview: ${result.output}", style = MaterialTheme.typography.bodySmall)
+                }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                assigned?.let { Text("✓ $it", color = Color(0xFF18794E), fontWeight = FontWeight.Bold) }
             }
         },
         confirmButton = {
-            Button(enabled = valid, onClick = {
-                val result = if (editing == null) {
-                    val skill = selectedSkill
-                    if (skill == null) {
-                        ShortcutEditResult.Rejected("skill_not_selected")
-                    } else {
-                        ShortcutRegistry.add(current, TriggerKeyBinding("binding-${skill.id}", skill.id, skill.version, skill.digest, keyCode = selectedKey!!, skillName = skill.name, accessibleLabel = "${skill.name}、長押しで実行"))
-                    }
-                } else ShortcutRegistry.reassign(current, editing.bindingId, selectedKey!!)
-                if (result is ShortcutEditResult.Success) onPublish(result.snapshot)
-            }) { Text(if (editing == null) "Add" else "保存") }
+            Button(enabled = valid && fixtureResult?.passed == true && assigned == null, onClick = {
+                val selected = candidate ?: return@Button
+                val occupied = current.bindings.firstOrNull { it.enabled && it.keyCode == selected.keyCode && it.bindingId != editing?.bindingId }
+                if (occupied != null) conflictBinding = occupied else publishCandidate()
+            }) { Text(if (editing == null) "保存" else "保存") }
         },
-        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text("キャンセル") } },
+        dismissButton = {
+            TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(if (assigned != null) "完了" else "キャンセル")
+            }
+        },
     )
+    conflictBinding?.let { occupied ->
+        AlertDialog(
+            onDismissRequest = { conflictBinding = null },
+            title = { Text("キー競合を解決") },
+            text = { Text("${ShortcutKeyCode.displayLabel(occupied.keyCode)}は${occupied.skillName}で使用中です。暗黙の上書きは行いません。") },
+            confirmButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (editing != null) {
+                        TextButton(onClick = { publishCandidate(ShortcutConflictResolution.SWAP) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Swap") }
+                    }
+                    TextButton(onClick = { publishCandidate(ShortcutConflictResolution.REPLACE) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Replace") }
+                }
+            },
+            dismissButton = { TextButton(onClick = { conflictBinding = null }, modifier = Modifier.heightIn(min = 48.dp)) { Text("キャンセル") } },
+        )
+    }
 }

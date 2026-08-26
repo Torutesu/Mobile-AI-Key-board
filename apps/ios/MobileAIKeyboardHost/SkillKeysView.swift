@@ -6,6 +6,7 @@ struct SkillKeysView: View {
     @State private var selectedSkill: ShortcutSkillOption?
     @State private var editingBinding: ShortcutBindingV1?
     @State private var errorMessage: String?
+    @State private var searchText = ""
 
     private let background = Color(red: 0.945, green: 0.961, blue: 0.984)
 
@@ -24,6 +25,7 @@ struct SkillKeysView: View {
         .preferredColorScheme(.light)
         .navigationTitle("Skill Keys")
         .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Skillを検索")
         .sheet(item: $selectedSkill) { skill in
             TriggerKeySheet(skill: skill, existingBinding: nil)
                 .environmentObject(registry)
@@ -117,7 +119,13 @@ struct SkillKeysView: View {
     private var availableSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Skillを追加").font(.title3.weight(.bold))
-            ForEach(registry.assignableSkills) { skill in
+            if filteredAssignableSkills.isEmpty {
+                Text(searchText.isEmpty ? "追加できるSkillはありません。" : "「\(searchText)」に一致するSkillはありません。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 8)
+            }
+            ForEach(filteredAssignableSkills) { skill in
                 let installed = registry.snapshot.bindings.contains { $0.skillID == skill.id && $0.enabled }
                 Button { selectedSkill = skill } label: {
                     HStack(spacing: 12) {
@@ -137,6 +145,14 @@ struct SkillKeysView: View {
                 .padding(14)
                 .background(.white, in: RoundedRectangle(cornerRadius: 16))
             }
+        }
+    }
+
+    private var filteredAssignableSkills: [ShortcutSkillOption] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return registry.assignableSkills }
+        return registry.assignableSkills.filter {
+            $0.name.localizedCaseInsensitiveContains(query) || $0.description.localizedCaseInsensitiveContains(query)
         }
     }
 
@@ -198,6 +214,11 @@ private struct TriggerKeySheet: View {
     let existingBinding: ShortcutBindingV1?
     @State private var selectedKey: ShortcutKeyCode?
     @State private var errorMessage: String?
+    @State private var fixtureInput = "田中さんへ。よろしくお願いいたします。"
+    @State private var fixtureOutput: String?
+    @State private var fixtureHasRun = false
+    @State private var conflictDialogPresented = false
+    @State private var successMessage: String?
 
     init(skill: ShortcutSkillOption, existingBinding: ShortcutBindingV1?) {
         self.skill = skill
@@ -221,7 +242,13 @@ private struct TriggerKeySheet: View {
                     if let selectedKey {
                         Label("選択中: \(selectedKey.displayLabel)", systemImage: "checkmark.circle.fill")
                             .foregroundStyle(.cyan)
+                        if let conflict = registry.binding(for: selectedKey), conflict.id != existingBinding?.id {
+                            Text("このキーは「\(registry.skill(for: conflict)?.name ?? "別のSkill")」が使用中です。保存時に入れ替えまたは置き換えを選べます。")
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
+                        }
                     }
+                    fixturePreview
                     Text("通常のタップでは必ず \(selectedKey?.displayLabel ?? "文字") を入力します。長押しの実行前には内容を確認します。")
                         .font(.footnote).foregroundStyle(.secondary)
                     if let errorMessage { Text(errorMessage).font(.footnote).foregroundStyle(.red) }
@@ -256,13 +283,32 @@ private struct TriggerKeySheet: View {
             }
             .navigationTitle("Trigger Key")
             .navigationBarTitleDisplayMode(.inline)
+            .alert("割り当てを保存しました", isPresented: Binding(get: { successMessage != nil }, set: { if !$0 { successMessage = nil } })) {
+                Button("完了") { dismiss() }
+            } message: {
+                Text(successMessage ?? "")
+            }
+            .confirmationDialog("このキーは使用中です", isPresented: $conflictDialogPresented, titleVisibility: .visible) {
+                if existingBinding != nil {
+                    Button("入れ替える") { resolveConflict(.swap) }
+                    Button("置き換える", role: .destructive) { resolveConflict(.replace) }
+                } else {
+                    Button("置き換える", role: .destructive) { resolveConflict(.replace) }
+                }
+                Button("キャンセル", role: .cancel) {}
+            } message: {
+                Text("この操作を明示的に選んだ場合だけ、現在の割り当てを変更します。")
+            }
+            .onChange(of: selectedKey) { _ in
+                fixtureHasRun = false
+                fixtureOutput = nil
+            }
         }
     }
 
     private var canSave: Bool {
-        guard let selectedKey else { return false }
-        guard let conflict = registry.binding(for: selectedKey) else { return true }
-        return conflict.id == existingBinding?.id
+        guard selectedKey != nil, fixtureHasRun else { return false }
+        return true
     }
 
     private func saveSelection() {
@@ -270,8 +316,99 @@ private struct TriggerKeySheet: View {
         do {
             if let existingBinding { try registry.reassign(bindingID: existingBinding.id, to: selectedKey) }
             else { try registry.assign(skillID: skill.id, key: selectedKey) }
-            dismiss()
+            successMessage = "\(selectedKey.displayLabel)キーに「\(skill.name)」を割り当てました。"
+        } catch let error as ShortcutRegistryError {
+            if case .keyOccupied = error { conflictDialogPresented = true }
+            else { errorMessage = error.localizedDescription }
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    private enum ConflictResolution { case swap, replace }
+
+    private func resolveConflict(_ resolution: ConflictResolution) {
+        guard let selectedKey else { return }
+        do {
+            if let existingBinding {
+                switch resolution {
+                case .swap: try registry.swap(bindingID: existingBinding.id, to: selectedKey)
+                case .replace: try registry.replace(bindingID: existingBinding.id, to: selectedKey)
+                }
+            } else {
+                try registry.replace(skillID: skill.id, key: selectedKey)
+            }
+            successMessage = "\(selectedKey.displayLabel)キーの割り当てを更新しました。"
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private var fixturePreview: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("保存前に端末内で確認", systemImage: "checkmark.shield")
+                .font(.headline)
+            Text("外部送信なしのfixtureを実行し、結果を確認してから保存できます。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            TextEditor(text: $fixtureInput)
+                .font(.body)
+                .frame(minHeight: 72)
+                .padding(8)
+                .background(Color.white, in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.black.opacity(0.08)))
+                .accessibilityLabel("fixture入力")
+            Button(fixtureHasRun ? "もう一度テスト実行" : "端末内でテスト実行") {
+                runFixture()
+            }
+            .font(.subheadline.weight(.semibold))
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(Color.cyan.opacity(0.16), in: Capsule())
+            if let fixtureOutput {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("テスト成功", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .font(.subheadline.weight(.semibold))
+                    Text(fixtureOutput)
+                        .font(.body)
+                        .textSelection(.enabled)
+                    Text("端末内fixture・外部送信なし")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .padding(14)
+        .background(Color.black.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
+        .onChange(of: fixtureInput) { _ in
+            fixtureHasRun = false
+            fixtureOutput = nil
+        }
+    }
+
+    private func runFixture() {
+        guard let pack = fixturePack else {
+            fixtureHasRun = false
+            fixtureOutput = nil
+            errorMessage = "このSkillの端末内fixtureはまだ用意されていません。"
+            return
+        }
+        guard let result = JapaneseWorkflowEngine().transform(fixtureInput, pack: pack) else {
+            fixtureHasRun = false
+            fixtureOutput = nil
+            errorMessage = "fixtureを実行できませんでした。入力を確認してください。"
+            return
+        }
+        fixtureHasRun = true
+        fixtureOutput = result.rewritten
+    }
+
+    private var fixturePack: JapaneseWorkflowPack? {
+        switch skill.id {
+        case "skill_polite_local_v1": return .polite
+        case "skill_punctuation_local_v1": return .keyPoints
+        default: return nil
+        }
     }
 
     private var keyGrid: some View {
@@ -288,9 +425,8 @@ private struct TriggerKeySheet: View {
                         .background(isSelected ? Color.cyan.opacity(0.26) : Color.white, in: RoundedRectangle(cornerRadius: 9))
                         .overlay(RoundedRectangle(cornerRadius: 9).stroke(isSelected ? Color.cyan : Color.clear, lineWidth: 2))
                 }
-                .disabled(conflict != nil && conflict?.id != existingBinding?.id)
                 .accessibilityLabel(conflict.map { "\(key.displayLabel)、\(registry.skill(for: $0)?.name ?? "割り当て済み")" } ?? "\(key.displayLabel)、空き")
-                .accessibilityValue(isSelected ? "選択中" : (conflict == nil || conflict?.id == existingBinding?.id ? "利用可能" : "利用不可"))
+                .accessibilityValue(isSelected ? (conflict == nil || conflict?.id == existingBinding?.id ? "選択中" : "選択中、保存時に競合解決が必要") : (conflict == nil || conflict?.id == existingBinding?.id ? "利用可能" : "割り当て済み。選択して置き換えまたは入れ替え"))
             }
         }
         .padding(10)

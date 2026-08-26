@@ -6,6 +6,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ShortcutModelsTest {
+    private fun assertReindexed(snapshot: ShortcutSnapshot) {
+        assertEquals(snapshot.bindings.indices.toList(), snapshot.bindings.map { it.order })
+    }
+
     private fun binding(id: String = "binding-a", key: String = "KeyA") = TriggerKeyBinding(
         bindingId = id,
         skillId = "local.polite-rewrite",
@@ -14,6 +18,12 @@ class ShortcutModelsTest {
         keyCode = key,
         skillName = "丁寧に書き換え",
         accessibleLabel = "丁寧に書き換え、長押しで実行",
+    )
+
+    private fun punctuationBinding(key: String = "KeyB") = binding("binding-b", key).copy(
+        skillId = ExecutableLocalSkills.PUNCTUATION_POLISH_ID,
+        skillName = "句読点を整える",
+        accessibleLabel = "句読点を整える、長押しで実行",
     )
 
     @Test
@@ -28,11 +38,13 @@ class ShortcutModelsTest {
     fun registryRejectsOccupiedKeyAndPublishesWholeGeneration() {
         val first = ShortcutRegistry.add(ShortcutSnapshot.empty(), binding()) as ShortcutEditResult.Success
         assertEquals(1, first.snapshot.generation)
+        assertReindexed(first.snapshot)
         val conflict = ShortcutRegistry.add(first.snapshot, binding("binding-b", "KeyA")) as ShortcutEditResult.Rejected
         assertEquals("key_occupied", conflict.reason)
         val second = ShortcutRegistry.add(first.snapshot, binding("binding-b", "B")) as ShortcutEditResult.Success
         assertEquals(2, second.snapshot.generation)
         assertEquals(2, second.snapshot.bindings.size)
+        assertReindexed(second.snapshot)
     }
 
     @Test
@@ -41,9 +53,36 @@ class ShortcutModelsTest {
         val reassigned = ShortcutRegistry.reassign(first.snapshot, "binding-a", "Z") as ShortcutEditResult.Success
         assertEquals("binding-a", reassigned.snapshot.bindings.single().bindingId)
         assertEquals("KeyZ", reassigned.snapshot.bindings.single().keyCode)
+        assertReindexed(reassigned.snapshot)
         val removed = ShortcutRegistry.remove(reassigned.snapshot, "binding-a") as ShortcutEditResult.Success
         assertTrue(removed.snapshot.bindings.isEmpty())
+        assertReindexed(removed.snapshot)
         assertFalse(removed.snapshot.generation == reassigned.snapshot.generation)
+    }
+
+    @Test
+    fun everySuccessfulMutationReindexesOrdersWithoutDuplicates() {
+        val first = ShortcutRegistry.add(ShortcutSnapshot.empty(), binding()) as ShortcutEditResult.Success
+        val second = ShortcutRegistry.add(first.snapshot, punctuationBinding()) as ShortcutEditResult.Success
+        assertReindexed(second.snapshot)
+        val replaced = ShortcutRegistry.reassignWithResolution(
+            second.snapshot,
+            "binding-a",
+            "KeyB",
+            ShortcutConflictResolution.REPLACE,
+        ) as ShortcutEditResult.Success
+        assertReindexed(replaced.snapshot)
+        assertEquals(listOf(0), replaced.snapshot.bindings.map { it.order })
+
+        val disabled = ShortcutRegistry.setEnabled(second.snapshot, "binding-a", false) as ShortcutEditResult.Success
+        assertReindexed(disabled.snapshot)
+        val swapped = ShortcutRegistry.reassignWithResolution(
+            disabled.snapshot,
+            "binding-a",
+            "KeyB",
+            ShortcutConflictResolution.SWAP,
+        ) as ShortcutEditResult.Success
+        assertReindexed(swapped.snapshot)
     }
 
     @Test
@@ -95,5 +134,33 @@ class ShortcutModelsTest {
         )
         assertEquals(good, ShortcutSnapshotRecovery.select(rejected, good))
         assertEquals(ShortcutSnapshot.empty(), ShortcutSnapshotRecovery.select(rejected, rejected))
+    }
+
+    @Test
+    fun conflictRequiresExplicitReplaceAndLeavesOriginalSnapshotUntouched() {
+        val first = ShortcutRegistry.add(ShortcutSnapshot.empty(), binding()) as ShortcutEditResult.Success
+        val conflicting = punctuationBinding("KeyA")
+        val before = first.snapshot
+        assertEquals(ShortcutEditResult.Rejected("key_occupied"), ShortcutRegistry.add(before, conflicting))
+        assertEquals(before, first.snapshot)
+        val replaced = ShortcutRegistry.addWithResolution(first.snapshot, conflicting, ShortcutConflictResolution.REPLACE) as ShortcutEditResult.Success
+        assertEquals(2, replaced.snapshot.generation)
+        assertEquals(listOf("binding-b"), replaced.snapshot.bindings.map { it.bindingId })
+        assertEquals(listOf(0), replaced.snapshot.bindings.map { it.order })
+        assertTrue(replaced.snapshot.digest != first.snapshot.digest)
+    }
+
+    @Test
+    fun explicitSwapExchangesKeysAndFixtureMustPassBeforeAssignment() {
+        val first = ShortcutRegistry.add(ShortcutSnapshot.empty(), binding()) as ShortcutEditResult.Success
+        val both = ShortcutRegistry.add(first.snapshot, punctuationBinding()) as ShortcutEditResult.Success
+        val swapped = ShortcutRegistry.reassignWithResolution(both.snapshot, "binding-a", "KeyB", ShortcutConflictResolution.SWAP) as ShortcutEditResult.Success
+        assertEquals("KeyB", swapped.snapshot.bindings.first { it.bindingId == "binding-a" }.keyCode)
+        assertEquals("KeyA", swapped.snapshot.bindings.first { it.bindingId == "binding-b" }.keyCode)
+        assertEquals(listOf(0, 1), swapped.snapshot.bindings.map { it.order })
+        assertEquals(swapped.snapshot.bindings.indices.toList(), swapped.snapshot.bindings.map { it.order })
+        assertEquals(3, swapped.snapshot.generation)
+        assertTrue(ShortcutFixtureRunner.run(binding()).passed)
+        assertFalse(ShortcutFixtureRunner.run(binding().copy(skillId = "calendar.availability.read")).passed)
     }
 }

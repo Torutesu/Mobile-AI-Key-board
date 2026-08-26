@@ -20,6 +20,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      # Deliberately explicit: the release manifest requires a visible CI step,
+      # even though pnpm check also exercises test:release transitively.
+      - run: pnpm shortcuts:vectors:check
       - run: pnpm audit --prod --audit-level high
       - name: Run deterministic performance regression diagnostic
         run: pnpm benchmark:performance -- --report "$RUNNER_TEMP/performance-benchmark.json"

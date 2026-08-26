@@ -7,7 +7,8 @@
     {"id": "ios_simulator_build", "command": "xcodebuild", "purpose": "iOS host and extension build"},
     {"id": "android_tests_lint_apk", "command": "./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug", "purpose": "Android unit, lint, and APK"},
     {"id": "dependency_audit", "command": "pnpm audit --prod --audit-level high", "purpose": "production dependency audit"},
-    {"id": "deterministic_performance_benchmark", "command": "pnpm benchmark:performance", "purpose": "content-free local threshold regression diagnostic"}
+    {"id": "deterministic_performance_benchmark", "command": "pnpm benchmark:performance", "purpose": "content-free local threshold regression diagnostic"},
+    {"id": "shortcut_vectors_check", "command": "pnpm shortcuts:vectors:check", "purpose": "TypeScript-authoritative shortcut golden vector check"}
   ],
   "required_artifacts": [
     {"id": "release_readiness_report", "path": "release-readiness.json", "class": "static_ci_report"},

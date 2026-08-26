@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { canonicalJson } from "./canonical.js";
 export { canonicalJson } from "./canonical.js";
+export { buildShortcutGoldenVectors } from "./shortcut-vectors.js";
+export type { ShortcutGoldenFixture, ShortcutGoldenVector } from "./shortcut-vectors.js";
 
 export const RiskClass = z.enum(["R0", "R1", "R2", "R3", "R4", "R5"]);
 export type RiskClass = z.infer<typeof RiskClass>;

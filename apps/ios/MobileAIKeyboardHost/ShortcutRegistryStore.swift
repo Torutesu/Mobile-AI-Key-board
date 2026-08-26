@@ -76,18 +76,49 @@ final class ShortcutRegistryStore: ObservableObject {
     func assign(skillID: String, key: ShortcutKeyCode) throws {
         guard let skill = skills.first(where: { $0.id == skillID }) else { throw ShortcutRegistryError.skillUnavailable }
         guard skill.isAssignable else { throw ShortcutRegistryError.skillUnavailable }
-        if let conflict = binding(for: key) { throw ShortcutRegistryError.keyOccupied(self.skill(for: conflict)?.name ?? conflict.skillID) }
         let now = Date()
         let binding = ShortcutBindingV1(id: "bind_\(UUID().uuidString)", userID: userID, deviceID: deviceID, skillID: skill.id, versionID: skill.versionID, skillVersion: skill.version, skillDigest: skill.digest, keyCode: key, presentation: ShortcutPresentation(iconValue: skill.icon, shortLabel: skill.name, accessibilityLabel: "\(key.displayLabel)、\(skill.name)", accessibilityHint: "長押しで\(skill.name)を実行", tintToken: .accent), executionRoute: skill.route, createdAt: now, updatedAt: now)
-        try publish(bindings: snapshot.bindings + [binding], skills: mergedSkills(adding: skill.projection), revision: snapshot.layout.revision + 1)
+        do {
+            let nextBindings = try ShortcutRegistryMutation.assign(bindings: snapshot.bindings, binding: binding)
+            try publish(bindings: nextBindings, skills: skills(for: nextBindings, adding: skill.projection), revision: snapshot.layout.revision + 1)
+        } catch { throw registryError(for: error) }
     }
 
     func reassign(bindingID: String, to key: ShortcutKeyCode) throws {
         guard let old = snapshot.bindings.first(where: { $0.id == bindingID }), let oldSkill = skill(for: old), oldSkill.isAssignable else { throw ShortcutRegistryError.skillUnavailable }
-        if let conflict = binding(for: key), conflict.id != bindingID { throw ShortcutRegistryError.keyOccupied(self.skill(for: conflict)?.name ?? conflict.skillID) }
-        var updated = old
-        updated = ShortcutBindingV1(id: old.id, userID: old.userID, deviceID: old.deviceID, skillID: old.skillID, versionID: old.versionID, skillVersion: old.skillVersion, skillDigest: old.skillDigest, keyCode: key, presentation: old.presentation, enabled: old.enabled, executionRoute: old.executionRoute, requiredConnectionIDs: old.requiredConnectionIDs, createdAt: old.createdAt, updatedAt: Date())
-        try publish(bindings: snapshot.bindings.map { $0.id == bindingID ? updated : $0 }, skills: snapshot.skills, revision: snapshot.layout.revision + 1)
+        do {
+            let nextBindings = try ShortcutRegistryMutation.move(bindings: snapshot.bindings, bindingID: bindingID, to: key)
+            try publish(bindings: nextBindings, skills: snapshot.skills, revision: snapshot.layout.revision + 1)
+        } catch { throw registryError(for: error) }
+    }
+
+    /// Explicitly replace the binding occupying `key` with a new Skill.
+    func replace(skillID: String, key: ShortcutKeyCode) throws {
+        guard let skill = skills.first(where: { $0.id == skillID }), skill.isAssignable else { throw ShortcutRegistryError.skillUnavailable }
+        let now = Date()
+        let binding = ShortcutBindingV1(id: "bind_\(UUID().uuidString)", userID: userID, deviceID: deviceID, skillID: skill.id, versionID: skill.versionID, skillVersion: skill.version, skillDigest: skill.digest, keyCode: key, presentation: ShortcutPresentation(iconValue: skill.icon, shortLabel: skill.name, accessibilityLabel: "\(key.displayLabel)、\(skill.name)", accessibilityHint: "長押しで\(skill.name)を実行", tintToken: .accent), executionRoute: skill.route, createdAt: now, updatedAt: now)
+        do {
+            let nextBindings = try ShortcutRegistryMutation.replace(bindings: snapshot.bindings, binding: binding)
+            try publish(bindings: nextBindings, skills: skills(for: nextBindings, adding: skill.projection), revision: snapshot.layout.revision + 1)
+        } catch { throw registryError(for: error) }
+    }
+
+    /// Explicitly swap an existing Skill Key with the owner of `key`.
+    func swap(bindingID: String, to key: ShortcutKeyCode) throws {
+        guard let old = snapshot.bindings.first(where: { $0.id == bindingID }), let oldSkill = skill(for: old), oldSkill.isAssignable else { throw ShortcutRegistryError.skillUnavailable }
+        do {
+            let nextBindings = try ShortcutRegistryMutation.swap(bindings: snapshot.bindings, bindingID: bindingID, to: key)
+            try publish(bindings: nextBindings, skills: snapshot.skills, revision: snapshot.layout.revision + 1)
+        } catch { throw registryError(for: error) }
+    }
+
+    /// Explicitly remove the current owner of `key` and move the selected key.
+    func replace(bindingID: String, to key: ShortcutKeyCode) throws {
+        guard let old = snapshot.bindings.first(where: { $0.id == bindingID }), let oldSkill = skill(for: old), oldSkill.isAssignable else { throw ShortcutRegistryError.skillUnavailable }
+        do {
+            let nextBindings = try ShortcutRegistryMutation.replace(bindings: snapshot.bindings, bindingID: bindingID, to: key)
+            try publish(bindings: nextBindings, skills: skills(for: nextBindings), revision: snapshot.layout.revision + 1)
+        } catch { throw registryError(for: error) }
     }
 
     func setEnabled(bindingID: String, enabled: Bool) throws {
@@ -137,8 +168,29 @@ final class ShortcutRegistryStore: ObservableObject {
         statusMessage = storage.isUsingSharedAppGroup ? "\(activeIDs.count)個のSkill Keyをキーボードと共有済み" : "\(activeIDs.count)個をhost内fallbackに保存。App Group同期は未証明"
     }
 
-    private func mergedSkills(adding skill: ShortcutSkillProjectionV1) -> [ShortcutSkillProjectionV1] {
-        snapshot.skills.contains { $0.id == skill.id && $0.versionID == skill.versionID } ? snapshot.skills : snapshot.skills + [skill]
+    private func skills(for bindings: [ShortcutBindingV1], adding skill: ShortcutSkillProjectionV1? = nil) -> [ShortcutSkillProjectionV1] {
+        var projections = snapshot.skills.filter { projection in
+            bindings.contains { $0.skillID == projection.id && $0.versionID == projection.versionID }
+        }
+        if let skill, !projections.contains(where: { $0.id == skill.id && $0.versionID == skill.versionID }) {
+            projections.append(skill)
+        }
+        return projections
+    }
+
+    private func registryError(for error: Error) -> ShortcutRegistryError {
+        guard let mutationError = error as? ShortcutRegistryMutationError else {
+            return (error as? ShortcutRegistryError) ?? .persistenceUnavailable
+        }
+        switch mutationError {
+        case .keyOccupied(let key):
+            let name = binding(for: key).flatMap { skill(for: $0)?.name } ?? key.displayLabel
+            return .keyOccupied(name)
+        case .hostHandoffUnavailable, .bindingNotFound:
+            return .skillUnavailable
+        case .keyIsAvailable, .bindingIDAlreadyExists:
+            return .invalidSnapshot("この競合解決は現在の割り当てと一致しません")
+        }
     }
 
     static let fixtureSkills: [ShortcutSkillOption] = [
