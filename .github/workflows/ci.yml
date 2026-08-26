@@ -111,20 +111,41 @@ jobs:
           java-version: '17'
           cache: gradle
       - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+      - name: Enable KVM acceleration for the Android emulator
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -r /dev/kvm
+          test -w /dev/kvm
       - run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'emulator' 'system-images;android-35;google_apis;x86_64'
       - run: chmod +x gradlew
       # JVM tests, lint, and a debug APK do not exercise an emulator or a
       # physical IME; release evidence must remain not_proven until protected.
       - run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
       - name: Exercise A-Z assignment and ordinary-input boundary on Android Emulator
-        timeout-minutes: 15
+        timeout-minutes: 18
         run: |
           set -euo pipefail
           echo no | avdmanager create avd --force --name mobile-ai-keyboard-ci --package 'system-images;android-35;google_apis;x86_64'
-          "$ANDROID_HOME/emulator/emulator" -avd mobile-ai-keyboard-ci -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect >"$RUNNER_TEMP/android-emulator.log" 2>&1 &
+          "$ANDROID_HOME/emulator/emulator" -avd mobile-ai-keyboard-ci -no-window -no-audio -no-boot-anim -no-snapshot -no-metrics -gpu swiftshader_indirect >"$RUNNER_TEMP/android-emulator.log" 2>&1 &
           emulator_pid=$!
-          trap 'kill "$emulator_pid" 2>/dev/null || true' EXIT
-          adb wait-for-device
+          cleanup() {
+            exit_code=$?
+            if (( exit_code != 0 )); then
+              echo '::group::Android emulator diagnostics'
+              adb devices -l || true
+              cat "$RUNNER_TEMP/android-emulator.log" || true
+              echo '::endgroup::'
+            fi
+            adb emu kill >/dev/null 2>&1 || true
+            kill "$emulator_pid" 2>/dev/null || true
+            wait "$emulator_pid" 2>/dev/null || true
+            exit "$exit_code"
+          }
+          trap cleanup EXIT
+          timeout 120 adb wait-for-device
           timeout 300 bash -c 'until adb shell getprop sys.boot_completed 2>/dev/null | grep -q 1; do sleep 2; done'
           adb shell settings put global window_animation_scale 0
           adb shell settings put global transition_animation_scale 0
