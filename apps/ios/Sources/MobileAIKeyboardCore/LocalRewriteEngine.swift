@@ -26,4 +26,17 @@ public struct LocalRewriteEngine: Sendable {
         if !output.hasSuffix("。") && !output.hasSuffix("！") && !output.hasSuffix("！") && !output.hasSuffix("?") && !output.hasSuffix("？") { output += "。" }
         return RewriteResult(original: trimmed, rewritten: output, preservedEntities: entities, fieldFingerprint: locking.fingerprint(trimmed))
     }
+
+    public func punctuationRewrite(_ input: String) -> RewriteResult? {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let entities = locking.entities(in: trimmed)
+        var output = locking.maskAndRestore(trimmed) { value in
+            value
+                .replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
+                .replacingOccurrences(of: #"[ \t]*([、。！？!?])"#, with: "$1", options: .regularExpression)
+        }
+        if !output.hasSuffix("。") && !output.hasSuffix("！") && !output.hasSuffix("!") && !output.hasSuffix("?") && !output.hasSuffix("？") { output += "。" }
+        return RewriteResult(original: trimmed, rewritten: output, preservedEntities: entities, fieldFingerprint: locking.fingerprint(trimmed))
+    }
 }

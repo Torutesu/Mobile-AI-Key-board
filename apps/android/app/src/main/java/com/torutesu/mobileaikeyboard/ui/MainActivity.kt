@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import com.torutesu.mobileaikeyboard.core.LocalPoliteRewriteService
 import com.torutesu.mobileaikeyboard.core.HostEvent
 import com.torutesu.mobileaikeyboard.core.HostFixtureClient
+import com.torutesu.mobileaikeyboard.core.ShortcutSnapshotStore
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -47,7 +48,10 @@ class MainActivity : ComponentActivity() {
 @androidx.compose.runtime.Composable
 private fun MobileAiKeyboardApp() {
     val fixtureClient = remember { HostFixtureClient }
+    val context = LocalContext.current
+    val shortcutStore = remember(context) { ShortcutSnapshotStore(context.applicationContext) }
     var hostState by remember { mutableStateOf(fixtureClient.initialState()) }
+    var shortcutSnapshot by remember { mutableStateOf(shortcutStore.read()) }
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
             Column(
@@ -60,6 +64,12 @@ private fun MobileAiKeyboardApp() {
                 HostAppDashboard(
                     state = hostState,
                     dispatch = { event -> hostState = fixtureClient.dispatch(hostState, event) },
+                    shortcutSnapshot = shortcutSnapshot,
+                    onShortcutPublish = { candidate ->
+                        val published = shortcutStore.publish(candidate)
+                        if (published) shortcutSnapshot = shortcutStore.read()
+                        published
+                    },
                 )
                 SandboxCard()
                 PrivacyCard()

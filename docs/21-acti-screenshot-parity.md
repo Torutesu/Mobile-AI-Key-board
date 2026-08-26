@@ -198,10 +198,10 @@ These values are starting targets and must be calibrated by rendered comparison 
 | --- | --- | --- |
 | Local Command -> review -> result -> apply/undo | Implemented native/shared foundation | Reuse as activation destination |
 | Skill definition/version/digest/binding fixtures | Implemented shared/native fixtures | Adapt into canonical trigger-key snapshot |
-| Keyboard Skill Keys | Not implemented | P0 |
-| Trigger-key picker/conflict UI | Not implemented | P0 |
-| Host -> iOS extension persistence | No configured production App Group proof | P0, `not_proven` until device-qualified |
-| Host -> Android IME persistence | No canonical runtime sync | P0, `not_proven` until device-qualified |
+| Keyboard Skill Keys | Implemented local iOS/Android foundation; device lifecycle not qualified | P0 device qualification remains |
+| Trigger-key picker/conflict UI | Implemented A-Z add/reassign/remove and occupied-key states | P0 interaction implemented; visual/device QA continues |
+| Host -> iOS extension persistence | App Group publisher/last-known-good reader configured; production provisioning not proven | P0, `not_proven` until device-qualified |
+| Host -> Android IME persistence | Content-free active/last-known-good shared app preferences implemented | P0, process-death/device qualification remains `not_proven` |
 | Skills catalog/search/detail | Not implemented as live product | P1 |
 | My Skills private/public management | Partial private fixtures | P0 private; P1 public state |
 | Builder | Fixture surface/contracts exist | Connect to persistence/version/deploy/assignment |

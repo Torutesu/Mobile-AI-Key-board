@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { DeviceId, UserId } from "./w3.js";
 import { GrantId } from "./w4_ids.js";
-import { canonicalJson } from "./index.js";
+import { canonicalJson } from "./canonical.js";
 
 export const CalendarWriteOperation = z.literal("calendar.event.create_private");
 export const CalendarUndoOperation = z.literal("calendar.event.delete_own");

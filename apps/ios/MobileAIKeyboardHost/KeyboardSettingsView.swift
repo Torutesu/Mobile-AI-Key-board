@@ -11,6 +11,24 @@ struct KeyboardSettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 boundaryCard
+                NavigationLink {
+                    SkillKeysView()
+                } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Skill Keys").font(.headline)
+                            Text("文字キーの長押しにSkillを割り当てる").font(.footnote).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                    } icon: {
+                        Image(systemName: "keyboard.badge.ellipsis").foregroundStyle(.cyan)
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .background(.white, in: RoundedRectangle(cornerRadius: 16))
                 appearanceSection
                 workflowSection
                 previewSection

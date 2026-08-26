@@ -39,11 +39,14 @@ import com.torutesu.mobileaikeyboard.core.HostFixtureClient
 import com.torutesu.mobileaikeyboard.core.RetentionPolicy
 import com.torutesu.mobileaikeyboard.core.RunStatus
 import com.torutesu.mobileaikeyboard.core.SessionStatus
+import com.torutesu.mobileaikeyboard.core.ShortcutSnapshot
 
 @Composable
 fun HostAppDashboard(
     state: HostAppState,
     dispatch: (HostEvent) -> Unit,
+    shortcutSnapshot: ShortcutSnapshot = ShortcutSnapshot.empty(),
+    onShortcutPublish: (ShortcutSnapshot) -> Boolean = { false },
 ) {
     Text("アカウント・デバイス・Activity", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
     Text("接続先に依存しないローカルfixture表示。実identity/backend接続は未証明です。")
@@ -52,6 +55,7 @@ fun HostAppDashboard(
     ConnectionsDashboard(state, dispatch)
     CalendarWriteDashboard(state, dispatch)
     SkillBuilderDashboard(state, dispatch)
+    ShortcutKeysDashboard(shortcutSnapshot, onShortcutPublish)
     KeyboardSettingsDashboard(state, dispatch)
     SuggestionTrustDashboard(state, dispatch)
     ActivityCard(state, dispatch)

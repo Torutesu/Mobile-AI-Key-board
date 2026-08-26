@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { DeviceId, UserId } from "./w3.js";
-import { canonicalJson } from "./index.js";
+import { canonicalJson } from "./canonical.js";
 
 const Digest = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const Opaque = (prefix: string) => z.string().regex(new RegExp(`^${prefix}_[A-Za-z0-9_-]{16,128}$`));

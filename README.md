@@ -44,6 +44,7 @@ The W0-W8 local and provider-neutral foundations are implemented:
 
 - iOS host app and keyboard extension with Command, explicit source selection, Capture Review, local rewrite, editable Result Preview, stale-safe Apply, and Undo;
 - Android host app and IME with the equivalent local workflow, bounded `InputConnection` capture, implicit-replacement rejection, stale-safe Apply, and Undo;
+- user-configurable A-Z Skill Keys on both platforms: QWERTY assignment/reassignment/removal, duplicate-key conflicts, content-free last-known-good snapshots, bound-key indicators, tap-to-type preservation, 450 ms long-press activation, and the existing Review-before-Apply route;
 - shared TypeScript contracts and policy for local-only R1 plans, disclosure acknowledgement, bounded capture, revision binding, telemetry minimization, and undo lifecycle;
 - provider-neutral device proof, rotating/revocable sessions, immutable authenticated run bindings, append-only content-free receipts/audit, retention, and account deletion state machines;
 - iOS and Android Account, Devices, Activity, and Privacy fixture surfaces that expose success, partial, failure, revocation, retention, and deletion states without pretending to be connected services;
@@ -61,7 +62,7 @@ The W0-W8 local and provider-neutral foundations are implemented:
 - API identity boundary, worker receipt projection, execution ledger, and tests;
 - content-free telemetry contracts and three-platform CI.
 
-This is not a production release. Real-device keyboard lifecycle, production Japanese conversion, extension/IME settings persistence, third-party app compatibility, signed release archives and store submission, configured support/on-call endpoints, external identity verification, live OAuth/provider APIs and writes, encrypted credential custody, hardware-backed device proof, durable multi-instance infrastructure, production signed Skill packages, protected publisher verification, durable marketplace moderation, R4 approval, and an external R3 security assessment remain explicit qualification gates. See [implementation status](docs/08-implementation-status.md).
+This is not a production release. Real-device keyboard lifecycle, production Japanese conversion, device-qualified extension/IME persistence, third-party app compatibility, signed release archives and store submission, configured support/on-call endpoints, external identity verification, live OAuth/provider APIs and writes, encrypted credential custody, hardware-backed device proof, durable multi-instance infrastructure, production signed Skill packages, protected publisher verification, durable marketplace moderation, R4 approval, and an external R3 security assessment remain explicit qualification gates. See [implementation status](docs/08-implementation-status.md).
 
 ## Local verification
 

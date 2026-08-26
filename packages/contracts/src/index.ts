@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { canonicalJson } from "./canonical.js";
+export { canonicalJson } from "./canonical.js";
 
 export const RiskClass = z.enum(["R0", "R1", "R2", "R3", "R4", "R5"]);
 export type RiskClass = z.infer<typeof RiskClass>;
@@ -67,17 +69,6 @@ export const RunStatus = z.enum(["awaiting_input_disclosure", "awaiting_input", 
 export type RunStatus = z.infer<typeof RunStatus>;
 export const ReceiptStatus = z.enum(["pending", "executing", "succeeded", "partial", "failed", "unknown", "undo_pending", "undone", "undo_failed"]);
 export type ReceiptStatus = z.infer<typeof ReceiptStatus>;
-
-/** RFC 8785-like canonical JSON for the limited JSON value domain used by plans. */
-export function canonicalJson(value: unknown): string {
-  if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>).filter(([, v]) => v !== undefined).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
-    return `{${entries.map(([key, val]) => `${JSON.stringify(key)}:${canonicalJson(val)}`).join(",")}}`;
-  }
-  throw new TypeError("Plan values must be JSON-compatible");
-}
 
 export function planDigest(plan: Omit<ActionPlan, "canonical_digest">): string {
   return `sha256:${createHash("sha256").update(canonicalJson(plan), "utf8").digest("hex")}`;
@@ -210,3 +201,4 @@ export * from "./w5.js";
 export * from "./w6.js";
 export * from "./w7.js";
 export * from "./w8.js";
+export * from "./shortcuts.js";

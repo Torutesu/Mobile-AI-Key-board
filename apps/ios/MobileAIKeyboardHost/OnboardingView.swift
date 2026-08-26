@@ -4,6 +4,7 @@ import MobileAIKeyboardCore
 struct OnboardingView: View {
     @State private var showKeyboardInstructions = false
     @StateObject private var accountStore = AccountActivityStore()
+    @StateObject private var shortcutRegistry = ShortcutRegistryStore()
 
     var body: some View {
         NavigationStack {
@@ -44,8 +45,9 @@ struct OnboardingView: View {
                     SandboxView()
 
                     NavigationLink {
-                        AccountDashboardView()
+                    AccountDashboardView()
                             .environmentObject(accountStore)
+                            .environmentObject(shortcutRegistry)
                     } label: {
                         Label("アカウント・Activity・プライバシー", systemImage: "person.2")
                             .frame(maxWidth: .infinity)

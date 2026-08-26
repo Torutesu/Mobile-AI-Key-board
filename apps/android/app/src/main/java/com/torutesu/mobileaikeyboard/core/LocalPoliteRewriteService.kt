@@ -17,6 +17,17 @@ class LocalPoliteRewriteService {
         return RewriteResult(input, rewritten, protected.entities, input != rewritten)
     }
 
+    fun polishPunctuation(input: String): RewriteResult {
+        if (input.isBlank()) return RewriteResult(input, input, emptyList(), false)
+        val protected = EntityProtector.protect(input)
+        var value = protected.masked.trim()
+            .replace(Regex("[ \\t]+"), " ")
+            .replace(Regex("[ \\t]*([、。！？!?])"), "$1")
+        if (value.isNotEmpty() && value.last() !in "。.!！?？") value += "。"
+        val rewritten = protected.restore(value)
+        return RewriteResult(input, rewritten, protected.entities, input != rewritten)
+    }
+
     private fun politeTransform(input: String): String {
         var value = input.trim()
         listOf(

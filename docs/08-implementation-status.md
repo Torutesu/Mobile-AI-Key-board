@@ -35,6 +35,7 @@ This checkpoint implements the W0/W1 local-first foundation, W2 local text-actio
 - W8 completion rates are derived from bounded integer counts, zero attempts have no rate, low samples remain low confidence, review evidence expires, and public issue metadata is content-free and categorized.
 - W8 suggestions contain typed/opaque local metadata only, have no network or execution authority, and cannot insert text, call tools, install a Skill, or widen connector access.
 - Team policy install, upgrade, revocation, and rollback are explicit and fail closed on digest, owner, team, version, epoch, scope, risk, confirmation, chronology, or evidence mismatch. R4 remains disabled pending a separate review.
+- Trigger-key contracts cover A-Z physical keys, immutable Skill version/digest pins, content-free presentation projections, exact-device layouts, canonical tamper-evident snapshots, generation/replay checks, duplicate/reserved-key conflicts, and activation bindings. The pure gesture runtime preserves short-tap character commit and emits one activation only after the hold threshold.
 
 ### iOS
 
@@ -52,6 +53,7 @@ This checkpoint implements the W0/W1 local-first foundation, W2 local text-actio
 - Private Skill Builder fixture UI with desired-outcome intake, explicit missing fields, typed manifest/schema review, allowlisted SF Symbols, static/policy validation, visible fixture results, quota/cost disclosure, digest confirmation, immutable private versions, exact binding pins, explicit upgrades, and private share/revoke.
 - Versioned keyboard customization and Japanese workflow-pack fixture models, qualification-budget surfaces, source-declared privacy manifests, and launch-readiness copy that distinguishes source presence from archive/runtime verification. Extension runtime settings sync and persistence remain `not_proven`.
 - Local contextual-suggestion, Trust Preview, team-policy, and R4-denial fixture screens. They expose provenance, immutable digests, derived completion confidence, typed issue counts, explicit upgrade/revoke state, and `not_proven` boundaries without claiming publisher/package verification.
+- Skill Keys management with QWERTY preview, add/reassign/remove/conflict states, version/digest-bound content-free App Group snapshots, last-known-good fallback, bound-key accessibility actions, tap-to-type preservation, 450 ms long-press activation, and routing into the existing Capture Review/Result Preview flow. Skill Keys sharing requests Full Access while ordinary typing remains available without it.
 
 ### Android
 
@@ -66,6 +68,7 @@ This checkpoint implements the W0/W1 local-first foundation, W2 local text-actio
 - Private Skill Builder fixture UI with bounded strict JSON parsing, typed local-only authority, injection/binding checks, visible fixture tests, quota accounting, owner/session-bound digests, immutable private versions, explicit upgrades, private share/revoke, and Material icons.
 - Versioned keyboard customization and Japanese workflow-pack fixture models plus qualification-budget surfaces. Session/revocation boundaries preserve ordinary preferences while account deletion resets them; the configuration is IME-consumable as a typed model, but Host-to-IME runtime sync and persistence remain `not_proven`.
 - Local contextual-suggestion and Trust Preview fixtures with secure-input suppression, content-free typed metadata, exact team-policy checks, explicit install/upgrade/revoke actions, and a permanently disabled R4 boundary. Public catalog and runtime synchronization remain `not_proven`.
+- Skill Keys management with QWERTY preview, add/reassign/remove/conflict states, content-free active/last-known-good `SharedPreferences` snapshots, generation/digest validation, bound-key semantics, movement-cancelled 450 ms long press, preserved short-tap typing, and routing into the existing Review/apply workflow.
 
 ## Verified in this checkpoint
 
@@ -79,13 +82,14 @@ This checkpoint implements the W0/W1 local-first foundation, W2 local text-actio
 - W6 stale/tampered/incomplete fixture-result, schema/effect/scope, injection, duplicate input/source, immutable version, explicit-upgrade, typing/accessibility, private-share, quota/idempotency, owner/epoch, strict-JSON, and delimiter-escape tests.
 - W7 candidate/evidence tamper, incomplete two-platform metrics, fixed-threshold, crash-rate, kill-switch authority, content-free incident, protected-evidence freshness, and migration/rollback binding tests.
 - W8 publisher/package/evidence, team-policy, suggestion/telemetry, safety-metric, report/moderation, revocation/control, and rollback adversarial tests across shared, iOS, and Android reducers.
+- Trigger-key schema/policy/gesture tests, iOS snapshot/store/validator tests, Android snapshot/conflict/tamper tests, iOS 18.6/26.4 Simulator builds, and Android unit/lint/debug APK assembly.
 - Source-level iOS privacy manifests and current Android no-INTERNET boundary; archive/AAB privacy aggregation and physical-device traffic capture remain separate gates.
 
 ## Not yet qualified
 
 - Physical iPhone and Android device lifecycle, memory pressure, rotation, process death, and keyboard switching.
 - Custom-keyboard switching into the live W2 surface remains `not_proven`: the signed extension was enabled in Simulator Settings, but Simulator input-mode cycling did not select it.
-- Full Access behavior, App Group provisioning, signing, notarization-equivalent store checks, and release archives.
+- Physical-device Full Access behavior, App Group provisioning/signing, store checks, and release archives. Simulator builds prove configuration and compilation, not production entitlement provisioning.
 - Stable Japanese composition, conversion, candidate selection, and dictionary licensing.
 - Selection replacement and undo across representative third-party apps such as messaging, mail, browser, and document editors.
 - Production identity verification, durable database/queue/ledger, KMS, secrets, deployment, monitoring, and incident recovery.
@@ -95,8 +99,9 @@ This checkpoint implements the W0/W1 local-first foundation, W2 local text-actio
 - Real Calendar event creation/deletion, provider-side idempotency and lookup semantics, externally verified reconciliation/Undo, and the required independent security assessment for R3 write promotion.
 - Durable transactional Skill storage, trusted test executors, signed Skill packages, external cost settlement, moderation/reporting/kill switches, public marketplace publication, and cross-device production binding synchronization.
 - Protected publisher/package verification, hardware-backed publisher signing custody, real team administration, durable governance/revocation state, external moderation, public safety metrics, marketplace distribution, and separately qualified R4 connectors.
-- Host-to-extension/App Group and Host-to-IME settings persistence/runtime synchronization, plus persistence across process death or device restart.
-- User-configurable physical letter-key assignment, QWERTY trigger picker, tap-to-type/long-press-to-invoke gesture handling, Skill Keys management, optional searchable palette, canonical shortcut snapshots, exact activation routing, live Host-to-keyboard refresh, and Acti-class key-binding parity. The W6 `shortcut` trigger and native installed-binding fixtures are models only; they are not a keyboard runtime implementation.
+- Physical-device Host-to-extension/App Group and Host-to-IME persistence/runtime synchronization across process death or restart. The native local implementations and simulator/JVM checks exist, but device evidence remains `not_proven`.
+- TypeScript, Swift, and Kotlin snapshot encoders intentionally validate their own native projections today; cross-language golden-vector parity for canonical snapshot bytes and digests remains `not_proven` and must be qualified before a server-synchronized registry is enabled.
+- Optional searchable overflow palette, authenticated cross-device shortcut synchronization, and production Skill catalog installation. Physical A-Z assignment, conflict management, tap/hold handling, and local Review routing are implemented foundations; Acti-class parity on representative third-party apps remains `not_proven` until device qualification.
 - Exact-candidate protected CI identity, durable incident/kill-switch storage, real crash/performance collection, independently repeatable beta migration/rollback, and configured on-call/support/privacy endpoints.
 - App Store/Play product identity, legal/privacy copy, signed archive/AAB inspection, store privacy aggregation, review submissions, approval, rollout, and rollback evidence.
 

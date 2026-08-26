@@ -21,6 +21,9 @@ targets:
         embed: true
     entitlements:
       path: MobileAIKeyboardHost/Host.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.torutesu.mobileaikeyboard
     info:
       path: MobileAIKeyboardHost/Info.plist
       properties:
@@ -46,6 +49,9 @@ targets:
       - package: MobileAIKeyboardCore
     entitlements:
       path: MobileAIKeyboardExtension/Extension.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.torutesu.mobileaikeyboard
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.torutesu.mobileaikeyboard.keyboard
@@ -63,7 +69,7 @@ targets:
             IsASCIICapable: true
             PrefersRightToLeft: false
             PrimaryLanguage: en-US
-            RequestsOpenAccess: false
+            RequestsOpenAccess: true
 schemes:
   MobileAIKeyboard:
     build:

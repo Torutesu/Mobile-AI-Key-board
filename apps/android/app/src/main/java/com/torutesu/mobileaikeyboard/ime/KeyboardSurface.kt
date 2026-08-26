@@ -3,8 +3,10 @@ package com.torutesu.mobileaikeyboard.ime
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.graphics.Typeface
 import android.view.Gravity
+import android.view.MotionEvent
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -12,12 +14,16 @@ import android.widget.ScrollView
 import android.widget.TextView
 import com.torutesu.mobileaikeyboard.core.KeyboardMode
 import com.torutesu.mobileaikeyboard.core.KeyboardState
+import com.torutesu.mobileaikeyboard.core.ShortcutSnapshot
+import com.torutesu.mobileaikeyboard.core.ShortcutKeyCode
+import com.torutesu.mobileaikeyboard.core.TriggerKeyBinding
 
 /** Small dependency-free keyboard surface; all touch targets are at least 48dp. */
 @SuppressLint("ViewConstructor") // Instantiated only by KeyboardImeService with mandatory callbacks; never inflated from XML.
 class KeyboardSurface(context: Context, private val callbacks: Callbacks) : ScrollView(context) {
     class Callbacks(
         val onCommand: () -> Unit,
+        val onShortcut: (TriggerKeyBinding) -> Unit,
         val onText: (String) -> Unit,
         val onDelete: () -> Unit,
         val onEnter: () -> Unit,
@@ -35,6 +41,7 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
     private val density = resources.displayMetrics.density
     private var shift = false
     private var numericMode = false
+    private var currentShortcutSnapshot = ShortcutSnapshot.empty()
     private val root = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(6), dp(5), dp(6), dp(5))
@@ -46,17 +53,18 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
         addView(root)
     }
 
-    fun render(state: KeyboardState) {
+    fun render(state: KeyboardState, shortcutSnapshot: ShortcutSnapshot = ShortcutSnapshot.empty()) {
+        currentShortcutSnapshot = shortcutSnapshot
         root.removeAllViews()
         when (state.mode) {
             KeyboardMode.COMMAND, KeyboardMode.CAPTURE_REVIEW, KeyboardMode.RESULT_REVIEW, KeyboardMode.ERROR -> renderCommand(state)
             KeyboardMode.LOCKED -> renderLocked(state)
             KeyboardMode.RECEIPT -> renderReceipt(state)
-            else -> renderTyping(state)
+            else -> renderTyping(state, shortcutSnapshot = shortcutSnapshot)
         }
     }
 
-    private fun renderTyping(state: KeyboardState, showCommandControls: Boolean = state.mode != KeyboardMode.LOCKED) {
+    private fun renderTyping(state: KeyboardState, showCommandControls: Boolean = state.mode != KeyboardMode.LOCKED, shortcutSnapshot: ShortcutSnapshot = ShortcutSnapshot.empty()) {
         val toolbar = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         toolbar.addView(label(if (state.mode == KeyboardMode.RECEIPT) "完了" else "通常入力", 14f), weight(1f))
         if (showCommandControls) toolbar.addView(actionButton("Command", "Command mode") { callbacks.onCommand() })
@@ -65,7 +73,10 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
         else listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
         rows.forEach { letters ->
             val row = row()
-            letters.forEach { letter -> row.addView(key(letter.uppercase(), letter.toString())) }
+            letters.forEach { letter ->
+                val keyCode = letter.uppercase()
+                row.addView(key(keyCode, letter.toString(), binding = shortcutSnapshot.bindingFor(keyCode)))
+            }
             root.addView(row)
         }
         val controls = row()
@@ -73,7 +84,7 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
             setOnClickListener { shift = !shift; contentDescription = if (shift) "Shift on" else "Shift off" }
         })
         controls.addView(key(if (numericMode) "ABC" else "123", "Numbers and symbols", weight = 1.2f).apply {
-            setOnClickListener { numericMode = !numericMode; render(state) }
+            setOnClickListener { numericMode = !numericMode; render(state, currentShortcutSnapshot) }
         })
         controls.addView(key("🌐", "Switch keyboard", weight = 1.2f).apply { setOnClickListener { callbacks.onSwitchKeyboard() } })
         controls.addView(key("space", "Space", weight = 3f).apply { setOnClickListener { callbacks.onText(" ") } })
@@ -230,12 +241,19 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
         layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, dp(52))
     }
 
-    private fun key(text: String, accessibleName: String, weight: Float = 1f) = Button(context).apply {
+    private fun key(text: String, accessibleName: String, weight: Float = 1f, binding: TriggerKeyBinding? = null) = Button(context).apply {
         this.text = text
         textSize = 15f
         minHeight = dp(48)
         minWidth = dp(48)
-        contentDescription = accessibleName
+        contentDescription = if (binding == null) accessibleName else "${ShortcutKeyCode.displayLabel(binding.keyCode)}、${binding.skillName}、長押しで実行"
+        if (binding != null) {
+            background = GradientDrawable().apply {
+                setColor(Color.TRANSPARENT)
+                setStroke(dp(2), Color.rgb(17, 156, 243))
+                cornerRadius = dp(8).toFloat()
+            }
+        }
         layoutParams = LinearLayout.LayoutParams(0, dp(52), weight).apply { setMargins(dp(2), dp(2), dp(2), dp(2)) }
         setOnClickListener {
             if (text.length == 1 && text[0].isLetter()) {
@@ -243,6 +261,56 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
                 shift = false
             } else if (text.length == 1 && !text[0].isLetterOrDigit()) {
                 callbacks.onText(text)
+            }
+        }
+        binding?.let { shortcut ->
+            // Use an explicit timer so OEM ViewConfiguration values cannot
+            // change the 450ms product boundary. Once fired, ACTION_UP is
+            // consumed and the ordinary character is never committed.
+            var longPressFired = false
+            var cancelled = false
+            var downX = 0f
+            var downY = 0f
+            val trigger = Runnable {
+                if (!cancelled && isPressed) {
+                    longPressFired = true
+                    callbacks.onShortcut(shortcut)
+                }
+            }
+            setOnTouchListener { _, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        longPressFired = false
+                        cancelled = false
+                        downX = event.x
+                        downY = event.y
+                        postDelayed(trigger, 450L)
+                        false
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val dx = event.x - downX
+                        val dy = event.y - downY
+                        val tooFar = kotlin.math.hypot(dx.toDouble(), dy.toDouble()) > 12f * density
+                        if (tooFar) {
+                            cancelled = true
+                            removeCallbacks(trigger)
+                        }
+                        false
+                    }
+                    MotionEvent.ACTION_POINTER_DOWN -> {
+                        cancelled = true
+                        removeCallbacks(trigger)
+                        false
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        removeCallbacks(trigger)
+                        val consume = longPressFired
+                        if (event.actionMasked == MotionEvent.ACTION_CANCEL) cancelled = true
+                        longPressFired = false
+                        consume
+                    }
+                    else -> false
+                }
             }
         }
     }
