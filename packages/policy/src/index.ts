@@ -107,3 +107,4 @@ export function assertLocalTextPlan(plan: LocalTextPlanData): void {
 }
 
 export * from "./w4.js";
+export * from "./w5.js";

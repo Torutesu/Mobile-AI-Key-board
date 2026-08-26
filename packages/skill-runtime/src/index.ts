@@ -145,3 +145,4 @@ export function newId(prefix: string): string { return `${prefix}_${randomUUID()
 
 export * from "./w3.js";
 export * from "./w4.js";
+export * from "./w5.js";

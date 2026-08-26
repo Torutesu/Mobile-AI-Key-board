@@ -21,6 +21,7 @@ data class ProviderConnection(
     val accountLabel: String? = null,
     val connectionEpoch: Int = 0,
     val updatedAt: String? = null,
+    val fixtureWriteCapability: Boolean = false,
 ) {
     val incrementalScopes: List<String> get() = requestedScopes.filterNot { it in grantedScopes }
 }
@@ -113,6 +114,7 @@ data class HostAppState(
     val deletion: DeletionState = DeletionState(),
     val connections: List<ProviderConnection> = emptyList(),
     val readOnlyQueries: List<ReadOnlyQueryState> = emptyList(),
+    val calendarWrite: CalendarWriteState = CalendarWriteState(),
 )
 
 sealed interface HostEvent {
@@ -136,6 +138,21 @@ sealed interface HostEvent {
     data class RunReadOnly(val provider: Provider) : HostEvent
     data class NextResults(val provider: Provider) : HostEvent
     data class SelectResult(val provider: Provider, val resultId: String?) : HostEvent
+    data object EnableCalendarWriteFixture : HostEvent
+    data object OpenCalendarWrite : HostEvent
+    data object CancelCalendarWrite : HostEvent
+    data class UpdateCalendarDraft(val draft: PrivateCalendarDraft) : HostEvent
+    data object ReviewCalendarWrite : HostEvent
+    data class ConfirmCalendarWrite(val digest: String) : HostEvent
+    data class SetCalendarWriteOutcome(val outcome: CalendarWritePhase) : HostEvent
+    data object RequestCalendarReconciliation : HostEvent
+    data object ConfirmCalendarReconciliation : HostEvent
+    data class CompleteCalendarReconciliation(val found: Boolean, val resourceRef: String? = null) : HostEvent
+    data object RequestCalendarUndo : HostEvent
+    data class ConfirmCalendarUndo(val resourceRef: String) : HostEvent
+    data object CompleteCalendarUndo : HostEvent
+    data object ExpireCalendarUndo : HostEvent
+    data class ObserveCalendarTime(val now: String) : HostEvent
 }
 
 object HostFixtureClient {
@@ -201,8 +218,8 @@ object HostFixtureClient {
                 sessionExpiresAt = "2026-08-26T10:00:00Z",
             ),
         )
-        HostEvent.SimulateSessionExpiry -> state.copy(account = state.account.copy(sessionStatus = SessionStatus.EXPIRED))
-        HostEvent.SimulateSessionRevocation -> state.copy(account = state.account.copy(sessionStatus = SessionStatus.REVOKED))
+        HostEvent.SimulateSessionExpiry -> state.copy(account = state.account.copy(sessionStatus = SessionStatus.EXPIRED), calendarWrite = CalendarWriteState())
+        HostEvent.SimulateSessionRevocation -> state.copy(account = state.account.copy(sessionStatus = SessionStatus.REVOKED), calendarWrite = CalendarWriteState())
         is HostEvent.RequestDeviceRevoke -> if (state.devices.any { it.id == event.deviceId && it.status == DeviceStatus.ACTIVE }) {
             state.copy(pendingRevokeDeviceId = event.deviceId)
         } else state
@@ -234,6 +251,7 @@ object HostFixtureClient {
                 pendingRevokeDeviceId = null,
                 connections = emptyList(),
                 readOnlyQueries = emptyList(),
+                calendarWrite = CalendarWriteState(),
                 deletion = state.deletion.copy(
                     status = DeletionStatus.COMPLETED,
                     completedAt = NOW,
@@ -263,28 +281,45 @@ object HostFixtureClient {
         }
         is HostEvent.MarkReconnectRequired -> state.updateConnection(event.provider) {
             if (it.status == ConnectionStatus.CONNECTED) it.copy(status = ConnectionStatus.RECONNECT_REQUIRED, updatedAt = NOW) else it
-        }
+        }.let { if (event.provider == Provider.CALENDAR) it.copy(calendarWrite = CalendarWriteState()) else it }
         is HostEvent.MarkRebindRequired -> state.updateConnection(event.provider) {
             if (it.status == ConnectionStatus.CONNECTED) it.copy(status = ConnectionStatus.REBIND_REQUIRED, updatedAt = NOW) else it
-        }
+        }.let { if (event.provider == Provider.CALENDAR) it.copy(calendarWrite = CalendarWriteState()) else it }
         is HostEvent.RequestDisconnect -> state.updateConnection(event.provider) {
             if (it.status == ConnectionStatus.CONNECTED || it.status == ConnectionStatus.RECONNECT_REQUIRED || it.status == ConnectionStatus.REBIND_REQUIRED) {
                 it.copy(status = ConnectionStatus.DISCONNECTING, updatedAt = NOW)
             } else it
-        }
+        }.let { if (event.provider == Provider.CALENDAR) it.copy(calendarWrite = CalendarWriteState()) else it }
         is HostEvent.CompleteDisconnect -> state.updateConnection(event.provider) {
             if (it.status == ConnectionStatus.DISCONNECTING) it.copy(
                 status = ConnectionStatus.DISCONNECTED,
                 grantedScopes = emptyList(),
                 accountLabel = null,
                 updatedAt = NOW,
+                fixtureWriteCapability = false,
             ) else it
         }.updateQuery(event.provider) { it.copy(results = emptyList(), hasNextPage = false, selectedResultId = null, failureClass = "connection_required", partial = false) }
+            .let { if (event.provider == Provider.CALENDAR) it.copy(calendarWrite = CalendarWriteState()) else it }
         is HostEvent.RunReadOnly -> state.runReadOnly(event.provider)
         is HostEvent.NextResults -> state.nextResults(event.provider)
         is HostEvent.SelectResult -> state.updateQuery(event.provider) {
             if (event.resultId == null || it.results.any { result -> result.id == event.resultId }) it.copy(selectedResultId = event.resultId) else it
         }
+        HostEvent.EnableCalendarWriteFixture -> state.enableCalendarWriteFixture()
+        HostEvent.OpenCalendarWrite -> state.openCalendarWrite()
+        HostEvent.CancelCalendarWrite -> state.copy(calendarWrite = CalendarWriteState())
+        is HostEvent.UpdateCalendarDraft -> state.updateCalendarDraft(event.draft)
+        HostEvent.ReviewCalendarWrite -> state.reviewCalendarWrite()
+        is HostEvent.ConfirmCalendarWrite -> state.confirmCalendarWrite(event.digest)
+        is HostEvent.SetCalendarWriteOutcome -> state.setCalendarWriteOutcome(event.outcome)
+        HostEvent.RequestCalendarReconciliation -> state.requestCalendarReconciliation()
+        HostEvent.ConfirmCalendarReconciliation -> state.confirmCalendarReconciliation()
+        is HostEvent.CompleteCalendarReconciliation -> state.completeCalendarReconciliation(event.found, event.resourceRef)
+        HostEvent.RequestCalendarUndo -> state.requestCalendarUndo()
+        is HostEvent.ConfirmCalendarUndo -> state.confirmCalendarUndo(event.resourceRef)
+        HostEvent.CompleteCalendarUndo -> state.completeCalendarUndo()
+        HostEvent.ExpireCalendarUndo -> state.expireCalendarUndo()
+        is HostEvent.ObserveCalendarTime -> state.observeCalendarTime(event.now)
     }
 
     private fun HostAppState.updateConnection(provider: Provider, update: (ProviderConnection) -> ProviderConnection): HostAppState =
@@ -352,6 +387,197 @@ object HostFixtureClient {
                 failureClass = query.failureClass,
                 completedSteps = if (failed) emptyList() else listOf(query.operation),
                 failedSteps = if (failed) listOf(query.operation) else emptyList(),
+            ),
+        )
+        return copy(runs = listOf(run) + runs)
+    }
+
+    private fun HostAppState.calendarConnection(): ProviderConnection? = connections.firstOrNull { it.provider == Provider.CALENDAR }
+
+    private fun HostAppState.writeEligible(): Boolean = account.authStatus == AuthStatus.SIGNED_IN &&
+        account.sessionStatus == SessionStatus.ACTIVE &&
+        calendarConnection()?.let { it.status == ConnectionStatus.CONNECTED && it.fixtureWriteCapability } == true
+
+    private fun HostAppState.enableCalendarWriteFixture(): HostAppState {
+        if (account.authStatus != AuthStatus.SIGNED_IN || account.sessionStatus != SessionStatus.ACTIVE) return copy(
+            calendarWrite = calendarWrite.copy(phase = CalendarWritePhase.FAILED, error = "アクティブなfixtureセッションが必要です"),
+        )
+        val connection = calendarConnection() ?: return this
+        if (connection.status != ConnectionStatus.CONNECTED) return copy(
+            calendarWrite = calendarWrite.copy(phase = CalendarWritePhase.FAILED, error = "Calendarを接続してからwrite capabilityを有効にしてください"),
+        )
+        return updateConnection(Provider.CALENDAR) { it.copy(fixtureWriteCapability = true) }
+            .copy(calendarWrite = CalendarWriteState())
+    }
+
+    private fun HostAppState.openCalendarWrite(): HostAppState = if (writeEligible()) {
+        copy(calendarWrite = CalendarWriteState(phase = CalendarWritePhase.DRAFT))
+    } else {
+        copy(calendarWrite = calendarWrite.copy(phase = CalendarWritePhase.FAILED, error = "Calendar接続、fixture write capability、アクティブセッションが必要です"))
+    }
+
+    private fun HostAppState.updateCalendarDraft(draft: PrivateCalendarDraft): HostAppState {
+        if (calendarWrite.phase != CalendarWritePhase.DRAFT && calendarWrite.phase != CalendarWritePhase.REVIEW) return this
+        return copy(calendarWrite = calendarWrite.copy(
+            phase = CalendarWritePhase.DRAFT,
+            draft = draft,
+            plan = null,
+            confirmedDigest = null,
+            receipt = null,
+            error = null,
+        ))
+    }
+
+    private fun HostAppState.reviewCalendarWrite(): HostAppState {
+        if (calendarWrite.phase != CalendarWritePhase.DRAFT || !writeEligible()) return copy(calendarWrite = calendarWrite.copy(error = "draftをreviewできません。接続またはセッションを確認してください"))
+        val draft = calendarWrite.draft
+        val validation = CalendarWriteCanonicalizer.validate(draft)
+        if (validation != null) return copy(calendarWrite = calendarWrite.copy(error = validation))
+        val connection = calendarConnection() ?: return this
+        val version = (calendarWrite.plan?.immutableVersion ?: 0) + 1
+        val owner = account.displayName ?: "fixture-owner"
+        val expiry = "2026-08-26T09:15:00Z"
+        val plan = PrivateCalendarPlan(
+            draft = draft,
+            canonicalPayload = CalendarWriteCanonicalizer.canonicalPayload(draft, owner, connection.connectionEpoch, version, expiry),
+            digest = CalendarWriteCanonicalizer.digest(draft, owner, connection.connectionEpoch, version, expiry),
+            immutableVersion = version,
+            createdAt = NOW,
+            connectionEpoch = connection.connectionEpoch,
+            ownerSubject = owner,
+            expiresAt = expiry,
+        )
+        return copy(calendarWrite = calendarWrite.copy(phase = CalendarWritePhase.REVIEW, plan = plan, confirmedDigest = null, error = null))
+    }
+
+    private fun HostAppState.confirmCalendarWrite(digest: String): HostAppState {
+        val plan = calendarWrite.plan ?: return this
+        val valid = calendarWrite.phase == CalendarWritePhase.REVIEW &&
+            digest == plan.digest &&
+            CalendarWriteCanonicalizer.digest(calendarWrite.draft, plan.ownerSubject, plan.connectionEpoch, plan.immutableVersion, plan.expiresAt) == plan.digest &&
+            !atOrAfter(calendarWrite.observedAt, plan.expiresAt) &&
+            writeEligible() && calendarConnection()?.connectionEpoch == plan.connectionEpoch
+        return if (valid) copy(calendarWrite = calendarWrite.copy(phase = CalendarWritePhase.EXECUTING, confirmedDigest = digest, error = null))
+        else copy(calendarWrite = calendarWrite.copy(error = "確認対象が変わりました。reviewをやり直してください", confirmedDigest = null))
+    }
+
+    private fun expectedResourceRef(plan: PrivateCalendarPlan): String = "calendar://private-event/${plan.digest.removePrefix("sha256:").take(16)}"
+
+    private fun HostAppState.setCalendarWriteOutcome(outcome: CalendarWritePhase): HostAppState {
+        val plan = calendarWrite.plan ?: return this
+        if (calendarWrite.phase != CalendarWritePhase.EXECUTING || outcome !in setOf(CalendarWritePhase.SUCCEEDED, CalendarWritePhase.FAILED, CalendarWritePhase.PARTIAL, CalendarWritePhase.UNKNOWN)) return this
+        val success = outcome == CalendarWritePhase.SUCCEEDED
+        val receipt = PrivateCalendarReceipt(
+            status = outcome,
+            summary = when (outcome) {
+                CalendarWritePhase.SUCCEEDED -> "招待なしのprivate Calendar eventを1件作成しました（fixture）"
+                CalendarWritePhase.FAILED -> "eventは作成されませんでした。安全に再確認できます。"
+                CalendarWritePhase.PARTIAL -> "処理の一部だけ完了しました。外部結果は未確定です。"
+                else -> "作成結果は不明です。盲目的な再試行は禁止されています。reconcileを実行してください。"
+            },
+            resourceRef = if (success) expectedResourceRef(plan) else null,
+            ownerSubject = plan.ownerSubject.takeIf { success },
+            connectionEpoch = plan.connectionEpoch.takeIf { success },
+            failureClass = when (outcome) {
+                CalendarWritePhase.FAILED -> "provider_error"
+                CalendarWritePhase.PARTIAL -> "partial_provider_result"
+                CalendarWritePhase.UNKNOWN -> "provider_timeout"
+                else -> null
+            },
+            createdAt = NOW,
+            undoExpiresAt = "2026-08-26T10:00:00Z".takeIf { success },
+            reconciliationRequired = outcome == CalendarWritePhase.UNKNOWN,
+        )
+        return copy(calendarWrite = calendarWrite.copy(phase = outcome, receipt = receipt, error = null)).appendCalendarActivity(plan, receipt)
+    }
+
+    private fun HostAppState.requestCalendarReconciliation(): HostAppState = if (calendarWrite.phase == CalendarWritePhase.UNKNOWN && calendarWrite.receipt?.reconciliationRequired == true) {
+        copy(calendarWrite = calendarWrite.copy(phase = CalendarWritePhase.RECONCILIATION_REVIEW, error = null))
+    } else this
+
+    private fun HostAppState.confirmCalendarReconciliation(): HostAppState = if (calendarWrite.phase == CalendarWritePhase.RECONCILIATION_REVIEW && writeEligible()) {
+        copy(calendarWrite = calendarWrite.copy(phase = CalendarWritePhase.RECONCILING, error = null))
+    } else this
+
+    private fun HostAppState.completeCalendarReconciliation(found: Boolean, resourceRef: String?): HostAppState {
+        val plan = calendarWrite.plan ?: return this
+        if (calendarWrite.phase != CalendarWritePhase.RECONCILING) return this
+        val expected = expectedResourceRef(plan)
+        if (found && resourceRef != expected) return copy(calendarWrite = calendarWrite.copy(phase = CalendarWritePhase.FAILED, error = "resource refまたはownerが一致しないため停止しました"))
+        val receipt = if (found) PrivateCalendarReceipt(
+            status = CalendarWritePhase.SUCCEEDED,
+            summary = "reconcileで既存のprivate eventを確認しました。新規作成はしていません（fixture）",
+            resourceRef = expected,
+            ownerSubject = plan.ownerSubject,
+            connectionEpoch = plan.connectionEpoch,
+            createdAt = NOW,
+            undoExpiresAt = "2026-08-26T10:00:00Z",
+        ) else PrivateCalendarReceipt(CalendarWritePhase.FAILED, "reconcileでeventを確認できませんでした。再作成は行いません。", failureClass = "not_found_after_reconciliation", createdAt = NOW)
+        return copy(calendarWrite = calendarWrite.copy(phase = receipt.status, receipt = receipt, error = null)).appendCalendarActivity(plan, receipt)
+    }
+
+    private fun HostAppState.requestCalendarUndo(): HostAppState {
+        if (calendarWrite.phase == CalendarWritePhase.UNDONE || calendarWrite.phase == CalendarWritePhase.UNDO_EXPIRED) return this
+        val receipt = calendarWrite.receipt
+        val connection = calendarConnection()
+        val valid = calendarWrite.phase == CalendarWritePhase.SUCCEEDED && receipt?.resourceRef != null && !receipt.undoUsed &&
+            writeEligible() && receipt.connectionEpoch == connection?.connectionEpoch && receipt.ownerSubject == (account.displayName ?: "fixture-owner")
+        return if (valid) copy(calendarWrite = calendarWrite.copy(phase = CalendarWritePhase.UNDO_REVIEW, error = null))
+        else copy(calendarWrite = calendarWrite.copy(error = "Undo対象が期限切れ、または接続・ownerが変わりました"))
+    }
+
+    private fun HostAppState.confirmCalendarUndo(resourceRef: String): HostAppState {
+        val receipt = calendarWrite.receipt
+        val valid = calendarWrite.phase == CalendarWritePhase.UNDO_REVIEW && receipt?.resourceRef == resourceRef && !receipt.undoUsed &&
+            writeEligible() && receipt.connectionEpoch == calendarConnection()?.connectionEpoch && receipt.ownerSubject == (account.displayName ?: "fixture-owner")
+        return if (valid) copy(calendarWrite = calendarWrite.copy(phase = CalendarWritePhase.UNDOING, error = null))
+        else copy(calendarWrite = calendarWrite.copy(phase = CalendarWritePhase.FAILED, error = "resource ref、owner、接続epochが一致しないためUndoを停止しました"))
+    }
+
+    private fun HostAppState.completeCalendarUndo(): HostAppState {
+        if (calendarWrite.phase != CalendarWritePhase.UNDOING) return this
+        val plan = calendarWrite.plan ?: return this
+        val receipt = calendarWrite.receipt ?: return this
+        val nextReceipt = receipt.copy(status = CalendarWritePhase.UNDONE, summary = "作成したprivate eventを1回だけ取り消しました（fixture）", undoUsed = true, undoExpiresAt = null)
+        val run = ActivityRun("run-calendar-undo-${runs.size + 1}", "calendar.event.delete_own", ImmutablePlanVersion(plan.immutableVersion, plan.digest, NOW), RiskClass.R3, RunStatus.SUCCEEDED, NOW, NOW, SafeRunReceipt(nextReceipt.summary))
+        return copy(calendarWrite = calendarWrite.copy(phase = CalendarWritePhase.UNDONE, receipt = nextReceipt, error = null), runs = listOf(run) + runs)
+    }
+
+    private fun HostAppState.expireCalendarUndo(): HostAppState = if (calendarWrite.phase == CalendarWritePhase.SUCCEEDED && calendarWrite.receipt?.undoUsed == false) {
+        copy(calendarWrite = calendarWrite.copy(phase = CalendarWritePhase.UNDO_EXPIRED, error = "Undo期限が切れました"))
+    } else this
+
+    private fun HostAppState.observeCalendarTime(now: String): HostAppState {
+        val current = calendarWrite.copy(observedAt = now)
+        val expiry = current.receipt?.undoExpiresAt
+        return when {
+            current.phase == CalendarWritePhase.SUCCEEDED && expiry != null && atOrAfter(now, expiry) -> copy(calendarWrite = current.copy(phase = CalendarWritePhase.UNDO_EXPIRED, error = "Undo期限が切れました"))
+            current.phase == CalendarWritePhase.REVIEW && current.plan != null && atOrAfter(now, current.plan.expiresAt) -> copy(calendarWrite = current.copy(phase = CalendarWritePhase.FAILED, error = "確認期限が切れました。reviewをやり直してください"))
+            else -> copy(calendarWrite = current)
+        }
+    }
+
+    private fun atOrAfter(left: String, right: String): Boolean = runCatching {
+        java.time.Instant.parse(left) >= java.time.Instant.parse(right)
+    }.getOrDefault(left >= right)
+
+    private fun HostAppState.appendCalendarActivity(plan: PrivateCalendarPlan, receipt: PrivateCalendarReceipt): HostAppState {
+        val status = when (receipt.status) {
+            CalendarWritePhase.SUCCEEDED -> RunStatus.SUCCEEDED
+            CalendarWritePhase.PARTIAL -> RunStatus.PARTIAL
+            CalendarWritePhase.UNKNOWN -> RunStatus.UNKNOWN
+            else -> RunStatus.FAILED
+        }
+        val run = ActivityRun(
+            id = "run-calendar-write-${runs.size + 1}", skillId = "calendar.event.create_private",
+            plan = ImmutablePlanVersion(plan.immutableVersion, plan.digest, plan.createdAt), riskClass = RiskClass.R3,
+            status = status, createdAt = NOW, updatedAt = NOW,
+            receipt = SafeRunReceipt(
+                summary = receipt.summary, failureClass = receipt.failureClass,
+                completedSteps = if (status == RunStatus.SUCCEEDED) listOf("calendar.event.create_private") else emptyList(),
+                failedSteps = if (status == RunStatus.FAILED) listOf("calendar.event.create_private") else emptyList(),
+                notStartedSteps = if (status == RunStatus.UNKNOWN || status == RunStatus.PARTIAL) listOf("calendar.event.create_private") else emptyList(),
+                undoAvailable = status == RunStatus.SUCCEEDED,
             ),
         )
         return copy(runs = listOf(run) + runs)
