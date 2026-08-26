@@ -41,6 +41,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -54,6 +55,13 @@ import org.junit.runner.RunWith
 class VerticalSliceUiTest {
     @get:Rule
     val composeRule = createAndroidComposeRule<ComponentActivity>()
+
+    @Before
+    fun resetProcessLocalSkillCatalog() {
+        // Instrumentation methods share one app process. A previous account-
+        // boundary test must never make a later fixture result order-dependent.
+        LocalSkillRegistry.clearInstalled()
+    }
 
     @Test
     fun builderDeployThenExplicitAddExposesSuccessAndCandidate() {
@@ -78,7 +86,7 @@ class VerticalSliceUiTest {
     fun shortcutPickerAssignsPrivateCandidateToZAfterFixtureGate() {
         val version = deployedVersion("private.ui.assign")
         val descriptor = LocalSkillRegistry.fromPrivateVersion(version)!!
-        LocalSkillRegistry.install(descriptor)
+        assertTrue(LocalSkillRegistry.install(descriptor))
         var published: ShortcutSnapshot? = null
         composeRule.setContent {
             MaterialTheme {
@@ -94,7 +102,9 @@ class VerticalSliceUiTest {
         composeRule.onNodeWithText("${version.skillName}（端末内 v${version.version}）").performClick()
         composeRule.onNodeWithContentDescription("Z、割り当て可能").performClick()
         composeRule.onNodeWithText("端末内fixtureをテスト").performClick()
-        composeRule.onNodeWithText("保存").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("端末内fixture testに成功（外部送信なし）").assertExists()
+        composeRule.onNodeWithText("保存").assertIsEnabled().performClick()
         composeRule.runOnIdle {
             val snapshot = published
             assertNotNull(snapshot)
@@ -109,7 +119,7 @@ class VerticalSliceUiTest {
     fun shortcutPickerRemainsOperableAtLargeFontScale() {
         val version = deployedVersion("private.ui.large-font")
         val descriptor = LocalSkillRegistry.fromPrivateVersion(version)!!
-        LocalSkillRegistry.install(descriptor)
+        assertTrue(LocalSkillRegistry.install(descriptor))
         var published: ShortcutSnapshot? = null
         val deviceDensity = composeRule.activity.resources.displayMetrics.density
         composeRule.setContent {
@@ -128,6 +138,8 @@ class VerticalSliceUiTest {
         composeRule.onNodeWithText("${version.skillName}（端末内 v${version.version}）").performClick()
         composeRule.onNodeWithContentDescription("Q、割り当て可能").performClick()
         composeRule.onNodeWithText("端末内fixtureをテスト").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("端末内fixture testに成功（外部送信なし）").assertExists()
         composeRule.onNodeWithText("保存").assertIsEnabled().performClick()
         composeRule.runOnIdle {
             assertEquals("KeyQ", published!!.bindings.single().keyCode)
