@@ -128,7 +128,16 @@ jobs:
         timeout-minutes: 18
         run: |
           set -euo pipefail
-          echo no | avdmanager create avd --force --name mobile-ai-keyboard-ci --package 'system-images;android-35;google_apis;x86_64'
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/android-avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          avdmanager create avd \
+            --force \
+            --name mobile-ai-keyboard-ci \
+            --package 'system-images;android-35;google_apis;x86_64' \
+            --device pixel_2 \
+            </dev/null
+          avdmanager list avd
+          test -f "$ANDROID_AVD_HOME/mobile-ai-keyboard-ci.ini"
           "$ANDROID_HOME/emulator/emulator" -avd mobile-ai-keyboard-ci -no-window -no-audio -no-boot-anim -no-snapshot -no-metrics -gpu swiftshader_indirect >"$RUNNER_TEMP/android-emulator.log" 2>&1 &
           emulator_pid=$!
           cleanup() {
