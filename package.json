@@ -7,10 +7,11 @@
   "scripts": {
     "build": "tsc -b --pretty false",
     "test": "pnpm -r test && pnpm test:release",
-    "test:release": "node --test scripts/test/*.test.mjs && pnpm shortcuts:vectors:check",
+    "test:release": "node --test scripts/test/*.test.mjs && pnpm shortcuts:vectors:check && pnpm shortcuts:vectors:native-check",
     "benchmark:performance": "node scripts/performance-benchmark.mjs",
     "shortcuts:vectors:generate": "pnpm build && node scripts/generate-shortcut-vectors.mjs",
     "shortcuts:vectors:check": "pnpm build && node scripts/generate-shortcut-vectors.mjs --check",
+    "shortcuts:vectors:native-check": "node scripts/check-native-shortcut-consumers.mjs",
     "release:readiness": "node scripts/release-readiness.mjs",
     "typecheck": "tsc -b --pretty false",
     "check": "pnpm build && pnpm test"

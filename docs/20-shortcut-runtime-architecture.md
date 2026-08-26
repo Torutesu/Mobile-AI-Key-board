@@ -232,6 +232,24 @@ Implement in `packages/policy/src/shortcuts.ts`:
 
 ## 6. State machines
 
+### 6.0 Cross-language golden-vector gate
+
+`fixtures/shortcut-golden-vectors.json` is generated from the TypeScript
+contracts and is the sole authoritative snapshot-vector fixture. The native
+unit suites must consume the checked-in bytes directly, rather than copying
+examples into platform-specific fixtures. Each consumer is required to cover
+the valid local snapshot, duplicate physical-key rejection, canonical
+`content_digest`, and typed rejection fields. The deterministic source gate is
+`pnpm shortcuts:vectors:native-check`; it requires the marker
+`MOBILE_AI_KEYBOARD_SHORTCUT_GOLDEN_CONSUMER_V1` in the iOS and Android test
+consumers and runs in CI alongside the platform unit-test lanes.
+
+The fixture reports `native_consumption_status: "not_proven"` when either
+consumer is absent and `"native_unit_consumers"` only when both are wired.
+`native_unit_consumers` is intentionally narrower than cross-language byte or
+runtime parity: simulator/JVM tests, physical-device behavior, and release
+qualification remain separate evidence gates.
+
 ### 6.1 Host configuration
 
 `idle -> editing -> validating -> publishing -> published`

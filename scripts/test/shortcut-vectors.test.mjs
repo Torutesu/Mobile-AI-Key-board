@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildFixture, checkFixture } from '../generate-shortcut-vectors.mjs';
+import { inspectNativeConsumers, nativeConsumerFailures, NATIVE_CONSUMER_MARKER } from '../check-native-shortcut-consumers.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -30,4 +31,28 @@ test('vector checker rejects fixture tampering and native proof overclaim', () =
   const claimedRejection = structuredClone(fixture);
   claimedRejection.vectors[1].expected.rejection = 'digest';
   assert.match(checkFixture(claimedRejection).join('\n'), /expected rejection=digest, got schema/);
+});
+
+test('native source gate is fail-closed and fixture status follows its exact level', () => {
+  const report = inspectNativeConsumers(root);
+  assert.ok(report.status === 'not_proven' || report.status === 'native_unit_consumers');
+  assert.equal(report.checks.length, 2);
+  assert.equal(report.status, buildFixture().native_consumption_status);
+  assert.ok(nativeConsumerFailures(root).every((failure) => /ios|android/.test(failure)));
+  assert.equal(NATIVE_CONSUMER_MARKER, 'MOBILE_AI_KEYBOARD_SHORTCUT_GOLDEN_CONSUMER_V1');
+});
+
+test('vector checker rejects expected digest and identity tampering', () => {
+  const fixture = buildFixture();
+  const digestExpectationTampered = structuredClone(fixture);
+  digestExpectationTampered.vectors[0].expected.content_digest = `sha256:${'0'.repeat(64)}`;
+  assert.match(checkFixture(digestExpectationTampered).join('\n'), /expected content_digest/);
+
+  const identityTampered = structuredClone(fixture);
+  identityTampered.vectors.reverse();
+  assert.match(checkFixture(identityTampered).join('\n'), /vector order\/identity/);
+
+  const shapeTampered = structuredClone(fixture);
+  shapeTampered.vectors[0].expected.extra = 'ignored by an unsafe consumer';
+  assert.match(checkFixture(shapeTampered).join('\n'), /expected keys are not exact/);
 });

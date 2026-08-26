@@ -86,6 +86,10 @@ public struct ShortcutPresentation: Codable, Equatable, Sendable {
     public let accessibilityHint: String
     public let tintToken: ShortcutTintToken
 
+    private enum CodingKeys: String, CodingKey {
+        case iconKind = "icon_kind", iconValue = "icon_value", shortLabel = "short_label", accessibilityLabel = "accessibility_label", accessibilityHint = "accessibility_hint", tintToken = "tint_token"
+    }
+
     public init(iconKind: String = "system", iconValue: String, shortLabel: String, accessibilityLabel: String, accessibilityHint: String, tintToken: ShortcutTintToken = .accent) {
         self.iconKind = iconKind
         self.iconValue = iconValue

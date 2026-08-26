@@ -1,7 +1,7 @@
 {
   "schema_version": "mobile-ai-keyboard.shortcut-golden.v1",
   "authority": "typescript-contracts",
-  "native_consumption_status": "not_proven",
+  "native_consumption_status": "native_unit_consumers",
   "canonicalization": "RFC8785-like canonicalJson from packages/contracts",
   "vectors": [
     {
