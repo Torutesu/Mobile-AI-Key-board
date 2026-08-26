@@ -47,7 +47,7 @@ final class AccountActivityTests: XCTestCase {
     func testActivityDetailIsContentFreeAndPlanVersionIsImmutable() {
         let activity = try! XCTUnwrap(AccountActivityFixtureClient().initialState().activities.first)
         XCTAssertEqual(activity.immutablePlanVersion, "text-rewrite.v1")
-        XCTAssertEqual(activity.planDigest, "sha256:fixture-plan-v1")
+        XCTAssertTrue(activity.planDigest.range(of: #"^sha256:[0-9a-f]{64}$"#, options: .regularExpression) != nil)
         XCTAssertFalse(activity.safeReceipt.contains("よろしく"))
         XCTAssertTrue(activity.steps.allSatisfy { !$0.safeSummary.isEmpty })
     }

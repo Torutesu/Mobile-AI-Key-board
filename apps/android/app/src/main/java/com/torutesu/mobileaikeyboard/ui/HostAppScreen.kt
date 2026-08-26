@@ -49,6 +49,7 @@ fun HostAppDashboard(
     Text("接続先に依存しないローカルfixture表示。実identity/backend接続は未証明です。")
     AccountCard(state.account, dispatch)
     DevicesCard(state, dispatch)
+    ConnectionsDashboard(state, dispatch)
     ActivityCard(state, dispatch)
     PrivacyControlsCard(state, dispatch)
 }

@@ -26,20 +26,23 @@ Working title only. Product naming and visual identity are intentionally deferre
 - [Implementation status](docs/08-implementation-status.md)
 - [W2 local text slice](docs/09-w2-local-text-slice.md)
 - [W3 identity, receipts, and retention](docs/10-w3-identity-receipts.md)
+- [W4 read-only connections](docs/11-w4-read-only-connections.md)
 
 ## Current status
 
-The W0-W3 local and provider-neutral foundations are implemented:
+The W0-W4 local and provider-neutral foundations are implemented:
 
 - iOS host app and keyboard extension with Command, explicit source selection, Capture Review, local rewrite, editable Result Preview, stale-safe Apply, and Undo;
 - Android host app and IME with the equivalent local workflow, bounded `InputConnection` capture, implicit-replacement rejection, stale-safe Apply, and Undo;
 - shared TypeScript contracts and policy for local-only R1 plans, disclosure acknowledgement, bounded capture, revision binding, telemetry minimization, and undo lifecycle;
 - provider-neutral device proof, rotating/revocable sessions, immutable authenticated run bindings, append-only content-free receipts/audit, retention, and account deletion state machines;
 - iOS and Android Account, Devices, Activity, and Privacy fixture surfaces that expose success, partial, failure, revocation, retention, and deletion states without pretending to be connected services;
+- provider-neutral OAuth state/PKCE, incremental grant, rebind/disconnect, exact read-only scope, source provenance/freshness, provider-taint, bounded pagination, and typed connector outcome contracts;
+- iOS and Android Connections and source-linked Results fixture surfaces for Calendar availability, Notion search, and Maps search, with explicit reconnect/rebind/disconnect and no external writes;
 - API identity boundary, worker receipt projection, execution ledger, and tests;
 - content-free telemetry contracts and three-platform CI.
 
-This is not a production release. Real-device keyboard lifecycle, Japanese conversion, third-party app compatibility, signed distribution, external identity verification, hardware-backed device proof, and durable multi-instance infrastructure remain explicit qualification gates. See [implementation status](docs/08-implementation-status.md).
+This is not a production release. Real-device keyboard lifecycle, Japanese conversion, third-party app compatibility, signed distribution, external identity verification, live OAuth/provider APIs, encrypted credential custody, hardware-backed device proof, and durable multi-instance infrastructure remain explicit qualification gates. See [implementation status](docs/08-implementation-status.md).
 
 ## Local verification
 

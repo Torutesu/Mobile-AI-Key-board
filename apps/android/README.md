@@ -12,6 +12,7 @@ Native Android companion app and `InputMethodService` foundation for W1/W2.
 - Telemetry is a typed, content-free event surface; no command, selection, clipboard, or output fields exist.
 - Host Activity receipts expose only immutable plan metadata, risk, typed status, timestamps, and safe summaries.
 - Account, device revocation, session expiry, retention, and deletion controls are local fixtures until a verified backend exists.
+- Calendar, Notion, and Maps connections are read-only fixtures with explicit scope review, reconnect/rebind/disconnect states, bounded pagination, source references, freshness, partial/failure status, and an untrusted-provider-content warning.
 
 ## Build
 
@@ -26,4 +27,4 @@ The keyboard UI is intentionally dependency-light (`InputMethodService` + access
 
 ## Current scope
 
-This milestone contains local English/number/symbol typing, layout switching, IME switching, command invocation, local preview/apply/copy/undo, stale-field fingerprint protection, onboarding/sandbox, and provider-neutral local Account/Devices/Activity/Privacy fixtures. It does not contain network, OAuth, LLM, external identity, or external tool execution. Remote identity/backend behavior remains unproven.
+This milestone contains local English/number/symbol typing, layout switching, IME switching, command invocation, local preview/apply/copy/undo, stale-field fingerprint protection, onboarding/sandbox, provider-neutral local Account/Devices/Activity/Privacy fixtures, and read-only Calendar/Notion/Maps result fixtures. It does not contain network, OAuth, LLM, external identity, secrets, or external tool execution. Remote identity/backend/provider behavior remains unproven.

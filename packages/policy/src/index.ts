@@ -105,3 +105,5 @@ export function assertLocalTextPlan(plan: LocalTextPlanData): void {
   const decision = evaluateLocalTextPlan(plan);
   if (!decision.allowed) throw new PolicyViolation("Local text plan is not allowed", decision);
 }
+
+export * from "./w4.js";

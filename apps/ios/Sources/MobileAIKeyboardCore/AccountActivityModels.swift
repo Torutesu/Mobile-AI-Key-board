@@ -1,4 +1,10 @@
+import CryptoKit
 import Foundation
+
+private func fixturePlanDigest(_ seed: String) -> String {
+    let digest = SHA256.hash(data: Data(seed.utf8))
+    return "sha256:" + digest.map { String(format: "%02x", $0) }.joined()
+}
 
 public enum AccountState: Equatable, Sendable {
     case anonymous
@@ -142,6 +148,7 @@ public enum AccountActivityAction: Equatable, Sendable {
     case advanceDeletion
     case completeDeletion
     case failDeletion(reason: String)
+    case appendActivity(ActivityRecord)
 }
 
 public struct AccountActivityReducer: Sendable {
@@ -187,6 +194,8 @@ public struct AccountActivityReducer: Sendable {
             case .requested, .inProgress: next.deletion = .failed(reason: reason)
             default: break
             }
+        case .appendActivity(let activity):
+            next.activities.insert(activity, at: 0)
         }
         _ = now
         return next
@@ -204,9 +213,9 @@ public struct AccountActivityFixtureClient: Sendable {
             ActivityStep(id: "step-1", operation: "text.rewrite.local", status: .succeeded, safeSummary: "端末内で結果を生成"),
             ActivityStep(id: "step-2", operation: "text.apply", status: .succeeded, safeSummary: "入力欄へ適用")
         ]
-        let activity = ActivityRecord(id: "run-fixture-1", immutablePlanVersion: "text-rewrite.v1", riskClass: "R1 / text transformation", status: .succeeded, createdAt: now.addingTimeInterval(-300), updatedAt: now.addingTimeInterval(-240), safeReceipt: "結果を入力欄へ適用しました（端末内）", steps: steps, planDigest: "sha256:fixture-plan-v1")
-        let partial = ActivityRecord(id: "run-fixture-2", immutablePlanVersion: "calendar.read.v1", riskClass: "R2 / read-only", status: .partial, createdAt: now.addingTimeInterval(-7_200), updatedAt: now.addingTimeInterval(-7_100), safeReceipt: "一部の読み取り結果を確認しました", safeFailure: "接続が切れたため、残りの結果は未確定です", steps: [ActivityStep(id: "step-3", operation: "calendar.availability.read", status: .partial, safeSummary: "一部の応答のみ" )], planDigest: "sha256:fixture-plan-v2")
-        let failed = ActivityRecord(id: "run-fixture-3", immutablePlanVersion: "notion.search.v1", riskClass: "R2 / read-only", status: .failed, createdAt: now.addingTimeInterval(-86_400), updatedAt: now.addingTimeInterval(-86_300), safeReceipt: "検索は実行されませんでした", safeFailure: "接続が設定されていません", steps: [ActivityStep(id: "step-4", operation: "notion.pages.search", status: .failed, safeSummary: "認証前に停止" )], planDigest: "sha256:fixture-plan-v3")
+        let activity = ActivityRecord(id: "run-fixture-1", immutablePlanVersion: "text-rewrite.v1", riskClass: "R1 / text transformation", status: .succeeded, createdAt: now.addingTimeInterval(-300), updatedAt: now.addingTimeInterval(-240), safeReceipt: "結果を入力欄へ適用しました（端末内）", steps: steps, planDigest: fixturePlanDigest("fixture-plan-v1"))
+        let partial = ActivityRecord(id: "run-fixture-2", immutablePlanVersion: "calendar.read.v1", riskClass: "R2 / read-only", status: .partial, createdAt: now.addingTimeInterval(-7_200), updatedAt: now.addingTimeInterval(-7_100), safeReceipt: "一部の読み取り結果を確認しました", safeFailure: "接続が切れたため、残りの結果は未確定です", steps: [ActivityStep(id: "step-3", operation: "calendar.availability.read", status: .partial, safeSummary: "一部の応答のみ" )], planDigest: fixturePlanDigest("fixture-plan-v2"))
+        let failed = ActivityRecord(id: "run-fixture-3", immutablePlanVersion: "notion.search.v1", riskClass: "R2 / read-only", status: .failed, createdAt: now.addingTimeInterval(-86_400), updatedAt: now.addingTimeInterval(-86_300), safeReceipt: "検索は実行されませんでした", safeFailure: "接続が設定されていません", steps: [ActivityStep(id: "step-4", operation: "notion.pages.search", status: .failed, safeSummary: "認証前に停止" )], planDigest: fixturePlanDigest("fixture-plan-v3"))
         return AccountActivityState(account: .anonymous, devices: [current, other], activities: [activity, partial, failed], retention: .receipts90Days)
     }
 }
