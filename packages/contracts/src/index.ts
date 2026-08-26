@@ -202,3 +202,5 @@ export function localTextPlanDigest(plan: Omit<LocalTextPlan, "canonical_digest"
 }
 
 export function parseContract<T extends z.ZodTypeAny>(schema: T, value: unknown): z.infer<T> { return schema.parse(value); }
+
+export * from "./w3.js";

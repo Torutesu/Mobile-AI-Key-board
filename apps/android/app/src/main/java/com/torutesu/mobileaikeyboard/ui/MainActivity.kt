@@ -34,6 +34,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.torutesu.mobileaikeyboard.core.LocalPoliteRewriteService
+import com.torutesu.mobileaikeyboard.core.HostEvent
+import com.torutesu.mobileaikeyboard.core.HostFixtureClient
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -44,6 +46,8 @@ class MainActivity : ComponentActivity() {
 
 @androidx.compose.runtime.Composable
 private fun MobileAiKeyboardApp() {
+    val fixtureClient = remember { HostFixtureClient }
+    var hostState by remember { mutableStateOf(fixtureClient.initialState()) }
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
             Column(
@@ -53,6 +57,10 @@ private fun MobileAiKeyboardApp() {
                 Text("Mobile AI Keyboard", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                 Text("入力の主導権を、あなたの手元に。", style = MaterialTheme.typography.titleMedium)
                 ReadinessCard()
+                HostAppDashboard(
+                    state = hostState,
+                    dispatch = { event -> hostState = fixtureClient.dispatch(hostState, event) },
+                )
                 SandboxCard()
                 PrivacyCard()
             }
@@ -67,8 +75,8 @@ private fun ReadinessCard() {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("セットアップ", style = MaterialTheme.typography.titleLarge)
             Text("キーボードを有効にすると、通常入力を端末内で利用できます。")
-            Text("● 端末内のローカル変換: 準備完了", color = androidx.compose.ui.graphics.Color(0xFF18794E))
-            Text("○ Android設定でキーボードを有効化: 次のステップ")
+            Text("準備完了: 端末内のローカル変換", color = androidx.compose.ui.graphics.Color(0xFF18794E))
+            Text("次のステップ: Android設定でキーボードを有効化")
             TextButton(onClick = {
                 context.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
             }) {

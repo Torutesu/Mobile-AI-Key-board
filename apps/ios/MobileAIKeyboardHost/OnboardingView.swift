@@ -3,6 +3,7 @@ import MobileAIKeyboardCore
 
 struct OnboardingView: View {
     @State private var showKeyboardInstructions = false
+    @StateObject private var accountStore = AccountActivityStore()
 
     var body: some View {
         NavigationStack {
@@ -18,6 +19,17 @@ struct OnboardingView: View {
 
                     privacyCard
                     SandboxView()
+
+                    NavigationLink {
+                        AccountDashboardView()
+                            .environmentObject(accountStore)
+                    } label: {
+                        Label("アカウント・Activity・プライバシー", systemImage: "person.2")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .frame(minHeight: 44)
+                    .accessibilityHint("サインイン状態、デバイス、実行履歴、保持期間を確認します")
 
                     Button {
                         showKeyboardInstructions = true

@@ -2,7 +2,7 @@
 
 ## Milestone boundary
 
-This checkpoint implements the W0/W1 local-first foundation and the W2 local text-action vertical slice. It deliberately does not connect a remote LLM, identity provider, OAuth account, or external action adapter.
+This checkpoint implements the W0/W1 local-first foundation, W2 local text-action vertical slice, and W3 provider-neutral identity/receipt lifecycle. It deliberately does not connect a remote LLM, external identity provider, OAuth account, durable database, or external action adapter.
 
 ## Implemented
 
@@ -17,6 +17,9 @@ This checkpoint implements the W0/W1 local-first foundation and the W2 local tex
 - Worker confirmation check, digest binding, execution ledger, retry suppression, and partial-result receipts.
 - Local-only R1 disclosure, capture, preview, plan, result revision, apply-method, and undo contracts with source-specific Unicode limits.
 - Fail-closed policy for source opt-in, acknowledgement/capture/plan digests, network/tool contamination, stale result revisions, and inactive/expired undo capabilities.
+- Challenge-bound Ed25519 device-registration contracts, token-hash-only rotating session families, stale-token replay revocation, and user/device/session ownership checks.
+- Immutable owner-bound plan versions, append-only receipt identity/sequence checks, content-free audit schemas, retention/legal-hold scheduling, and explicit account-deletion transitions.
+- Provider-neutral API composition and content-free worker receipt projection; all backing stores remain in-memory fixtures.
 
 ### iOS
 
@@ -28,6 +31,7 @@ This checkpoint implements the W0/W1 local-first foundation and the W2 local tex
 - Content-free telemetry allowlist and accessibility-labelled controls.
 - Visible and long-press Command entry, per-run selection/surrounding source controls, exact and locally redacted Capture Review, explicit acknowledgement, editable/regenerable Result Preview, copy/cancel, stale-safe Apply, and one-shot Undo.
 - SHA-256 field fingerprints and editor/document boundary invalidation; command 500, selection 4,000, surrounding 1,000 + 500, result 10,000 character limits.
+- Host Account, Devices, Activity, and Privacy fixture surfaces with session expiry/revocation, partial/failed receipts, retention choices, deletion progress, Dynamic Type, and accessibility labels.
 
 ### Android
 
@@ -36,6 +40,7 @@ This checkpoint implements the W0/W1 local-first foundation and the W2 local tex
 - Ordinary text entry and explicit command-mode transition without network access.
 - Capture Review, local-only acknowledgement gate, editable/regenerable Result Preview, copy/cancel, stale-safe insertion or selection replacement, and one-shot Undo.
 - Bounded `InputConnection` reads, active-selection protection, exact applied-suffix verification before Undo, source/result limits, and editor-boundary state destruction.
+- Host Account, Devices, Activity, and Privacy fixture surfaces with confirmed device revoke, session states, content-free receipt details, retention choices, deletion progress, scrolling, and accessibility semantics.
 
 ## Verified in this checkpoint
 
@@ -43,6 +48,7 @@ This checkpoint implements the W0/W1 local-first foundation and the W2 local tex
 - iOS Swift unit tests, XcodeGen project generation, destination-specific signed Simulator build, embedded-extension validation, host launch, and keyboard enablement in Settings.
 - Android JVM unit tests, InputConnection adapter simulations, lint, and debug APK assembly.
 - CI definitions for the same three lanes.
+- W3 replay, owner mismatch, immutable binding, append-only receipt identity, clone-boundary, invalid deletion transition, retention expiry, and native reducer tests.
 
 ## Not yet qualified
 
@@ -52,6 +58,7 @@ This checkpoint implements the W0/W1 local-first foundation and the W2 local tex
 - Stable Japanese composition, conversion, candidate selection, and dictionary licensing.
 - Selection replacement and undo across representative third-party apps such as messaging, mail, browser, and document editors.
 - Production identity verification, durable database/queue/ledger, KMS, secrets, deployment, monitoring, and incident recovery.
+- External IdP issuer/audience/revocation checks, Secure Enclave/Android Keystore proof, production token verifier, multi-instance race safety, and provider-side deletion/backup expiry.
 - Live LLM privacy behavior, streaming, redaction, provider retention, regional processing, and adversarial prompt qualification.
 - OAuth connectors, external writes, reconciliation, and receipts backed by real provider state.
 

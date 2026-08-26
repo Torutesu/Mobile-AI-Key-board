@@ -25,6 +25,7 @@ targets:
         CFBundleDisplayName: Mobile AI Keyboard
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: true
+        UILaunchStoryboardName: LaunchScreen
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.torutesu.mobileaikeyboard
