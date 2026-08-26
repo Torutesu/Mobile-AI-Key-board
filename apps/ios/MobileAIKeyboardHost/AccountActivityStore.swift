@@ -8,22 +8,32 @@ final class AccountActivityStore: ObservableObject {
     @Published private(set) var state: AccountActivityState
     @Published private(set) var connections: ConnectionsState
     @Published private(set) var calendarWrite: CalendarWriteState
+    @Published private(set) var skillBuilder: SkillBuilderState
     private let reducer = AccountActivityReducer()
     private let fixture = AccountActivityFixtureClient()
     private let connectionsReducer = ConnectionsReducer()
     private let calendarWriteReducer = CalendarWriteReducer()
+    private let skillBuilderReducer = SkillBuilderReducer()
 
     init() {
         state = fixture.initialState()
         connections = ConnectionsFixtureClient().initialState()
         calendarWrite = CalendarWriteFixtureClient().initialState()
+        skillBuilder = SkillBuilderFixtureClient().initialState()
     }
 
     func send(_ action: AccountActivityAction) {
         let wasAuthenticated = state.account.canUseAuthenticatedFeatures
         state = reducer.reduce(state, action)
+        if case .signInFixture(let label) = action {
+            skillBuilder = skillBuilderReducer.reduce(skillBuilder, .setAccountContext(ownerSubject: "fixture-user:\(label)", accountEpoch: 1))
+        }
         if wasAuthenticated, !state.account.canUseAuthenticatedFeatures {
             calendarWrite = calendarWriteReducer.reduce(calendarWrite, .clearBoundary)
+            skillBuilder = skillBuilderReducer.reduce(skillBuilder, .clearBoundary)
+        } else if case .completeDeletion = action {
+            calendarWrite = calendarWriteReducer.reduce(calendarWrite, .clearBoundary)
+            skillBuilder = skillBuilderReducer.reduce(skillBuilder, .clearBoundary)
         }
     }
 
@@ -56,5 +66,9 @@ final class AccountActivityStore: ObservableObject {
     var canEnableCalendarWriteFixture: Bool {
         state.account.canUseAuthenticatedFeatures
             && connections.connections.contains { $0.provider == .calendar && $0.status == .connected }
+    }
+
+    func send(_ action: SkillBuilderAction) {
+        skillBuilder = skillBuilderReducer.reduce(skillBuilder, action)
     }
 }

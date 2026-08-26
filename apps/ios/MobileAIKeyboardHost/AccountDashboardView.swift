@@ -12,6 +12,7 @@ struct AccountDashboardView: View {
                 navigationCard(title: "デバイス", subtitle: "現在の端末、最終利用、失効", systemImage: "iphone.gen3") { DevicesView() }
                 navigationCard(title: "Connections", subtitle: "Calendar・Notion・Mapsのread-only接続", systemImage: "link") { ConnectionsView() }
                 navigationCard(title: "Calendar write", subtitle: "R3・招待なしprivate event（fixture）", systemImage: "calendar.badge.plus") { CalendarWriteView() }
+                navigationCard(title: "Private Skill Builder", subtitle: "コードなし・private v1・fixture deploy", systemImage: "wand.and.stars") { SkillBuilderView() }
                 navigationCard(title: "Activity", subtitle: "実行履歴とcontent-free監査情報", systemImage: "clock.arrow.circlepath") { ActivityView() }
                 navigationCard(title: "プライバシー", subtitle: "保持期間と削除リクエスト", systemImage: "hand.raised.shield") { PrivacyView() }
             }

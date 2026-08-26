@@ -115,6 +115,7 @@ data class HostAppState(
     val connections: List<ProviderConnection> = emptyList(),
     val readOnlyQueries: List<ReadOnlyQueryState> = emptyList(),
     val calendarWrite: CalendarWriteState = CalendarWriteState(),
+    val skillBuilder: SkillBuilderState = SkillBuilderState(),
 )
 
 sealed interface HostEvent {
@@ -153,6 +154,7 @@ sealed interface HostEvent {
     data object CompleteCalendarUndo : HostEvent
     data object ExpireCalendarUndo : HostEvent
     data class ObserveCalendarTime(val now: String) : HostEvent
+    data class SkillBuilderAction(val action: SkillBuilderEvent) : HostEvent
 }
 
 object HostFixtureClient {
@@ -218,8 +220,8 @@ object HostFixtureClient {
                 sessionExpiresAt = "2026-08-26T10:00:00Z",
             ),
         )
-        HostEvent.SimulateSessionExpiry -> state.copy(account = state.account.copy(sessionStatus = SessionStatus.EXPIRED), calendarWrite = CalendarWriteState())
-        HostEvent.SimulateSessionRevocation -> state.copy(account = state.account.copy(sessionStatus = SessionStatus.REVOKED), calendarWrite = CalendarWriteState())
+        HostEvent.SimulateSessionExpiry -> state.copy(account = state.account.copy(sessionStatus = SessionStatus.EXPIRED), calendarWrite = CalendarWriteState(), skillBuilder = SkillBuilderState())
+        HostEvent.SimulateSessionRevocation -> state.copy(account = state.account.copy(sessionStatus = SessionStatus.REVOKED), calendarWrite = CalendarWriteState(), skillBuilder = SkillBuilderState())
         is HostEvent.RequestDeviceRevoke -> if (state.devices.any { it.id == event.deviceId && it.status == DeviceStatus.ACTIVE }) {
             state.copy(pendingRevokeDeviceId = event.deviceId)
         } else state
@@ -252,6 +254,7 @@ object HostFixtureClient {
                 connections = emptyList(),
                 readOnlyQueries = emptyList(),
                 calendarWrite = CalendarWriteState(),
+                skillBuilder = SkillBuilderState(),
                 deletion = state.deletion.copy(
                     status = DeletionStatus.COMPLETED,
                     completedAt = NOW,
@@ -320,6 +323,7 @@ object HostFixtureClient {
         HostEvent.CompleteCalendarUndo -> state.completeCalendarUndo()
         HostEvent.ExpireCalendarUndo -> state.expireCalendarUndo()
         is HostEvent.ObserveCalendarTime -> state.observeCalendarTime(event.now)
+        is HostEvent.SkillBuilderAction -> state.copy(skillBuilder = SkillBuilderReducer.reduce(state.skillBuilder, event.action, state.account, state.deletion))
     }
 
     private fun HostAppState.updateConnection(provider: Provider, update: (ProviderConnection) -> ProviderConnection): HostAppState =

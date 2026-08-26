@@ -51,6 +51,7 @@ fun HostAppDashboard(
     DevicesCard(state, dispatch)
     ConnectionsDashboard(state, dispatch)
     CalendarWriteDashboard(state, dispatch)
+    SkillBuilderDashboard(state, dispatch)
     ActivityCard(state, dispatch)
     PrivacyControlsCard(state, dispatch)
 }
