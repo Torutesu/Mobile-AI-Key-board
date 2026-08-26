@@ -6,7 +6,7 @@
 - Scope: iOS host app + keyboard extension, Android host app + IME, shared contracts, and the minimum backend interfaces needed for cross-device Skill metadata
 - Reference horizon: public Acti product surfaces plus 20 user-supplied 1170 x 2532 screenshots inspected on 2026-08-26
 - Product boundary: ordinary typing remains the primary product. Shortcuts add an explicit action layer; they never silently observe or execute from normal typing.
-- Current implementation boundary: the repository has private Skill/binding fixtures and one fixed AI command entry, but it does not yet have persisted user-configurable physical key bindings, host-to-keyboard runtime sync, or a long-press activation router.
+- Current implementation boundary (2026-08-27): iOS and Android persist owner-bound A–Z physical key assignments, publish sanitized snapshots from the host, converge changes while the keyboard is visible, and route deliberate long presses through Capture Review -> Preview -> Apply. Local simulator/emulator gates cover the core contracts; third-party-app physical-device matrices, signed archive qualification, protected CI evidence, and connected R2/R3 execution remain `not_proven`.
 
 ## 2. Product decision
 

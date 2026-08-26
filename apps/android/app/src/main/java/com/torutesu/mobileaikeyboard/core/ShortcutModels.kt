@@ -88,6 +88,9 @@ data class ShortcutActivation(
     val layoutId: String,
     val ownerSubject: String,
     val sessionEpoch: Int,
+    val editorSessionId: Long,
+    val requestedAtElapsedMillis: Long,
+    val expiresAtElapsedMillis: Long,
 )
 
 object ShortcutSnapshotCanonical {
@@ -338,11 +341,10 @@ class ShortcutSnapshotStore(context: android.content.Context) {
 
 /** Pure migration/recovery policy, shared by the store and unit tests. */
 internal object ShortcutSnapshotRecovery {
-    fun select(active: ShortcutSnapshot?, previous: ShortcutSnapshot?): ShortcutSnapshot = when {
-        active?.isValid() == true -> active
-        previous?.isValid() == true -> previous
-        else -> ShortcutSnapshot.empty()
-    }
+    fun select(active: ShortcutSnapshot?, previous: ShortcutSnapshot?): ShortcutSnapshot =
+        listOfNotNull(active?.takeIf { it.isValid() }, previous?.takeIf { it.isValid() })
+            .maxByOrNull { it.generation }
+            ?: ShortcutSnapshot.empty()
 }
 
 internal object ShortcutSnapshotCodec {

@@ -20,6 +20,10 @@ import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.longClick
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import android.os.SystemClock
+import android.view.MotionEvent
+import android.view.View
+import android.view.ViewGroup
 import com.torutesu.mobileaikeyboard.core.ExecutableLocalSkills
 import com.torutesu.mobileaikeyboard.core.AccountBoundaryStore
 import com.torutesu.mobileaikeyboard.core.HostAppState
@@ -188,13 +192,47 @@ class VerticalSliceUiTest {
     }
 
     @Test
+    fun boundKeyLongPressIsCancelledAcrossViewBoundary() {
+        var typed = ""
+        var triggered = 0
+        val descriptor = LocalSkillDescriptor(
+            "private.ui.cancel-gesture", 1, "sha256:${TextFingerprint.of("cancel-gesture")}", "Cancel Gesture", LocalSkillExecutorKind.PRIVATE_LOCAL_REWRITE,
+        )
+        LocalSkillRegistry.install(descriptor)
+        val binding = TriggerKeyBinding("binding-cancel-gesture", descriptor.skillId, descriptor.skillVersion, descriptor.skillDigest, keyCode = "KeyZ", skillName = descriptor.skillName)
+        val surface = KeyboardSurface(composeRule.activity, KeyboardSurface.Callbacks(
+            onCommand = {}, onShortcut = { triggered++ }, onText = { typed += it }, onDelete = {}, onEnter = {},
+            onSwitchKeyboard = {}, onCapture = { _, _, _ -> }, onAcknowledge = {}, onEditResult = {}, onRegenerate = {},
+            onApply = {}, onCopy = {}, onUndo = {}, onCancel = {},
+        ))
+        lateinit var boundKey: View
+        composeRule.activity.runOnUiThread {
+            composeRule.activity.setContentView(surface)
+            surface.render(KeyboardState(), ShortcutSnapshot(generation = 1, bindings = listOf(binding)))
+            boundKey = findViewWithDescription(surface, "Z、${descriptor.skillName}、長押しで実行")
+                ?: error("bound key missing")
+            val downAt = SystemClock.uptimeMillis()
+            val downEvent = MotionEvent.obtain(downAt, downAt, MotionEvent.ACTION_DOWN, 8f, 8f, 0)
+            boundKey.dispatchTouchEvent(downEvent)
+            downEvent.recycle()
+            surface.cancelPendingGestures()
+        }
+        SystemClock.sleep(600L)
+        composeRule.waitForIdle()
+        composeRule.runOnIdle {
+            assertEquals("", typed)
+            assertEquals(0, triggered)
+        }
+    }
+
+    @Test
     fun accountBoundaryClearRemovesPersistedCatalogAndShortcuts() {
         val version = deployedVersion("private.ui.boundary")
         val appContext = composeRule.activity.applicationContext
         val boundaryStore = AccountBoundaryStore(appContext)
         val installedStore = InstalledSkillStore(appContext)
         val shortcutStore = ShortcutSnapshotStore(appContext)
-        boundaryStore.deactivate()
+        boundaryStore.resetForTesting()
         installedStore.clear()
         shortcutStore.clear()
         assertTrue(boundaryStore.activateForTesting(version.ownerSubject, version.sessionEpoch))
@@ -205,26 +243,36 @@ class VerticalSliceUiTest {
         assertTrue(shortcutStore.publish(snapshot.snapshot))
         assertTrue(ExecutableLocalSkills.isExecutable(binding))
 
-        // Simulate a cold process: persisted A bytes remain, but process-local
-        // authentication authority starts CLOSED and must not hydrate them.
+        // Simulate Android reclaiming the process. The bounded, integrity-bound
+        // owner lease restores the exact same private Skill without requiring
+        // the host UI to be opened again.
         boundaryStore.closeProcessAuthorityForTesting()
         assertFalse(ExecutableLocalSkills.isExecutable(binding))
-        assertTrue(InstalledSkillStore(appContext).read().isEmpty())
-        assertTrue(ShortcutSnapshotStore(appContext).read().bindings.isEmpty())
-        assertFalse(ExecutableLocalSkills.isExecutable(binding))
-
-        // Explicit re-authentication of the same stable owner resumes the
-        // durable boundary and restores its private catalog and assignment.
-        val resumed = boundaryStore.activateNewSession(version.ownerSubject)
-        assertEquals(version.sessionEpoch, resumed?.sessionEpoch)
         assertTrue(InstalledSkillStore(appContext).read().any { it.skillId == version.skillId })
         assertTrue(ShortcutSnapshotStore(appContext).read().bindings.any { it.bindingId == binding.bindingId })
         assertTrue(ExecutableLocalSkills.isExecutable(binding))
 
+        // Integrity corruption closes both the catalog and assignment. The
+        // process cache cannot keep a previously executable private Skill alive.
+        boundaryStore.corruptDigestForTesting()
+        assertEquals(null, boundaryStore.read())
+        assertTrue(InstalledSkillStore(appContext).read().isEmpty())
+        assertTrue(ShortcutSnapshotStore(appContext).read().bindings.isEmpty())
+        assertFalse(ExecutableLocalSkills.isExecutable(binding))
+
+        // A corrupt boundary can only be replaced by a fresh monotonic session;
+        // the old epoch's private payload never crosses into it.
+        val resumed = boundaryStore.activateNewSession(version.ownerSubject)
+        assertTrue(resumed != null && resumed.sessionEpoch > version.sessionEpoch)
+        assertTrue(InstalledSkillStore(appContext).read().isEmpty())
+        assertTrue(ShortcutSnapshotStore(appContext).read().bindings.isEmpty())
+        assertFalse(ExecutableLocalSkills.isExecutable(binding))
+
         // A process recreation under another account must not hydrate A's
         // catalog or shortcut bytes, even before best-effort deletion runs.
         boundaryStore.closeProcessAuthorityForTesting()
-        assertTrue(boundaryStore.activateForTesting("Account B", version.sessionEpoch + 1))
+        val accountB = boundaryStore.activateNewSession("Account B")
+        assertTrue(accountB != null && accountB.sessionEpoch > resumed!!.sessionEpoch)
         assertTrue(InstalledSkillStore(appContext).read().isEmpty())
         assertTrue(ShortcutSnapshotStore(appContext).read().bindings.isEmpty())
         assertFalse(ExecutableLocalSkills.isExecutable(binding))
@@ -234,6 +282,34 @@ class VerticalSliceUiTest {
         assertTrue(shortcutStore.clear())
         assertTrue(shortcutStore.read().bindings.isEmpty())
         assertFalse(ExecutableLocalSkills.isExecutable(binding))
+    }
+
+    @Test
+    fun expiredDurableAccountBoundaryCannotRecoverPrivateSkillAfterProcessDeath() {
+        val version = deployedVersion("private.ui.expired-boundary")
+        val appContext = composeRule.activity.applicationContext
+        val boundaryStore = AccountBoundaryStore(appContext)
+        val installedStore = InstalledSkillStore(appContext)
+        val shortcutStore = ShortcutSnapshotStore(appContext)
+        boundaryStore.resetForTesting()
+        installedStore.clear()
+        shortcutStore.clear()
+        assertTrue(boundaryStore.activateForTesting(version.ownerSubject, version.sessionEpoch))
+        assertTrue(installedStore.install(version))
+        val descriptor = LocalSkillRegistry.fromPrivateVersion(version)!!
+        val binding = TriggerKeyBinding("binding-expired-boundary", descriptor.skillId, descriptor.skillVersion, descriptor.skillDigest, keyCode = "KeyE", skillName = descriptor.skillName)
+        val snapshot = ShortcutRegistry.add(ShortcutSnapshot.empty(), binding) as ShortcutEditResult.Success
+        assertTrue(shortcutStore.publish(snapshot.snapshot))
+
+        boundaryStore.expireForTesting()
+        assertEquals(null, boundaryStore.read())
+        assertTrue(InstalledSkillStore(appContext).read().isEmpty())
+        assertTrue(ShortcutSnapshotStore(appContext).read().bindings.isEmpty())
+        assertFalse(ExecutableLocalSkills.isExecutable(binding))
+
+        boundaryStore.resetForTesting()
+        installedStore.clear()
+        shortcutStore.clear()
     }
 
     private fun deployedVersion(skillId: String = "private.ui.builder"): PrivateSkillVersion {
@@ -253,5 +329,14 @@ class VerticalSliceUiTest {
         state = HostFixtureClient.dispatch(state, HostEvent.SkillBuilderAction(SkillBuilderEvent.ConfirmDeploy(version.digest)))
         assertEquals(SkillBuilderPhase.DEPLOYED, state.skillBuilder.phase)
         return version
+    }
+
+    private fun findViewWithDescription(root: View, description: String): View? {
+        if (root.contentDescription?.toString() == description) return root
+        if (root !is ViewGroup) return null
+        for (index in 0 until root.childCount) {
+            findViewWithDescription(root.getChildAt(index), description)?.let { return it }
+        }
+        return null
     }
 }

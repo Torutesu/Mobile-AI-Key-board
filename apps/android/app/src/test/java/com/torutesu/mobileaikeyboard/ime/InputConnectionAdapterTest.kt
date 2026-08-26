@@ -14,15 +14,17 @@ import org.junit.Test
 
 class InputConnectionAdapterTest {
     @Test
-    fun captureReadsOnlyExplicitlyEnabledSources() {
+    fun captureExposesOnlyEnabledSourcesButUsesBoundedContextForSelectionLock() {
         val editor = FakeEditor("before selected after", 7, 15)
         val adapter = InputConnectionAdapter(editor.connection)
 
         val selectionOnly = adapter.captureContext(useSelection = true, useSurrounding = false)
         assertEquals("selected", selectionOnly.selected)
         assertEquals(1, editor.selectedReads)
-        assertEquals(0, editor.beforeReads)
-        assertEquals(0, editor.afterReads)
+        assertEquals("", selectionOnly.before)
+        assertEquals("", selectionOnly.after)
+        assertEquals(1, editor.beforeReads)
+        assertEquals(1, editor.afterReads)
 
         editor.resetReadCounts()
         val commandOnly = adapter.captureContext(useSelection = false, useSurrounding = false)
@@ -70,6 +72,30 @@ class InputConnectionAdapterTest {
         editor.replace("hello new! world", 10, 10)
         assertFalse(adapter.undo(edit))
         assertEquals("hello new! world", editor.text)
+    }
+
+    @Test
+    fun duplicateSelectedTextCannotBeAppliedAtAnotherOccurrence() {
+        val editor = FakeEditor("old middle old", 0, 3)
+        val adapter = InputConnectionAdapter(editor.connection)
+        val first = adapter.captureContext(useSelection = true, useSurrounding = false)
+
+        editor.moveSelection(11, 14)
+        assertNull(adapter.applySelection(first.fieldFingerprint, "old", "new", selectionEnabled = true))
+        assertEquals("old middle old", editor.text)
+    }
+
+    @Test
+    fun undoCannotTargetAnotherIdenticalAppliedSuffix() {
+        val editor = FakeEditor("new middle old", 11, 14)
+        val adapter = InputConnectionAdapter(editor.connection)
+        val captured = adapter.captureContext(useSelection = true, useSurrounding = false)
+        val edit = requireNotNull(adapter.applySelection(captured.fieldFingerprint, "old", "new", selectionEnabled = true))
+        assertEquals("new middle new", editor.text)
+
+        editor.moveSelection(3, 3)
+        assertFalse(adapter.undo(edit))
+        assertEquals("new middle new", editor.text)
     }
 
     @Test
@@ -154,6 +180,11 @@ private class FakeEditor(initialText: String, selectionStart: Int, selectionEnd:
 
     fun replace(value: String, start: Int, end: Int) {
         text = value
+        selectionStart = start
+        selectionEnd = end
+    }
+
+    fun moveSelection(start: Int, end: Int) {
         selectionStart = start
         selectionEnd = end
     }

@@ -59,6 +59,8 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
     private var currentReturnKey = ReturnKeySpec("↵")
     private var currentKeyboardState = KeyboardState()
     private var currentShortcutSnapshot = ShortcutSnapshot.empty()
+    private val pendingGestureCancels = mutableSetOf<() -> Unit>()
+    private var gestureEpoch = 0L
     private val root = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(6), dp(5), dp(6), dp(5))
@@ -76,6 +78,7 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
         config: ImeConsumableConfig = currentConfig,
         returnKey: ReturnKeySpec = currentReturnKey,
     ) {
+        cancelPendingGestures()
         currentConfig = config
         currentReturnKey = returnKey
         currentKeyboardState = state
@@ -90,7 +93,21 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
     }
 
     fun resetTypingState() {
+        cancelPendingGestures()
         typingMode = TypingModeReducer.resetForInput()
+    }
+
+    /** Cancels delayed long-press callbacks before an editor/view boundary. */
+    fun cancelPendingGestures() {
+        gestureEpoch += 1L
+        val pending = pendingGestureCancels.toList()
+        pendingGestureCancels.clear()
+        pending.forEach { it() }
+    }
+
+    override fun onDetachedFromWindow() {
+        cancelPendingGestures()
+        super.onDetachedFromWindow()
     }
 
     private fun renderTyping(state: KeyboardState, showCommandControls: Boolean = state.mode != KeyboardMode.LOCKED, shortcutSnapshot: ShortcutSnapshot = ShortcutSnapshot.empty()) {
@@ -401,8 +418,9 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
             var isDown = false
             var downX = 0f
             var downY = 0f
+            var downEpoch = -1L
             val trigger = Runnable {
-                if (!cancelled && isDown) {
+                if (!cancelled && isDown && downEpoch == gestureEpoch && isAttachedToWindow) {
                     longPressFired = true
                     isPressed = false
                     if (currentConfig.haptics != com.torutesu.mobileaikeyboard.core.HapticMode.OFF) {
@@ -410,6 +428,13 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
                     }
                     performLongClick()
                 }
+            }
+            val cancelPending: () -> Unit = {
+                removeCallbacks(trigger)
+                cancelled = true
+                isDown = false
+                isPressed = false
+                textSize = 15f
             }
             setOnTouchListener { _, event ->
                 when (event.actionMasked) {
@@ -419,9 +444,11 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
                         isDown = true
                         downX = event.x
                         downY = event.y
+                        downEpoch = gestureEpoch
                         isPressed = true
                         if (currentConfig.characterPreview && stateAllowsCharacterPreview()) textSize = 20f
                         postDelayed(trigger, 450L)
+                        pendingGestureCancels.add(cancelPending)
                         true
                     }
                     MotionEvent.ACTION_MOVE -> {
@@ -429,24 +456,19 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
                         val dy = event.y - downY
                         val tooFar = kotlin.math.hypot(dx.toDouble(), dy.toDouble()) > 12f * density
                         if (tooFar) {
-                            cancelled = true
-                            isDown = false
-                            removeCallbacks(trigger)
-                            isPressed = false
-                            textSize = 15f
+                            cancelPending()
+                            pendingGestureCancels.remove(cancelPending)
                         }
                         true
                     }
                     MotionEvent.ACTION_POINTER_DOWN -> {
-                        cancelled = true
-                        isDown = false
-                        removeCallbacks(trigger)
-                        isPressed = false
-                        textSize = 15f
+                        cancelPending()
+                        pendingGestureCancels.remove(cancelPending)
                         true
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         removeCallbacks(trigger)
+                        pendingGestureCancels.remove(cancelPending)
                         val commitTap = event.actionMasked == MotionEvent.ACTION_UP && isDown && !cancelled && !longPressFired
                         textSize = 15f
                         if (commitTap) {
@@ -466,11 +488,8 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
                         true
                     }
                     else -> {
-                        cancelled = true
-                        isDown = false
-                        removeCallbacks(trigger)
-                        isPressed = false
-                        textSize = 15f
+                        cancelPending()
+                        pendingGestureCancels.remove(cancelPending)
                         true
                     }
                 }

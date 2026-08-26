@@ -10,7 +10,9 @@ public struct KeyboardStateMachine: Sendable {
     public mutating func send(_ action: KeyboardAction) -> KeyboardScreen {
         switch (screen, action) {
         case (.typing, .invokeCommand): screen = .command
-        case (.typing, .lock(let reason)): screen = .locked(reason)
+        // A secure/unsupported transition is authoritative from every screen.
+        // It discards command, capture, result, action, receipt, and Undo state.
+        case (_, .lock(let reason)): screen = .locked(reason)
         case (.command, .beginCapture(let draft)) where !draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty:
             screen = .captureReview(draft)
         case (.captureReview(let draft), .acknowledgeCapture): screen = .captureReview(draft.acknowledging())

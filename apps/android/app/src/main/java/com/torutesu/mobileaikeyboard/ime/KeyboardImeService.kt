@@ -1,6 +1,8 @@
 package com.torutesu.mobileaikeyboard.ime
 
 import android.inputmethodservice.InputMethodService
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import com.torutesu.mobileaikeyboard.core.BoundedCapture
@@ -26,6 +28,7 @@ import com.torutesu.mobileaikeyboard.core.TelemetryEvent
 import com.torutesu.mobileaikeyboard.core.UndoTicket
 import com.torutesu.mobileaikeyboard.core.asKeyboardState
 import com.torutesu.mobileaikeyboard.core.withAccountBoundaryLock
+import java.util.concurrent.Executors
 
 class KeyboardImeService : InputMethodService() {
     private var session = CommandSession()
@@ -41,6 +44,11 @@ class KeyboardImeService : InputMethodService() {
     private var currentEditorInfo: EditorInfo? = null
     private var shortcutSnapshot: ShortcutSnapshot = ShortcutSnapshot.empty()
     private var activeShortcut: ShortcutActivation? = null
+    private var editorSessionId = 0L
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val shortcutRefreshExecutor = Executors.newSingleThreadExecutor()
+    private var shortcutRefreshEpoch = 0L
+    private var keyboardWindowVisible = false
 
     override fun onCreate() {
         super.onCreate()
@@ -51,6 +59,7 @@ class KeyboardImeService : InputMethodService() {
     }
 
     override fun onCreateInputView(): View {
+        surface?.cancelPendingGestures()
         shortcutSnapshot = shortcutStore.read()
         surface = KeyboardSurface(this, KeyboardSurface.Callbacks(
             onCommand = { enterCommand() },
@@ -87,10 +96,22 @@ class KeyboardImeService : InputMethodService() {
         shortcutSnapshot = shortcutStore.read()
         settingsStore.read()
         syncSurface()
+        keyboardWindowVisible = true
+        shortcutRefreshEpoch += 1L
+        scheduleShortcutRefresh(shortcutRefreshEpoch)
+    }
+
+    override fun onWindowHidden() {
+        keyboardWindowVisible = false
+        shortcutRefreshEpoch += 1L
+        mainHandler.removeCallbacksAndMessages(null)
+        clearEphemeralEditorState()
+        super.onWindowHidden()
     }
 
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
         super.onStartInput(attribute, restarting)
+        editorSessionId += 1L
         adapter = currentInputConnection?.let(::InputConnectionAdapter)
         currentEditorInfo = attribute
         shortcutSnapshot = shortcutStore.read()
@@ -106,6 +127,7 @@ class KeyboardImeService : InputMethodService() {
     }
 
     override fun onFinishInput() {
+        editorSessionId += 1L
         adapter = null
         appliedEdit = null
         activeShortcut = null
@@ -115,6 +137,54 @@ class KeyboardImeService : InputMethodService() {
         lockReason = null
         syncSurface()
         super.onFinishInput()
+    }
+
+    override fun onDestroy() {
+        keyboardWindowVisible = false
+        shortcutRefreshEpoch += 1L
+        mainHandler.removeCallbacksAndMessages(null)
+        shortcutRefreshExecutor.shutdownNow()
+        editorSessionId += 1L
+        clearEphemeralEditorState()
+        surface = null
+        super.onDestroy()
+    }
+
+    private fun clearEphemeralEditorState() {
+        surface?.cancelPendingGestures()
+        appliedEdit = null
+        activeShortcut = null
+        session = CommandSession()
+        surface?.resetTypingState()
+        syncSurface()
+    }
+
+    /**
+     * SharedPreferences notifications are not a cross-process contract. Poll a
+     * bounded, content-free snapshot off the IME main thread while visible so
+     * host publishes, missed notifications, and warm nil -> active transitions
+     * converge within the documented two-second window.
+     */
+    private fun scheduleShortcutRefresh(epoch: Long) {
+        if (!keyboardWindowVisible || epoch != shortcutRefreshEpoch) return
+        mainHandler.postDelayed({
+            if (!keyboardWindowVisible || epoch != shortcutRefreshEpoch || shortcutRefreshExecutor.isShutdown) return@postDelayed
+            shortcutRefreshExecutor.execute {
+                val refreshed = shortcutStore.read()
+                mainHandler.post {
+                    if (!keyboardWindowVisible || epoch != shortcutRefreshEpoch) return@post
+                    if (refreshed != shortcutSnapshot) {
+                        surface?.cancelPendingGestures()
+                        activeShortcut = null
+                        appliedEdit = null
+                        session = CommandSession()
+                        shortcutSnapshot = refreshed
+                        syncSurface()
+                    }
+                    scheduleShortcutRefresh(epoch)
+                }
+            }
+        }, SHORTCUT_REFRESH_INTERVAL_MILLIS)
     }
 
     private fun enterCommand() {
@@ -140,6 +210,9 @@ class KeyboardImeService : InputMethodService() {
             layoutId = current.layoutId,
             ownerSubject = boundary.ownerSubject,
             sessionEpoch = boundary.sessionEpoch,
+            editorSessionId = editorSessionId,
+            requestedAtElapsedMillis = android.os.SystemClock.elapsedRealtime(),
+            expiresAtElapsedMillis = android.os.SystemClock.elapsedRealtime() + SHORTCUT_ACTIVATION_TTL_MILLIS,
         )
         session = CommandSessionReducer.reduce(session, SessionEvent.BeginCommand)
         // The skill label is metadata only. Actual editor text is captured below
@@ -311,7 +384,6 @@ class KeyboardImeService : InputMethodService() {
                 session = CommandSession()
             }
         }
-        shortcutSnapshot = if (::shortcutStore.isInitialized) shortcutStore.read() else shortcutSnapshot
         if (::settingsStore.isInitialized) {
             surface?.render(
                 session.asKeyboardState(lockReason),
@@ -326,6 +398,11 @@ class KeyboardImeService : InputMethodService() {
 
     private fun shortcutStillCurrent(): Boolean {
         val activation = activeShortcut ?: return true
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (activation.editorSessionId != editorSessionId ||
+            activation.requestedAtElapsedMillis > now ||
+            activation.expiresAtElapsedMillis < now
+        ) return false
         val boundary = ActiveAccountBoundary(activation.ownerSubject, activation.sessionEpoch)
         val current = shortcutStore.readForBoundary(boundary) ?: return false
         return current.generation == activation.snapshotGeneration &&
@@ -367,5 +444,10 @@ class KeyboardImeService : InputMethodService() {
         count <= 100 -> "21_100"
         count <= 500 -> "101_500"
         else -> "501_plus"
+    }
+
+    companion object {
+        private const val SHORTCUT_ACTIVATION_TTL_MILLIS = 60_000L
+        private const val SHORTCUT_REFRESH_INTERVAL_MILLIS = 2_000L
     }
 }

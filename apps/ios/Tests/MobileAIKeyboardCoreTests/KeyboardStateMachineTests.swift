@@ -50,18 +50,32 @@ final class KeyboardStateMachineTests: XCTestCase {
         XCTAssertEqual(token.appliedFingerprint, EntityLocking().fingerprint("編集後の結果"))
     }
 
-    func testApplyAndUndoBindTheExpectedWholeFieldFingerprint() {
+    func testApplyCallbackAndUndoBindTheSameCursorContextFingerprint() {
         var machine = KeyboardStateMachine()
         _ = machine.send(.invokeCommand)
         _ = machine.send(.beginCapture(CaptureDraft(text: "old", fieldFingerprint: "selection", documentIdentifier: "doc-1")))
         _ = machine.send(.acknowledgeCapture)
         _ = machine.send(.beginPlanning)
         _ = machine.send(.showRewrite(RewriteResult(original: "old", rewritten: "new", preservedEntities: [], fieldFingerprint: "selection", documentIdentifier: "doc-1")))
-        let wholeField = EntityLocking().fingerprint("before new after")
-        let applied = machine.send(.applyResultWithSnapshot(EditorSnapshot(documentIdentifier: "doc-1", fieldFingerprint: "selection", expectedAppliedFingerprint: wholeField)))
+        let expectedAfterInsertion = EntityLocking().selectionFingerprint(selectedText: "", before: "before new", after: " after")
+        let applied = machine.send(.applyResultWithSnapshot(EditorSnapshot(documentIdentifier: "doc-1", fieldFingerprint: "selection", expectedAppliedFingerprint: expectedAfterInsertion)))
         guard case .applied(let token) = applied else { return XCTFail("expected applied state") }
-        XCTAssertEqual(token.appliedFingerprint, wholeField)
-        XCTAssertEqual(machine.send(.undoWithSnapshot(EditorSnapshot(documentIdentifier: "doc-1", fieldFingerprint: EntityLocking().fingerprint("mutated")))), .error(.staleField))
+        XCTAssertEqual(token.appliedFingerprint, expectedAfterInsertion)
+        XCTAssertEqual(
+            machine.send(.undoWithSnapshot(EditorSnapshot(documentIdentifier: "doc-1", fieldFingerprint: expectedAfterInsertion))),
+            .typing
+        )
+
+        // The old whole-field hash format must not alias the cursor-context
+        // lock used by Apply callback and Undo.
+        var staleMachine = KeyboardStateMachine()
+        _ = staleMachine.send(.invokeCommand)
+        _ = staleMachine.send(.beginCapture(CaptureDraft(text: "old", fieldFingerprint: "selection", documentIdentifier: "doc-1")))
+        _ = staleMachine.send(.acknowledgeCapture)
+        _ = staleMachine.send(.beginPlanning)
+        _ = staleMachine.send(.showRewrite(RewriteResult(original: "old", rewritten: "new", preservedEntities: [], fieldFingerprint: "selection", documentIdentifier: "doc-1")))
+        _ = staleMachine.send(.applyResultWithSnapshot(EditorSnapshot(documentIdentifier: "doc-1", fieldFingerprint: "selection", expectedAppliedFingerprint: expectedAfterInsertion)))
+        XCTAssertEqual(staleMachine.send(.undoWithSnapshot(EditorSnapshot(documentIdentifier: "doc-1", fieldFingerprint: EntityLocking().fingerprint("mutated")))), .error(.staleField))
     }
 
     func testLocalTextLimitsMatchW2Contract() {
@@ -98,6 +112,34 @@ final class KeyboardStateMachineTests: XCTestCase {
         XCTAssertEqual(machine.screen, .locked(.secureField))
         XCTAssertEqual(machine.send(.invokeCommand), .locked(.secureField))
         XCTAssertEqual(machine.send(.unlock), .typing)
+    }
+
+    func testSecureTransitionOverridesEveryContentBearingScreen() {
+        var command = KeyboardStateMachine()
+        _ = command.send(.invokeCommand)
+        XCTAssertEqual(command.send(.lock(.secureField)), .locked(.secureField))
+
+        var capture = KeyboardStateMachine()
+        _ = capture.send(.invokeCommand)
+        _ = capture.send(.beginCapture(CaptureDraft(text: "secret", fieldFingerprint: "f")))
+        XCTAssertEqual(capture.send(.lock(.unsupportedField)), .locked(.unsupportedField))
+
+        var result = KeyboardStateMachine()
+        _ = result.send(.invokeCommand)
+        _ = result.send(.beginCapture(CaptureDraft(text: "secret", fieldFingerprint: "f")))
+        _ = result.send(.acknowledgeCapture)
+        _ = result.send(.beginPlanning)
+        _ = result.send(.showRewrite(RewriteResult(original: "secret", rewritten: "result", preservedEntities: [], fieldFingerprint: "f")))
+        XCTAssertEqual(result.send(.lock(.secureField)), .locked(.secureField))
+
+        var applied = KeyboardStateMachine()
+        _ = applied.send(.invokeCommand)
+        _ = applied.send(.beginCapture(CaptureDraft(text: "secret", fieldFingerprint: "f")))
+        _ = applied.send(.acknowledgeCapture)
+        _ = applied.send(.beginPlanning)
+        _ = applied.send(.showRewrite(RewriteResult(original: "secret", rewritten: "result", preservedEntities: [], fieldFingerprint: "f")))
+        _ = applied.send(.applyResult(currentFieldFingerprint: "f"))
+        XCTAssertEqual(applied.send(.lock(.secureField)), .locked(.secureField))
     }
 
     func testActionRequiresExplicitConfirmation() {

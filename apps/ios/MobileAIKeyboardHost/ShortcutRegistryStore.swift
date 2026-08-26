@@ -73,6 +73,7 @@ final class ShortcutRegistryStore: ObservableObject {
     }
 
     var activeBindings: [ShortcutBindingV1] { snapshot.bindings.filter(\.enabled) }
+    var allBindings: [ShortcutBindingV1] { snapshot.bindings }
     var assignableSkills: [ShortcutSkillOption] { skills.filter(\.isAssignable) }
     var unavailableSkills: [ShortcutSkillOption] { skills.filter { !$0.isAssignable } }
     var assignedKeyCount: Int { activeBindings.count }

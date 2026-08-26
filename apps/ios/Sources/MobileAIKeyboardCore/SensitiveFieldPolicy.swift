@@ -23,6 +23,8 @@ public struct SensitiveFieldPolicy: Sendable {
         ]
         if let type = field.textContentType, sensitiveTypes.contains(type) { return .secureField }
         if field.keyboardType == "asciiCapableNumberPad" && field.textContentType == "oneTimeCode" { return .secureField }
+        let unsupportedKeyboardTypes: Set<String> = ["phonePad", "numberPad", "decimalPad", "asciiCapableNumberPad"]
+        if let keyboardType = field.keyboardType, unsupportedKeyboardTypes.contains(keyboardType) { return .unsupportedField }
         return nil
     }
 

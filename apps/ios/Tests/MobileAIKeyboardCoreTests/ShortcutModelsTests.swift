@@ -54,6 +54,27 @@ final class ShortcutModelsTests: XCTestCase {
         XCTAssertThrowsError(try store.publish(newer))
     }
 
+    func testLoaderChoosesHighestValidGenerationWhenSlotsAreReordered() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("shortcut-slot-order-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = AppGroupShortcutSnapshotStore(appGroupIdentifier: "group.invalid.slot-order", fallbackDirectoryURL: root)
+        let boundary = try store.activateBoundary(ownerSubjectHash: "sha256:test-owner")
+        let first = makeSnapshot(ownerSubjectHash: boundary.ownerSubjectHash, policyEpoch: boundary.sessionEpoch).withComputedDigest()
+        try store.publish(first)
+        let second = ShortcutSnapshotV1(id: "ss_second", generation: 2, userSubjectHash: first.userSubjectHash, deviceID: first.deviceID, layout: ShortcutLayoutV1(id: first.layout.id, userID: first.layout.userID, deviceID: first.deviceID, revision: 2, keyBindingIDs: first.layout.keyBindingIDs), bindings: first.bindings, skills: first.skills, policyEpoch: first.policyEpoch).withComputedDigest()
+        try store.publish(second)
+
+        let directory = root.appendingPathComponent("ShortcutSnapshots")
+        let currentURL = directory.appendingPathComponent("shortcut-snapshot.current.json")
+        let previousURL = directory.appendingPathComponent("shortcut-snapshot.previous.json")
+        let currentData = try Data(contentsOf: currentURL)
+        let previousData = try Data(contentsOf: previousURL)
+        try previousData.write(to: currentURL, options: .atomic)
+        try currentData.write(to: previousURL, options: .atomic)
+
+        XCTAssertEqual(store.loadLastKnownGood()?.generation, 2)
+    }
+
     func testAssignedPrivateProjectionRestoresFromSnapshotAfterRestart() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("shortcut-private-restart-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }

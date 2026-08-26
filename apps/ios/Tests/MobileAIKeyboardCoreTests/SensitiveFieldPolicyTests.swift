@@ -20,4 +20,11 @@ final class SensitiveFieldPolicyTests: XCTestCase {
         XCTAssertNil(policy.lockReason(for: FieldSecurityContext(textContentType: "plainText")))
         XCTAssertTrue(policy.allowsAI(for: FieldSecurityContext(textContentType: "plainText")))
     }
+
+    func testPhoneAndNumericKeyboardTypesDisableAIWithoutCallingThemPasswords() {
+        for keyboardType in ["phonePad", "numberPad", "decimalPad", "asciiCapableNumberPad"] {
+            XCTAssertEqual(policy.lockReason(for: FieldSecurityContext(keyboardType: keyboardType)), .unsupportedField)
+        }
+        XCTAssertEqual(policy.lockReason(for: FieldSecurityContext(textContentType: "oneTimeCode", keyboardType: "asciiCapableNumberPad")), .secureField)
+    }
 }

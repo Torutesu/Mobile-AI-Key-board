@@ -138,6 +138,14 @@ class ShortcutModelsTest {
     }
 
     @Test
+    fun recoveryChoosesHighestValidGenerationRegardlessOfSlotOrder() {
+        val older = ShortcutSnapshot(generation = 4, bindings = listOf(binding()))
+        val newer = ShortcutSnapshot(generation = 5, bindings = listOf(binding()))
+        assertEquals(newer, ShortcutSnapshotRecovery.select(older, newer))
+        assertEquals(newer, ShortcutSnapshotRecovery.select(newer, older))
+    }
+
+    @Test
     fun conflictRequiresExplicitReplaceAndLeavesOriginalSnapshotUntouched() {
         val first = ShortcutRegistry.add(ShortcutSnapshot.empty(), binding()) as ShortcutEditResult.Success
         val conflicting = punctuationBinding("KeyA")

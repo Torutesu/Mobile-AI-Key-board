@@ -69,16 +69,13 @@ final class KeyboardViewController: UIInputViewController {
         super.viewWillDisappear(animated)
         boundaryRefreshTimer?.invalidate()
         boundaryRefreshTimer = nil
+        clearEphemeralState(showTypingView: false)
     }
 
     private func refreshVisibleShortcutAuthority() {
-        guard let snapshot = shortcutSnapshot else { return }
-        guard let boundary = shortcutStore.loadActiveBoundary(),
-              boundary.ownerSubjectHash == snapshot.userSubjectHash,
-              boundary.sessionEpoch == snapshot.policyEpoch else {
-            applyShortcutSnapshot(nil)
-            return
-        }
+        // Re-read even when owner/epoch is unchanged: the host may publish a
+        // newer generation, and an initial nil read must converge while warm.
+        refreshShortcutSnapshot()
     }
 
     private func updateFullAccessState() {
@@ -114,15 +111,7 @@ final class KeyboardViewController: UIInputViewController {
             shortcutSnapshot = nil
             shortcutBindings = [:]
             shortcutSkills = [:]
-            pendingShortcutSkill = nil
-            pendingShortcutActivation = nil
-            captureDraft = nil
-            captureAcknowledged = false
-            hasSelectionCapture = false
-            if typingStack != nil {
-                machine = KeyboardStateMachine()
-                showTyping()
-            }
+            clearEphemeralState(showTypingView: typingStack != nil)
             updateBoundKeyPresentation()
             return
         }
@@ -136,8 +125,10 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func updateBoundKeyPresentation() {
+        let shortcutsAllowed: Bool
+        if case .locked = machine.screen { shortcutsAllowed = false } else { shortcutsAllowed = true }
         for (key, button) in letterButtonsByKey {
-            guard let binding = shortcutBindings[key], let skill = shortcutSkills["\(binding.skillID)|\(binding.versionID)"] else {
+            guard shortcutsAllowed, let binding = shortcutBindings[key], let skill = shortcutSkills["\(binding.skillID)|\(binding.versionID)"] else {
                 button.layer.borderWidth = 0.5
                 button.layer.borderColor = UIColor.separator.cgColor
                 button.accessibilityLabel = key.displayLabel
@@ -377,6 +368,7 @@ final class KeyboardViewController: UIInputViewController {
               let key = ShortcutKeyCode(displayLabel: title) else { return }
         switch gesture.state {
         case .began:
+            if case .locked = machine.screen { return }
             guard let binding = shortcutBindings[key], let skill = shortcutSkills["\(binding.skillID)|\(binding.versionID)"] else { return }
             guard isFullAccessEnabled else {
                 presentRecoverableError(.unavailable)
@@ -668,6 +660,7 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     @objc private func copyResult() {
+        guard shortcutActivationStillCurrent() else { presentRecoverableError(.staleField); return }
         let proposed = resultTextView.text ?? ""
         guard proposed.count <= LocalTextLimits.resultCharacters else { presentRecoverableError(.resultTooLarge); return }
         UIPasteboard.general.string = proposed
@@ -694,8 +687,10 @@ final class KeyboardViewController: UIInputViewController {
         }
         let effectiveResult = RewriteResult(original: result.original, rewritten: proposed, preservedEntities: result.preservedEntities, fieldFingerprint: result.fieldFingerprint, documentIdentifier: result.documentIdentifier)
         transition(.updateRewrite(effectiveResult))
-        let expectedAppliedField = (textDocumentProxy.documentContextBeforeInput ?? "") + proposed + (textDocumentProxy.documentContextAfterInput ?? "")
-        let snapshot = EditorSnapshot(documentIdentifier: documentIdentifier, fieldFingerprint: currentTargetFingerprint(for: draft.source), expectedAppliedFingerprint: locking.fingerprint(expectedAppliedField))
+        let expectedBefore = (textDocumentProxy.documentContextBeforeInput ?? "") + proposed
+        let expectedAfter = textDocumentProxy.documentContextAfterInput ?? ""
+        let expectedAppliedFingerprint = locking.selectionFingerprint(selectedText: "", before: expectedBefore, after: expectedAfter)
+        let snapshot = EditorSnapshot(documentIdentifier: documentIdentifier, fieldFingerprint: currentTargetFingerprint(for: draft.source), expectedAppliedFingerprint: expectedAppliedFingerprint)
         transition(.applyResultWithSnapshot(snapshot))
         guard case .applied(let token) = machine.screen else { return }
         guard shortcutActivationStillCurrent() else { presentRecoverableError(.staleField); return }
@@ -713,10 +708,10 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     @objc private func undoResult() {
+        guard shortcutActivationStillCurrent() else { presentRecoverableError(.staleField); return }
         guard case .applied(let token) = machine.screen else { return }
         guard (textDocumentProxy.documentContextBeforeInput ?? "").hasSuffix(token.rewritten) else { transition(.fail(.staleField)); return }
-        let currentField = (textDocumentProxy.documentContextBeforeInput ?? "") + (textDocumentProxy.documentContextAfterInput ?? "")
-        let snapshot = EditorSnapshot(documentIdentifier: documentIdentifier, fieldFingerprint: locking.fingerprint(currentField))
+        let snapshot = EditorSnapshot(documentIdentifier: documentIdentifier, fieldFingerprint: currentAppliedFingerprint())
         transition(.undoWithSnapshot(snapshot))
         guard case .typing = machine.screen else { return }
         for _ in token.rewritten { textDocumentProxy.deleteBackward() }
@@ -734,6 +729,17 @@ final class KeyboardViewController: UIInputViewController {
             return locking.selectionFingerprint(selectedText: selected, before: textDocumentProxy.documentContextBeforeInput ?? "", after: textDocumentProxy.documentContextAfterInput ?? "")
         }
         return locking.fingerprint((textDocumentProxy.documentContextBeforeInput ?? "") + (textDocumentProxy.documentContextAfterInput ?? ""))
+    }
+
+    /// Fingerprint for an already-applied edit at the current insertion point.
+    /// Apply prediction, textDidChange acknowledgement, and Undo must use this
+    /// exact format or a successful insertion would revoke its own Undo token.
+    private func currentAppliedFingerprint() -> String {
+        locking.selectionFingerprint(
+            selectedText: "",
+            before: textDocumentProxy.documentContextBeforeInput ?? "",
+            after: textDocumentProxy.documentContextAfterInput ?? ""
+        )
     }
 
     private func makeExactContentView(_ title: String, value: String) -> UIStackView {
@@ -874,6 +880,26 @@ final class KeyboardViewController: UIInputViewController {
 
     @objc private func cancelAction() { transition(.cancel); captureDraft = nil; captureAcknowledged = false; hasSelectionCapture = false; pendingShortcutSkill = nil; pendingShortcutActivation = nil; showTyping() }
 
+    private func clearEphemeralState(showTypingView: Bool) {
+        let existingLock: LockReason?
+        if case .locked(let reason) = machine.screen { existingLock = reason } else { existingLock = nil }
+        machine = KeyboardStateMachine()
+        captureDraft = nil
+        captureAcknowledged = false
+        hasSelectionCapture = false
+        pendingShortcutSkill = nil
+        pendingShortcutActivation = nil
+        consumedLongPressKey = nil
+        longPressBeganKey = nil
+        commandTextView.text = nil
+        resultTextView.text = nil
+        if showTypingView { showTyping() }
+        if let existingLock {
+            transition(.lock(existingLock))
+            actionButton.isHidden = true
+        }
+    }
+
     private func shortcutActivationStillCurrent(now: Date = Date()) -> Bool {
         guard let activation = pendingShortcutActivation else { return true }
         guard activation.editorSessionID == documentIdentifier, activation.expiresAt >= now,
@@ -911,9 +937,8 @@ final class KeyboardViewController: UIInputViewController {
         updateReturnKeyPresentation()
         refreshFieldSecurityFromProxy()
         if case .applied(let token) = machine.screen {
-            let currentField = (textDocumentProxy.documentContextBeforeInput ?? "") + (textDocumentProxy.documentContextAfterInput ?? "")
             let identityMatches = token.documentIdentifier == nil || token.documentIdentifier == documentIdentifier
-            if identityMatches && locking.fingerprint(currentField) == token.appliedFingerprint { return }
+            if identityMatches && currentAppliedFingerprint() == token.appliedFingerprint { return }
         }
         if case .typing = machine.screen { return }
         if case .locked = machine.screen { return }
@@ -922,8 +947,17 @@ final class KeyboardViewController: UIInputViewController {
 
     /// Host/adapter integrations call this with OS input traits before showing AI controls.
     func updateFieldSecurity(_ context: FieldSecurityContext) {
-        if let reason = policy.lockReason(for: context) { transition(.lock(reason)) }
-        else if case .locked = machine.screen { transition(.unlock) }
+        if let reason = policy.lockReason(for: context) {
+            clearEphemeralState(showTypingView: true)
+            transition(.lock(reason))
+            actionButton.isHidden = true
+            updateBoundKeyPresentation()
+        } else if case .locked = machine.screen {
+            transition(.unlock)
+            actionButton.isHidden = false
+            showTyping()
+            updateBoundKeyPresentation()
+        }
     }
 
     private func refreshFieldSecurityFromProxy() {

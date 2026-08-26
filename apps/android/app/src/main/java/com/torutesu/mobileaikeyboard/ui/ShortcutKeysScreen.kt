@@ -67,6 +67,12 @@ fun ShortcutKeysDashboard(
                         }
                         TextButton(onClick = { editing = binding; dialogOpen = true }, modifier = Modifier.heightIn(min = 48.dp)) { Text("再割当") }
                         TextButton(onClick = {
+                            val result = ShortcutRegistry.setEnabled(snapshot, binding.bindingId, !binding.enabled)
+                            if (result is ShortcutEditResult.Success) onPublish(result.snapshot)
+                        }, modifier = Modifier.heightIn(min = 48.dp).semantics {
+                            contentDescription = if (binding.enabled) "${binding.skillName}を一時停止" else "${binding.skillName}を再開"
+                        }) { Text(if (binding.enabled) "停止" else "再開") }
+                        TextButton(onClick = {
                             val result = ShortcutRegistry.remove(snapshot, binding.bindingId)
                             if (result is ShortcutEditResult.Success) onPublish(result.snapshot)
                         }, modifier = Modifier.heightIn(min = 48.dp)) { Text("削除") }

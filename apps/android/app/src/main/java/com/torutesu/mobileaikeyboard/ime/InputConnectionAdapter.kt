@@ -22,14 +22,28 @@ class InputConnectionAdapter(
     private val beforeLimit: Int = CaptureLimits.surroundingBeforeCodePoints,
     private val afterLimit: Int = CaptureLimits.surroundingAfterCodePoints,
 ) {
+    private val revisionContextLimit = 64
+
     fun captureSelection(): String = safely { inputConnection.getSelectedText(0)?.toString() }.orEmpty()
 
     fun captureContext(useSelection: Boolean, useSurrounding: Boolean): CapturedContext {
         // Reading editor content is itself a capability. Never touch a source
         // that the user did not explicitly enable for this capture.
         val selectedRaw = if (useSelection) safely { inputConnection.getSelectedText(0)?.toString() } else null
-        val beforeRaw = if (useSurrounding) safely { inputConnection.getTextBeforeCursor(beforeLimit, 0)?.toString() } else null
-        val afterRaw = if (useSurrounding) safely { inputConnection.getTextAfterCursor(afterLimit, 0)?.toString() } else null
+        // Selection-only Skills do not expose surrounding text to the Skill or
+        // review model. We still read a small bounded window locally to mint a
+        // revision lock; hashing only the selected bytes aliases duplicate
+        // occurrences and can replace the wrong range after the user moves it.
+        val beforeRaw = when {
+            useSurrounding -> safely { inputConnection.getTextBeforeCursor(beforeLimit, 0)?.toString() }
+            useSelection -> safely { inputConnection.getTextBeforeCursor(revisionContextLimit, 0)?.toString() }
+            else -> null
+        }
+        val afterRaw = when {
+            useSurrounding -> safely { inputConnection.getTextAfterCursor(afterLimit, 0)?.toString() }
+            useSelection -> safely { inputConnection.getTextAfterCursor(revisionContextLimit, 0)?.toString() }
+            else -> null
+        }
         val selectedValue = selectedRaw.orEmpty()
         val selectionOverLimit = selectedValue.codePointCount(0, selectedValue.length) > CaptureLimits.selectionCodePoints
         val selected = if (selectionOverLimit) {
@@ -42,7 +56,8 @@ class InputConnectionAdapter(
         val fingerprint = when {
             useSurrounding && beforeRaw != null && afterRaw != null ->
                 TextFingerprint.of("surrounding\u0000$beforeRaw\u0000$selected\u0000$afterRaw")
-            useSelection && selectedRaw != null -> TextFingerprint.of("selection\u0000$selected")
+            useSelection && selectedRaw != null && beforeRaw != null && afterRaw != null ->
+                TextFingerprint.of("selection-lock\u0000$beforeRaw\u0000$selectedRaw\u0000$afterRaw")
             else -> null
         }
         return CapturedContext(
@@ -75,18 +90,27 @@ class InputConnectionAdapter(
         val current = captureContext(useSelection = selectionEnabled, useSurrounding = false)
         if (expectedFingerprint == null || current.fieldFingerprint != expectedFingerprint) return null
         if (safelyBoolean { inputConnection.commitText(replacement, 1) } != true) return null
+        val afterFingerprint = cursorRevisionFingerprint() ?: run {
+            // A successful editor mutation without a post-edit revision token
+            // cannot become undoable state. Restore the selection best-effort
+            // and report failure instead of minting a weak suffix-only token.
+            if (safelyBoolean { inputConnection.deleteSurroundingText(replacement.length, 0) } == true && originalText.isNotEmpty()) {
+                safelyBoolean { inputConnection.commitText(originalText, 1) }
+            }
+            return null
+        }
         return AppliedEdit(
             originalText,
             replacement,
-            appliedSuffixFingerprint(replacement),
+            afterFingerprint,
             wasReplacement = originalText.isNotEmpty(),
         )
     }
 
     fun undo(edit: AppliedEdit): Boolean {
+        if (cursorRevisionFingerprint() != edit.expectedAfterFingerprint) return false
         val appliedBeforeCursor = safely { inputConnection.getTextBeforeCursor(edit.appliedText.length, 0)?.toString() }
         if (appliedBeforeCursor != edit.appliedText) return false
-        if (appliedSuffixFingerprint(appliedBeforeCursor) != edit.expectedAfterFingerprint) return false
         if (safelyBoolean { inputConnection.deleteSurroundingText(edit.appliedText.length, 0) } != true) return false
         if (edit.originalText.isNotEmpty() && safelyBoolean { inputConnection.commitText(edit.originalText, 1) } != true) {
             // Best-effort rollback prevents a failed restore from silently
@@ -114,7 +138,12 @@ class InputConnectionAdapter(
         return count > 0 && safelyBoolean { inputConnection.deleteSurroundingText(count, 0) } == true
     }
 
-    private fun appliedSuffixFingerprint(value: String): String = TextFingerprint.of("applied-suffix\u0000$value")
+    private fun cursorRevisionFingerprint(): String? {
+        val before = safely { inputConnection.getTextBeforeCursor(revisionContextLimit, 0)?.toString() } ?: return null
+        val after = safely { inputConnection.getTextAfterCursor(revisionContextLimit, 0)?.toString() } ?: return null
+        val selected = safely { inputConnection.getSelectedText(0)?.toString() }.orEmpty()
+        return TextFingerprint.of("cursor-lock\u0000$before\u0000$selected\u0000$after")
+    }
 
     private fun <T> safely(block: () -> T): T? = try {
         block()

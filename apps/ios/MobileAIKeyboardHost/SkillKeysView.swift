@@ -83,13 +83,13 @@ struct SkillKeysView: View {
     private var assignedSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Skill Keys").font(.title3.weight(.bold))
-            if registry.activeBindings.isEmpty {
+            if registry.allBindings.isEmpty {
                 Text("まだキーがありません。下のSkillから追加できます。")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
-            ForEach(registry.activeBindings) { binding in
+            ForEach(registry.allBindings) { binding in
                 let skill = registry.skill(for: binding)
-                let isRunnable = skill?.isAssignable == true
+                let isRunnable = skill?.isAssignable == true && binding.enabled
                 Button { editingBinding = binding } label: {
                     HStack(spacing: 12) {
                         Text(binding.keyCode.displayLabel)
@@ -98,7 +98,7 @@ struct SkillKeysView: View {
                             .background(Color.cyan.opacity(0.16), in: RoundedRectangle(cornerRadius: 10))
                         VStack(alignment: .leading, spacing: 3) {
                             Text(skill?.name ?? binding.skillID).font(.headline)
-                            Text(isRunnable ? "長押しで実行 · v\(binding.skillVersion)" : "準備中・割り当て不可 · v\(binding.skillVersion)")
+                            Text(isRunnable ? "長押しで実行 · v\(binding.skillVersion)" : (binding.enabled ? "準備中・割り当て不可 · v\(binding.skillVersion)" : "一時停止中 · v\(binding.skillVersion)"))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -110,8 +110,8 @@ struct SkillKeysView: View {
                 .buttonStyle(.plain)
                 .padding(14)
                 .background(.white, in: RoundedRectangle(cornerRadius: 16))
-                .accessibilityLabel("\(binding.keyCode.displayLabel)、\(skill?.name ?? binding.skillID)、\(isRunnable ? "長押しで実行" : "準備中・割り当て不可")")
-                .accessibilityHint(isRunnable ? "再割り当てまたは削除" : "削除して割り当てを解除")
+                .accessibilityLabel("\(binding.keyCode.displayLabel)、\(skill?.name ?? binding.skillID)、\(isRunnable ? "長押しで実行" : (binding.enabled ? "準備中・割り当て不可" : "一時停止中"))")
+                .accessibilityHint("再割り当て、一時停止、または削除")
             }
         }
     }
@@ -256,6 +256,11 @@ private struct TriggerKeySheet: View {
                         .font(.footnote).foregroundStyle(.secondary)
                     if let errorMessage { Text(errorMessage).font(.footnote).foregroundStyle(.red) }
                     if existingBinding != nil {
+                        Button(existingBinding!.enabled ? "このSkill Keyを一時停止" : "このSkill Keyを再開") {
+                            do { try registry.setEnabled(bindingID: existingBinding!.id, enabled: !existingBinding!.enabled); dismiss() }
+                            catch { errorMessage = error.localizedDescription }
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 44)
                         Button("このSkill Keyを削除", role: .destructive) {
                             do { try registry.remove(bindingID: existingBinding!.id); dismiss() }
                             catch { errorMessage = error.localizedDescription }

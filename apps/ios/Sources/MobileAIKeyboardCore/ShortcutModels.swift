@@ -542,14 +542,13 @@ public final class AppGroupShortcutSnapshotStore: @unchecked Sendable {
 
     private func loadLastKnownGoodLocked() -> ShortcutSnapshotV1? {
         guard let floor = revocationFloorLocked(), let boundary = activeBoundaryLocked() else { return nil }
-        for path in [currentURL, previousURL] {
+        return [currentURL, previousURL].compactMap { path -> ShortcutSnapshotV1? in
             guard let data = try? Data(contentsOf: path), data.count <= ShortcutSnapshotValidator.maxEncodedBytes,
                   let snapshot = try? ShortcutJSON.decoder.decode(ShortcutSnapshotV1.self, from: data),
                   snapshot.generation >= floor,
-                  (try? ShortcutSnapshotValidator.validate(snapshot, expectedOwnerSubjectHash: boundary.ownerSubjectHash, expectedPolicyEpoch: boundary.sessionEpoch)) != nil else { continue }
+                  (try? ShortcutSnapshotValidator.validate(snapshot, expectedOwnerSubjectHash: boundary.ownerSubjectHash, expectedPolicyEpoch: boundary.sessionEpoch)) != nil else { return nil }
             return snapshot
-        }
-        return nil
+        }.max(by: { $0.generation < $1.generation })
     }
 
     public func loadActiveBoundary() -> ShortcutAccountBoundaryV1? {

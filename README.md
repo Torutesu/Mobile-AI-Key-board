@@ -37,6 +37,7 @@ Working title only. Product naming and visual identity are intentionally deferre
 - [Keyboard shortcut platform product requirements](docs/19-keyboard-shortcut-product-requirements.md)
 - [Shortcut runtime architecture and implementation plan](docs/20-shortcut-runtime-architecture.md)
 - [Acti screenshot parity specification](docs/21-acti-screenshot-parity.md)
+- [World-class product gap audit](docs/22-world-class-product-gap-audit.md)
 
 ## Current status
 

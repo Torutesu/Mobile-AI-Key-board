@@ -76,8 +76,10 @@ private fun MobileAiKeyboardApp(imeEnabled: Boolean) {
     val shortcutStore = remember(context) { ShortcutSnapshotStore(context.applicationContext) }
     val accountBoundaryStore = remember(context) { AccountBoundaryStore(context.applicationContext) }
     val settingsStore = remember(context) { KeyboardSettingsStore(context.applicationContext) }
-    // A persisted marker is never authentication. Every new process starts
-    // anonymous/CLOSED until the host establishes a fresh session explicitly.
+    // The host UI remains anonymous until explicit fixture authentication. The
+    // IME may separately resume the exact same owner/epoch from a short,
+    // integrity-bound durable lease so Android process reclamation does not
+    // erase authorized private Skill Keys.
     var hostState by remember { mutableStateOf(fixtureClient.initialState().copy(keyboardSettings = settingsStore.readState())) }
     var shortcutSnapshot by remember { mutableStateOf(shortcutStore.read()) }
     var installedSkills by remember(context) { mutableStateOf(LocalSkillRegistry.all()) }
