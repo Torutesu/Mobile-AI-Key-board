@@ -4,10 +4,23 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { generateKeyPairSync, sign as signPayload } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { evaluate } from '../release-readiness.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
+  return JSON.stringify(value);
+}
+
+function protectedRunPayload(run) {
+  const copy = structuredClone(run);
+  delete copy.attestation.signature;
+  return Buffer.from(stableJson({ schema: 'mobile-ai-keyboard.protected-run.v1', run: copy }), 'utf8');
+}
 
 test('source gate catches the historical false Full Access declaration', () => {
   const file = path.join(root, 'docs/16-store-privacy-declarations.md');
@@ -62,69 +75,176 @@ test('passed E2E evidence is bound to a real-device classification and one candi
   const matrix = JSON.parse(fs.readFileSync(path.join(root, 'docs/release-e2e-matrix.json'), 'utf8'));
   const sourceCommit = 'a'.repeat(40);
   const artifactDigest = `sha256:${'b'.repeat(64)}`;
+  const testNow = Date.parse('2026-08-27T05:00:00.000Z');
   matrix.status = 'passed';
   matrix.candidate = { source_commit: sourceCommit, artifact_digest: artifactDigest };
   matrix.targets = matrix.targets.map((target) => ({
     ...target,
+    device_classes: target.platform === 'ios'
+      ? ['iphone_baseline', 'iphone_current', 'iphone_small', 'ipad_portrait_landscape']
+      : ['android11_baseline', 'pixel_current', 'samsung_current', 'android_low_memory'],
     status: 'passed',
-    runs: [{
-      run_id: `protected-${target.platform}-1`,
-      runner_id: `runner-${target.platform}-1`,
-      attested: true,
+    runs: (target.platform === 'ios'
+      ? ['iphone_baseline', 'iphone_current', 'iphone_small', 'ipad_portrait_landscape']
+      : ['android11_baseline', 'pixel_current', 'samsung_current', 'android_low_memory']).map((deviceClass, deviceIndex) => ({
+      status: 'passed',
+      run_id: `protected-${target.platform}-${deviceIndex + 1}`,
+      runner_id: `runner-${target.platform}-${deviceIndex + 1}`,
       evidence_class: 'protected_external',
       environment: 'protected_device',
-      device_id: `${target.platform}-device-1`,
+      device_id: `${target.platform}-device-${deviceIndex + 1}`,
+      device_class: deviceClass,
+      device_model: target.platform === 'ios' ? `iPhone ${17 - deviceIndex}` : ['Android 11 baseline', 'Pixel 9', 'Samsung Galaxy S25', 'Android low-memory'][deviceIndex],
+      os_version: target.platform === 'ios' ? 'iOS 18.6' : 'Android 35',
       source_commit: sourceCommit,
       artifact_digest: artifactDigest,
-      scenarios: matrix.required_scenarios,
+      attestation: {
+        status: 'verified', verifier_kind: 'protected_runner', verifier_id: `runner-${target.platform}-${deviceIndex + 1}`, verification_id: `attestation-${target.platform}-${deviceIndex + 1}`,
+        signature: 'pending', issued_at: new Date(testNow - 60_000).toISOString(), expires_at: new Date(testNow + 86_400_000).toISOString(), nonce: `nonce_${target.platform}_${deviceIndex + 1}_protected`,
+        run_id: `protected-${target.platform}-${deviceIndex + 1}`, device_id: `${target.platform}-device-${deviceIndex + 1}`, source_commit: sourceCommit, artifact_digest: artifactDigest,
+      },
+      scenario_results: matrix.required_scenarios.map((scenario) => ({ scenario_id: scenario, status: 'passed', run_id: `protected-${target.platform}-${deviceIndex + 1}`, evidence_ref: `e2e:${target.platform}:${scenario}`, evidence_digest: `sha256:${'d'.repeat(64)}` })),
+      field_class_results: matrix.required_field_classes.map((fieldClass) => ({ field_class: fieldClass, status: 'passed', run_id: `protected-${target.platform}-${deviceIndex + 1}`, evidence_ref: `e2e:${target.platform}:${fieldClass}`, evidence_digest: `sha256:${'d'.repeat(64)}` })),
+      lifecycle_results: matrix.required_lifecycle_events.map((lifecycleEvent) => ({ lifecycle_event: lifecycleEvent, status: 'passed', run_id: `protected-${target.platform}-${deviceIndex + 1}`, evidence_ref: `e2e:${target.platform}:${lifecycleEvent}`, evidence_digest: `sha256:${'d'.repeat(64)}` })),
       accessibility_tools: [target.platform === 'ios' ? 'voiceover' : 'talkback'],
-      field_classes: matrix.required_field_classes,
-      lifecycle_events: matrix.required_lifecycle_events,
-      apps: target.apps,
-    }],
+      app_evidence: target.apps.map((app) => ({ app_id: app, app_identifier: `com.example.${app.toLowerCase()}`, run_id: `protected-${target.platform}-${deviceIndex + 1}`, evidence_ref: `e2e:${target.platform}:app:${app}`, evidence_digest: `sha256:${'d'.repeat(64)}` })),
+    })),
   }));
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' });
+  const trustedAttestationKeys = {};
+  for (const target of matrix.targets) {
+    for (const run of target.runs) {
+      trustedAttestationKeys[run.runner_id] = publicKeyPem;
+      run.attestation.signature = signPayload(null, protectedRunPayload(run), privateKey).toString('base64');
+    }
+  }
+  const evaluateSigned = (options) => evaluate({ trustedAttestationKeys, nowMillis: testNow, ...options });
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mobile-ai-keyboard-e2e-'));
   const file = path.join(tempDir, 'matrix.json');
   try {
     fs.writeFileSync(file, `${JSON.stringify(matrix)}\n`);
-    const valid = evaluate({ staticOnly: true, matrix: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.e2e.schema');
+    const valid = evaluateSigned({ staticOnly: true, matrix: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.e2e.schema');
     assert.equal(valid.status, 'pass');
+
+    const untrusted = evaluate({ staticOnly: true, matrix: file, candidateSha: sourceCommit, trustedAttestationKeys: {}, nowMillis: testNow }).checks.find((check) => check.code === 'evidence.e2e.schema');
+    assert.equal(untrusted.status, 'fail');
+    assert.match(untrusted.detail, /verifier is not trusted/);
+
+    const forgedSignature = structuredClone(matrix);
+    forgedSignature.targets[0].runs[0].attestation.signature = Buffer.from('forged').toString('base64');
+    fs.writeFileSync(file, `${JSON.stringify(forgedSignature)}\n`);
+    const rejectedSignature = evaluateSigned({ staticOnly: true, matrix: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.e2e.schema');
+    assert.equal(rejectedSignature.status, 'fail');
+    assert.match(rejectedSignature.detail, /signature verification failed/);
+    fs.writeFileSync(file, `${JSON.stringify(matrix)}\n`);
+
+    const { publicKey: rsaPublicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const rsaTrustedKeys = Object.fromEntries(Object.keys(trustedAttestationKeys).map((id) => [id, rsaPublicKey.export({ type: 'spki', format: 'pem' })]));
+    const rejectedRsa = evaluate({ staticOnly: true, matrix: file, candidateSha: sourceCommit, trustedAttestationKeys: rsaTrustedKeys, nowMillis: testNow }).checks.find((check) => check.code === 'evidence.e2e.schema');
+    assert.equal(rejectedRsa.status, 'fail');
+    assert.match(rejectedRsa.detail, /signature verification failed/);
+
+    const staleAttestation = structuredClone(matrix);
+    staleAttestation.targets[0].runs[0].attestation.expires_at = new Date(testNow - 1).toISOString();
+    fs.writeFileSync(file, `${JSON.stringify(staleAttestation)}\n`);
+    const rejectedFreshness = evaluateSigned({ staticOnly: true, matrix: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.e2e.schema');
+    assert.equal(rejectedFreshness.status, 'fail');
+    assert.match(rejectedFreshness.detail, /freshness window is invalid/);
+    fs.writeFileSync(file, `${JSON.stringify(matrix)}\n`);
 
     const missingCoverage = {
       ...matrix,
       targets: matrix.targets.map((target) => ({
         ...target,
-        runs: target.runs.map(({ field_classes: _fieldClasses, lifecycle_events: _lifecycleEvents, ...run }) => run),
+        runs: target.runs.map(({ field_class_results: _fieldResults, lifecycle_results: _lifecycleResults, ...run }) => run),
       })),
     };
     fs.writeFileSync(file, `${JSON.stringify(missingCoverage)}\n`);
-    const rejectedCoverage = evaluate({ staticOnly: true, matrix: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.e2e.schema');
+    const rejectedCoverage = evaluateSigned({ staticOnly: true, matrix: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.e2e.schema');
     assert.equal(rejectedCoverage.status, 'fail');
-    assert.match(rejectedCoverage.detail, /field-class|lifecycle-event/);
+    assert.match(rejectedCoverage.detail, /field class|lifecycle event/);
 
     const fakeAppCoverage = {
       ...matrix,
       targets: matrix.targets.map((target) => ({
         ...target,
         apps: target.apps.map((app, index) => index === 0 ? 'Unbound Test App' : app),
-        runs: target.runs.map((run) => ({ ...run, apps: run.apps.map((app, index) => index === 0 ? 'Unbound Test App' : app) })),
+        runs: target.runs.map((run) => ({ ...run, app_evidence: run.app_evidence.map((app, index) => index === 0 ? { ...app, app_id: 'Unbound Test App' } : app) })),
       })),
     };
     fs.writeFileSync(file, `${JSON.stringify(fakeAppCoverage)}\n`);
-    const rejectedApps = evaluate({ staticOnly: true, matrix: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.e2e.schema');
+    const rejectedApps = evaluateSigned({ staticOnly: true, matrix: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.e2e.schema');
     assert.equal(rejectedApps.status, 'fail');
     assert.match(rejectedApps.detail, /required app/);
 
     const tampered = { ...matrix, targets: matrix.targets.map((target) => ({ ...target, runs: target.runs.map((run) => ({ ...run, artifact_digest: `sha256:${'c'.repeat(64)}` })) })) };
     fs.writeFileSync(file, `${JSON.stringify(tampered)}\n`);
-    const rejected = evaluate({ staticOnly: true, matrix: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.e2e.schema');
+    const rejected = evaluateSigned({ staticOnly: true, matrix: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.e2e.schema');
     assert.equal(rejected.status, 'fail');
     assert.match(rejected.detail, /artifact_digest/);
 
     fs.writeFileSync(file, `${JSON.stringify(matrix)}\n`);
-    const missingSha = evaluate({ staticOnly: true, matrix: file, candidateSha: null }).checks.find((check) => check.code === 'evidence.e2e.schema');
+    const missingSha = evaluateSigned({ staticOnly: true, matrix: file, candidateSha: null }).checks.find((check) => check.code === 'evidence.e2e.schema');
     assert.equal(missingSha.status, 'fail');
     assert.match(missingSha.detail, /candidate_sha/);
+
+    const noRunStatus = {
+      ...matrix,
+      targets: matrix.targets.map((target) => ({ ...target, runs: target.runs.map(({ status: _status, ...run }) => run) })),
+    };
+    fs.writeFileSync(file, `${JSON.stringify(noRunStatus)}\n`);
+    const rejectedStatus = evaluateSigned({ staticOnly: true, matrix: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.e2e.schema');
+    assert.equal(rejectedStatus.status, 'fail');
+    assert.match(rejectedStatus.detail, /status passed/);
+
+    const badScenarioEvidence = {
+      ...matrix,
+      targets: matrix.targets.map((target) => ({ ...target, runs: target.runs.map((run) => ({ ...run, scenario_results: run.scenario_results.map((result, index) => index === 0 ? { ...result, evidence_ref: '' } : result) })) })),
+    };
+    fs.writeFileSync(file, `${JSON.stringify(badScenarioEvidence)}\n`);
+    const rejectedScenarioEvidence = evaluateSigned({ staticOnly: true, matrix: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.e2e.schema');
+    assert.equal(rejectedScenarioEvidence.status, 'fail');
+    assert.match(rejectedScenarioEvidence.detail, /scenario .*evidence binding/);
+
+    const unboundEvidence = {
+      ...matrix,
+      targets: matrix.targets.map((target) => ({ ...target, runs: target.runs.map((run) => ({ ...run, scenario_results: run.scenario_results.map((result, index) => index === 0 ? { ...result, run_id: 'different-run' } : result) })) })),
+    };
+    fs.writeFileSync(file, `${JSON.stringify(unboundEvidence)}\n`);
+    const rejectedUnboundEvidence = evaluateSigned({ staticOnly: true, matrix: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.e2e.schema');
+    assert.equal(rejectedUnboundEvidence.status, 'fail');
+    assert.match(rejectedUnboundEvidence.detail, /not bound to run_id/);
+
+    const labelUnion = {
+      ...matrix,
+      targets: matrix.targets.map((target) => ({ ...target, runs: target.runs.map((run) => ({ ...run, scenarios: ['arbitrary_label_union'], attested: true })) })),
+    };
+    fs.writeFileSync(file, `${JSON.stringify(labelUnion)}\n`);
+    const rejectedLabelUnion = evaluateSigned({ staticOnly: true, matrix: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.e2e.schema');
+    assert.equal(rejectedLabelUnion.status, 'fail');
+    assert.match(rejectedLabelUnion.detail, /legacy label\/self-attestation/);
+
+    const arbitraryRequiredLabel = { ...matrix, required_scenarios: [...matrix.required_scenarios, 'arbitrary_label'] };
+    fs.writeFileSync(file, `${JSON.stringify(arbitraryRequiredLabel)}\n`);
+    const rejectedArbitraryLabel = evaluateSigned({ staticOnly: true, matrix: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.e2e.schema');
+    assert.equal(rejectedArbitraryLabel.status, 'fail');
+    assert.match(rejectedArbitraryLabel.detail, /exactly the known required IDs/);
+
+    const oneDevice = { ...matrix, targets: matrix.targets.map((target) => ({ ...target, device_classes: [target.device_classes[0]] })) };
+    fs.writeFileSync(file, `${JSON.stringify(oneDevice)}\n`);
+    const rejectedDevices = evaluateSigned({ staticOnly: true, matrix: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.e2e.schema');
+    assert.equal(rejectedDevices.status, 'fail');
+    assert.match(rejectedDevices.detail, /exactly the required device classes/);
+
+    const mismatchedAttestation = {
+      ...matrix,
+      targets: matrix.targets.map((target) => ({ ...target, runs: target.runs.map((run) => ({ ...run, attestation: { ...run.attestation, device_id: 'different-device' } })) })),
+    };
+    fs.writeFileSync(file, `${JSON.stringify(mismatchedAttestation)}\n`);
+    const rejectedAttestation = evaluateSigned({ staticOnly: true, matrix: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.e2e.schema');
+    assert.equal(rejectedAttestation.status, 'fail');
+    assert.match(rejectedAttestation.detail, /attestation device_id/);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

@@ -27,6 +27,7 @@
       "device_class": "baseline",
       "os": "iOS 17 or later",
       "devices": ["iPhone baseline", "current iPhone", "small-screen iPhone", "iPad portrait-landscape"],
+      "device_classes": ["iphone_baseline", "iphone_current", "iphone_small", "ipad_portrait_landscape"],
       "apps": ["Messages", "Mail", "Safari", "LINE", "Slack", "Gmail", "Notion"],
       "status": "not_proven",
       "runs": []
@@ -36,6 +37,7 @@
       "device_class": "baseline",
       "os": "Android 11 or later",
       "devices": ["Android 11 baseline phone", "current Pixel", "current Samsung Galaxy", "low-memory Android phone"],
+      "device_classes": ["android11_baseline", "pixel_current", "samsung_current", "android_low_memory"],
       "apps": ["Messages", "Mail", "Chrome", "LINE", "Slack", "Gmail", "Notion"],
       "status": "not_proven",
       "runs": []

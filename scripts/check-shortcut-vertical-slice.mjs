@@ -74,6 +74,13 @@ const platformContracts = {
         ['apps/ios/MobileAIKeyboardHost/ShortcutRegistryStore.swift', ['init(storage:', 'loadLastKnownGood']],
       ],
     },
+    {
+      id: 'accessible_non_hold_palette',
+      purpose: 'Every assigned Skill has a visible non-hold action that enters the exact reviewed activation path.',
+      required: [
+        ['apps/ios/MobileAIKeyboardExtension/KeyboardViewController.swift', ['accessibilityIdentifier = "skill-palette"', '@objc private func showSkillPalette()', 'self?.invokeShortcut(skill, binding: binding)', 'UIAccessibility.post(notification: .screenChanged']],
+      ],
+    },
   ],
   android: [
     {
@@ -128,6 +135,14 @@ const platformContracts = {
       required: [
         ['apps/android/app/src/main/java/com/torutesu/mobileaikeyboard/core/ShortcutModels.kt', ['class ShortcutSnapshotStore', 'getSharedPreferences', 'fun read(): ShortcutSnapshot', 'fun publish(candidate:']],
         ['apps/android/app/src/main/java/com/torutesu/mobileaikeyboard/ime/KeyboardImeService.kt', ['override fun onCreate()', 'shortcutStore.read()', 'override fun onStartInput']],
+      ],
+    },
+    {
+      id: 'accessible_non_hold_palette',
+      purpose: 'Every assigned Skill has a visible non-hold action that enters the exact reviewed activation path.',
+      required: [
+        ['apps/android/app/src/main/java/com/torutesu/mobileaikeyboard/ime/KeyboardSurface.kt', ['"Skill一覧を開く、${activeBindings.size}件"', 'private fun renderSkillPalette', 'callbacks.onShortcut(binding)', 'announceStatus("Skill一覧。']],
+        ['apps/android/app/src/androidTest/java/com/torutesu/mobileaikeyboard/VerticalSliceUiTest.kt', ['physicalTapAccessibleLongClickAndVisiblePaletteRemainDistinctActions', 'Skill一覧を開く、1件']],
       ],
     },
   ],

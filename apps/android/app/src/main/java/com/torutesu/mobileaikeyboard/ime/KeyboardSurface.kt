@@ -2,6 +2,7 @@ package com.torutesu.mobileaikeyboard.ime
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.graphics.Typeface
@@ -9,8 +10,12 @@ import android.media.AudioManager
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
+import android.view.View
+import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityManager
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -20,6 +25,9 @@ import com.torutesu.mobileaikeyboard.core.KeyboardState
 import com.torutesu.mobileaikeyboard.core.ImeConsumableConfig
 import com.torutesu.mobileaikeyboard.core.KeyboardLayer
 import com.torutesu.mobileaikeyboard.core.KeySoundMode
+import com.torutesu.mobileaikeyboard.core.KeyboardTheme
+import com.torutesu.mobileaikeyboard.core.KeySize
+import com.torutesu.mobileaikeyboard.core.OneHandedMode
 import com.torutesu.mobileaikeyboard.core.ReturnKeySpec
 import com.torutesu.mobileaikeyboard.core.ShortcutSnapshot
 import com.torutesu.mobileaikeyboard.core.ShortcutKeyCode
@@ -27,14 +35,16 @@ import com.torutesu.mobileaikeyboard.core.TriggerKeyBinding
 import com.torutesu.mobileaikeyboard.core.ShiftState
 import com.torutesu.mobileaikeyboard.core.TypingModeReducer
 import com.torutesu.mobileaikeyboard.core.TypingModeState
+import java.util.Locale
 
-/** Small dependency-free keyboard surface; all touch targets are at least 48dp. */
+/** Small dependency-free keyboard surface. Dense adjacent QWERTY keys share the
+ * full row like a system keyboard; utility and Skill-palette actions are 48dp+. */
 @SuppressLint("ViewConstructor") // Instantiated only by KeyboardImeService with mandatory callbacks; never inflated from XML.
 class KeyboardSurface(context: Context, private val callbacks: Callbacks) : ScrollView(context) {
     class Callbacks(
         val onCommand: () -> Unit,
         val onShortcut: (TriggerKeyBinding) -> Unit,
-        val onText: (String) -> Unit,
+        val onText: (String) -> Boolean,
         val onDelete: () -> Unit,
         val onEnter: () -> Unit,
         val onSwitchKeyboard: () -> Unit,
@@ -60,6 +70,7 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
     private var currentReturnKey = ReturnKeySpec("↵")
     private var currentKeyboardState = KeyboardState()
     private var currentShortcutSnapshot = ShortcutSnapshot.empty()
+    private var lastAnnouncedMode: KeyboardMode? = null
     private val pendingGestureCancels = mutableSetOf<() -> Unit>()
     private var gestureEpoch = 0L
     private val root = LinearLayout(context).apply {
@@ -70,7 +81,7 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
 
     init {
         isFillViewport = true
-        addView(root)
+        addView(root, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
     }
 
     fun render(
@@ -81,6 +92,7 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
     ) {
         cancelPendingGestures()
         currentConfig = config
+        applyRuntimeConfig()
         currentReturnKey = returnKey
         currentKeyboardState = state
         currentShortcutSnapshot = shortcutSnapshot
@@ -91,7 +103,64 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
             KeyboardMode.RECEIPT -> renderReceipt(state)
             else -> renderTyping(state, shortcutSnapshot = shortcutSnapshot)
         }
+        if (lastAnnouncedMode != state.mode) {
+            lastAnnouncedMode = state.mode
+            val announcement = when (state.mode) {
+                KeyboardMode.TYPING -> "通常入力"
+                KeyboardMode.COMMAND -> "コマンド入力"
+                KeyboardMode.CAPTURE_REVIEW -> "入力内容の確認"
+                KeyboardMode.RESULT_REVIEW -> "結果の確認"
+                KeyboardMode.ERROR -> "復旧が必要です"
+                KeyboardMode.LOCKED -> "安全な入力モード。AI機能は利用できません"
+                KeyboardMode.RECEIPT -> "適用完了。Undoを利用できます"
+                else -> "処理中"
+            }
+            post { announceStatus(announcement) }
+        }
     }
+
+    private fun applyRuntimeConfig() {
+        val width = when (currentConfig.oneHanded) {
+            OneHandedMode.OFF -> LayoutParams.MATCH_PARENT
+            OneHandedMode.LEFT, OneHandedMode.RIGHT -> (resources.displayMetrics.widthPixels * 0.84f).toInt()
+        }
+        root.layoutParams = FrameLayout.LayoutParams(width, LayoutParams.WRAP_CONTENT).apply {
+            gravity = when (currentConfig.oneHanded) {
+                OneHandedMode.LEFT -> Gravity.START
+                OneHandedMode.RIGHT -> Gravity.END
+                OneHandedMode.OFF -> Gravity.FILL_HORIZONTAL
+            }
+        }
+        root.setBackgroundColor(backgroundColor())
+    }
+
+    private fun keyHeightDp(): Int = when (currentConfig.keySize) {
+        KeySize.COMPACT -> 48
+        KeySize.STANDARD -> 52
+        KeySize.LARGE -> 58
+    }
+
+    private fun usesDarkSystemTheme() = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+    private fun foregroundColor(): Int = when (currentConfig.theme) {
+        KeyboardTheme.HIGH_CONTRAST -> Color.YELLOW
+        KeyboardTheme.DARK -> Color.WHITE
+        KeyboardTheme.LIGHT -> Color.BLACK
+        KeyboardTheme.SYSTEM -> if (usesDarkSystemTheme()) Color.WHITE else Color.BLACK
+    }
+    private fun backgroundColor(): Int = when (currentConfig.theme) {
+        KeyboardTheme.HIGH_CONTRAST -> Color.BLACK
+        KeyboardTheme.DARK -> Color.rgb(32, 33, 36)
+        KeyboardTheme.LIGHT -> Color.rgb(245, 247, 250)
+        KeyboardTheme.SYSTEM -> if (usesDarkSystemTheme()) Color.rgb(32, 33, 36) else Color.rgb(245, 247, 250)
+    }
+    private fun keySurfaceColor(): Int = when (currentConfig.theme) {
+        KeyboardTheme.HIGH_CONTRAST -> Color.BLACK
+        KeyboardTheme.DARK -> Color.rgb(60, 64, 67)
+        KeyboardTheme.LIGHT -> Color.WHITE
+        KeyboardTheme.SYSTEM -> if (usesDarkSystemTheme()) Color.rgb(60, 64, 67) else Color.WHITE
+    }
+    private fun hintColor(): Int = if (currentConfig.theme == KeyboardTheme.DARK || currentConfig.theme == KeyboardTheme.HIGH_CONTRAST || (currentConfig.theme == KeyboardTheme.SYSTEM && usesDarkSystemTheme())) Color.LTGRAY else Color.DKGRAY
+    private fun errorColor(): Int = if (currentConfig.theme == KeyboardTheme.DARK || currentConfig.theme == KeyboardTheme.HIGH_CONTRAST || (currentConfig.theme == KeyboardTheme.SYSTEM && usesDarkSystemTheme())) Color.rgb(255, 138, 128) else Color.rgb(176, 0, 32)
 
     fun resetTypingState() {
         cancelPendingGestures()
@@ -101,7 +170,9 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
     /** System Toast plus reject haptic for a rejected ordinary editor mutation. */
     fun reportOrdinaryInputFailure() {
         val message = "入力欄がキー操作を受け付けませんでした"
-        performHapticFeedback(HapticFeedbackConstants.REJECT)
+        if (currentConfig.haptics != com.torutesu.mobileaikeyboard.core.HapticMode.OFF) {
+            performHapticFeedback(HapticFeedbackConstants.REJECT)
+        }
         // Toast is rendered by the system and announced by TalkBack without
         // repurposing this keyboard root's stable accessibility label.
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
@@ -121,21 +192,26 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
     }
 
     private fun renderTyping(state: KeyboardState, showCommandControls: Boolean = state.mode != KeyboardMode.LOCKED, shortcutSnapshot: ShortcutSnapshot = ShortcutSnapshot.empty()) {
+        val activeBindings = shortcutSnapshot.bindings.filter { it.enabled }
         val toolbar = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         toolbar.addView(label(if (state.mode == KeyboardMode.RECEIPT) "完了" else "通常入力", 14f), weight(1f))
-        if (showCommandControls) toolbar.addView(actionButton("Command", "Command mode") { callbacks.onCommand() })
+        if (showCommandControls && activeBindings.isNotEmpty()) {
+            toolbar.addView(actionButton("Skills", "Skill一覧を開く、${activeBindings.size}件") {
+                renderSkillPalette(state, shortcutSnapshot)
+            }.apply { layoutParams = weight(1f) })
+        }
+        if (showCommandControls) toolbar.addView(actionButton("Command", "Command mode") { callbacks.onCommand() }, weight(1f))
         root.addView(toolbar)
         val rows = if (typingMode.layer == KeyboardLayer.SYMBOLS) listOf("1234567890", "-/:;()\$&@", ".,?!'\"")
         else listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
-        val activeBindings = shortcutSnapshot.bindings.filter { it.enabled }
         if (activeBindings.isNotEmpty()) {
-            root.addView(label("青枠のキーは長押しでSkillを実行（${activeBindings.joinToString { it.skillName }}）", 12f))
+            root.addView(label("青枠のキーは長押し、またはSkills一覧から実行（${activeBindings.joinToString { it.skillName }}）", 12f))
         }
         rows.forEach { letters ->
             val row = row()
             letters.forEach { letter ->
-                val keyCode = letter.uppercase()
-                val display = if (typingMode.layer == KeyboardLayer.LETTERS && typingMode.lettersUppercase) letter.uppercase() else letter.toString()
+                val keyCode = letter.toString().uppercase(Locale.ROOT)
+                val display = if (typingMode.layer == KeyboardLayer.LETTERS && typingMode.lettersUppercase) letter.toString().uppercase(Locale.ROOT) else letter.toString()
                 row.addView(key(display, display, binding = shortcutSnapshot.bindingFor(keyCode)))
             }
             root.addView(row)
@@ -180,6 +256,50 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
         }
     }
 
+    /** Visible non-hold path that preserves the exact immutable binding and
+     * enters the same reviewed activation callback as a physical long-press. */
+    private fun renderSkillPalette(state: KeyboardState, shortcutSnapshot: ShortcutSnapshot) {
+        cancelPendingGestures()
+        currentKeyboardState = state
+        currentShortcutSnapshot = shortcutSnapshot
+        root.removeAllViews()
+        val heading = label("Skill一覧", 17f).apply {
+            setTypeface(Typeface.DEFAULT, Typeface.BOLD)
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+            isFocusable = true
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+        }
+        root.addView(heading)
+        root.addView(label("タップして実行。文字キーの長押しは不要です。", 13f))
+        shortcutSnapshot.bindings.filter { it.enabled }
+            .sortedBy { it.keyCode }
+            .forEach { binding ->
+                root.addView(actionButton(
+                    "${ShortcutKeyCode.displayLabel(binding.keyCode)}  ${binding.skillName}",
+                    "${ShortcutKeyCode.displayLabel(binding.keyCode)}、${binding.accessibleLabel}を実行、利用可能、端末内の選択文変換",
+                ) { callbacks.onShortcut(binding) })
+            }
+        root.addView(actionButton("閉じる", "Skill一覧を閉じて通常入力へ戻る") {
+            render(state, shortcutSnapshot, currentConfig, currentReturnKey)
+        })
+        post {
+            heading.requestFocus()
+            heading.sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED)
+            announceStatus("Skill一覧。${shortcutSnapshot.bindings.count { it.enabled }}件")
+        }
+    }
+
+    private fun announceStatus(message: String) {
+        val manager = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager ?: return
+        if (!manager.isEnabled) return
+        val event = AccessibilityEvent.obtain(AccessibilityEvent.TYPE_ANNOUNCEMENT).apply {
+            className = KeyboardSurface::class.java.name
+            packageName = context.packageName
+            text.add(message)
+        }
+        manager.sendAccessibilityEvent(event)
+    }
+
     private fun renderCommand(state: KeyboardState) {
         val heading = label(
             when (state.mode) {
@@ -202,7 +322,7 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
             root.addView(label("機密候補を伏せた表示", 13f).apply { setTypeface(Typeface.DEFAULT, Typeface.BOLD) })
             root.addView(label(preview?.redactedText.orEmpty(), 15f).apply { contentDescription = "Redacted capture preview" })
             preview?.notice?.let { root.addView(label(it, 13f)) }
-            preview?.blockedReason?.let { root.addView(label(it, 13f).apply { setTextColor(Color.rgb(150, 30, 30)) }) }
+            preview?.blockedReason?.let { root.addView(label(it, 13f).apply { setTextColor(errorColor()) }) }
             if (preview?.acknowledgementRequired == true) {
                 root.addView(actionButton("確認して端末内で実行", "Capture Reviewを確認し、端末内の変換を実行") { callbacks.onAcknowledge() })
             }
@@ -213,6 +333,9 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
             val result = state.resultText.orEmpty()
             val edited = EditText(context).apply {
                 setText(result)
+                setTextColor(foregroundColor())
+                setHintTextColor(hintColor())
+                setBackgroundColor(keySurfaceColor())
                 setSelection(text.length)
                 minHeight = dp(72)
                 setSingleLine(false)
@@ -221,7 +344,7 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
                 hint = "編集可能な結果"
             }
             root.addView(label("プレビュー（編集・再生成・適用を選べます）", 13f))
-            state.errorMessage?.let { root.addView(label(it, 13f).apply { setTextColor(Color.rgb(150, 30, 30)) }) }
+            state.errorMessage?.let { root.addView(label(it, 13f).apply { setTextColor(errorColor()) }) }
             root.addView(edited)
             root.addView(inlineEditorKeyboard(edited))
             root.addView(actionButton("編集", "結果を編集") { edited.requestFocus() })
@@ -232,7 +355,7 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
             return
         }
         if (state.mode == KeyboardMode.ERROR) {
-            root.addView(label(state.errorMessage.orEmpty(), 14f).apply { setTextColor(Color.rgb(150, 30, 30)) })
+            root.addView(label(state.errorMessage.orEmpty(), 14f).apply { setTextColor(errorColor()) })
             state.resultText?.takeIf { it.isNotBlank() }?.let { result ->
                 root.addView(actionButton("結果をコピー", "失敗前の結果をクリップボードへコピー") { callbacks.onCopy(result) })
                 root.addView(actionButton("再試行", "同じ入力から端末内で再生成を再試行") { callbacks.onRegenerate() })
@@ -242,7 +365,10 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
         }
         val command = EditText(context).apply {
             hint = "文章を入力、または選択して実行"
-            minHeight = dp(52)
+            setTextColor(foregroundColor())
+            setHintTextColor(hintColor())
+            setBackgroundColor(keySurfaceColor())
+            minHeight = dp(keyHeightDp())
             setSingleLine(false)
             showSoftInputOnFocus = false
             contentDescription = "Command input"
@@ -323,7 +449,7 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
     private fun row() = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER
-        layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, dp(52))
+        layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, dp(keyHeightDp()))
     }
 
     private fun key(
@@ -335,28 +461,35 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
     ) = Button(context).apply {
         this.text = text
         textSize = 15f
+        setTextColor(foregroundColor())
         minHeight = dp(48)
-        minWidth = dp(48)
-        contentDescription = if (binding == null) accessibleName else "${ShortcutKeyCode.displayLabel(binding.keyCode)}、${binding.skillName}、長押しで実行"
-        if (binding != null) {
-            background = GradientDrawable().apply {
-                setColor(Color.TRANSPARENT)
+        // A ten-key portrait row cannot fit ten independent 48dp boxes. Avoid
+        // clipping ordinary keys; the row remains edge-to-edge and every bound
+        // Skill also has a full-width 48dp+ action in the visible palette.
+        minWidth = 0
+        contentDescription = if (binding == null) accessibleName else "${ShortcutKeyCode.displayLabel(binding.keyCode)}、${binding.accessibleLabel}、利用可能、端末内の選択文変換、長押しまたはSkill一覧から実行"
+        isSoundEffectsEnabled = false
+        background = GradientDrawable().apply {
+            setColor(keySurfaceColor())
+            cornerRadius = dp(8).toFloat()
+            if (binding != null) {
                 setStroke(dp(2), Color.rgb(17, 156, 243))
-                cornerRadius = dp(8).toFloat()
             }
+        }
+        if (binding != null) {
             tooltipText = "${binding.skillName}（長押し）"
         }
-        layoutParams = LinearLayout.LayoutParams(0, dp(52), weight).apply { setMargins(dp(2), dp(2), dp(2), dp(2)) }
+        layoutParams = LinearLayout.LayoutParams(0, dp(keyHeightDp()), weight).apply { setMargins(dp(2), dp(2), dp(2), dp(2)) }
         val commitBoundCharacter = {
-            emitText(if (typingMode.lettersUppercase) text.uppercase() else text.lowercase())
-            typingMode = TypingModeReducer.characterCommitted(typingMode)
+            if (emitText(if (typingMode.lettersUppercase) text.uppercase(Locale.ROOT) else text.lowercase(Locale.ROOT))) {
+                typingMode = TypingModeReducer.characterCommitted(typingMode)
+            }
         }
         setOnClickListener {
             if (binding != null) {
                 commitBoundCharacter()
             } else if (text.length == 1 && text[0].isLetter()) {
-                emitText(text)
-                typingMode = TypingModeReducer.characterCommitted(typingMode)
+                if (emitText(text)) typingMode = TypingModeReducer.characterCommitted(typingMode)
             } else if (text.length == 1) {
                 emitText(text)
             }
@@ -507,9 +640,10 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
         }
     }
 
-    private fun emitText(value: String) {
-        callbacks.onText(value)
-        playKeySound()
+    private fun emitText(value: String): Boolean {
+        val committed = callbacks.onText(value)
+        if (committed) playKeySound()
+        return committed
     }
 
     private fun playKeySound() {
@@ -522,21 +656,28 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
 
     private fun actionButton(text: String, accessibleName: String, action: () -> Unit) = Button(context).apply {
         this.text = text
+        setTextColor(foregroundColor())
+        background = GradientDrawable().apply {
+            setColor(keySurfaceColor())
+            cornerRadius = dp(8).toFloat()
+            setStroke(dp(1), if (currentConfig.theme == KeyboardTheme.HIGH_CONTRAST) Color.YELLOW else Color.GRAY)
+        }
         minHeight = dp(48)
         contentDescription = accessibleName
+        isSoundEffectsEnabled = false
         setOnClickListener { action() }
-        layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, dp(52)).apply { setMargins(dp(2), dp(2), dp(2), dp(2)) }
+        layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, dp(keyHeightDp())).apply { setMargins(dp(2), dp(2), dp(2), dp(2)) }
     }
 
     private fun label(text: String, size: Float) = TextView(context).apply {
         this.text = text
         textSize = size
-        setTextColor(Color.DKGRAY)
+        setTextColor(foregroundColor())
         setPadding(dp(8), dp(5), dp(8), dp(5))
         minHeight = dp(44)
         gravity = Gravity.CENTER_VERTICAL
     }
 
-    private fun weight(value: Float) = LinearLayout.LayoutParams(0, dp(52), value)
+    private fun weight(value: Float) = LinearLayout.LayoutParams(0, dp(keyHeightDp()), value)
     private fun dp(value: Int) = (value * density).toInt()
 }

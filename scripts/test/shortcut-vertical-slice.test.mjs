@@ -12,12 +12,13 @@ test('vertical slice reports implemented source seams without claiming runtime p
 
   for (const platform of ['ios', 'android']) {
     const checks = report.platforms[platform];
-    assert.equal(checks.length, 6);
+    assert.equal(checks.length, 7);
     assert.equal(checks.find((check) => check.id === 'builder_immutable_skill_identity').status, 'passed');
     assert.equal(checks.find((check) => check.id === 'builder_deploy_requires_exact_confirmation').status, 'passed');
     assert.equal(checks.find((check) => check.id === 'az_assignment_publishes_snapshot').status, 'passed');
     assert.equal(checks.find((check) => check.id === 'closed_local_executor_binds_exact_identity').status, 'passed');
     assert.equal(checks.find((check) => check.id.includes('restart_persistence')).status, 'passed');
+    assert.equal(checks.find((check) => check.id === 'accessible_non_hold_palette').status, 'passed');
   }
 
   const addChecks = ['ios', 'android'].map((platform) => report.platforms[platform].find((check) => check.id === 'explicit_add_separates_deploy_and_assignment'));

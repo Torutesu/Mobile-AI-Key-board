@@ -11,11 +11,14 @@ final class KeyboardViewController: UIInputViewController {
     private let locking = EntityLocking()
     private let statusLabel = UILabel()
     private let actionButton = UIButton(type: .system)
+    private let skillPaletteButton = UIButton(type: .system)
     private var shiftButton = UIButton(type: .system)
     private var letterButtons: [UIButton] = []
     private var inputState = KeyboardInputState()
     private var returnButton: UIButton?
     private var actionButtonConfigured = false
+    private var skillPaletteButtonConfigured = false
+    private var isSkillPaletteVisible = false
     private var typingStack: UIStackView?
     private var commandTextView = UITextView()
     private var resultTextView = UITextView()
@@ -82,12 +85,17 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func updateFullAccessState() {
+        let hadFullAccess = isFullAccessEnabled
         isFullAccessEnabled = hasFullAccess
         accessStatusStore.publish(fullAccessEnabled: isFullAccessEnabled)
         // Local command processing does not need Full Access. The permission is
         // required for the App Group-backed Skill Key projection and any future
         // network capability, so ordinary typing and local workflow stay usable.
         actionButton.isEnabled = true
+        if hadFullAccess && !isFullAccessEnabled && (pendingShortcutActivation != nil || pendingShortcutSkill != nil || isSkillPaletteVisible) {
+            clearEphemeralState(showTypingView: true)
+            UIAccessibility.post(notification: .announcement, argument: "フルアクセスが無効になったためSkill実行を停止しました。通常入力は利用できます。")
+        }
         updateBoundKeyPresentation()
         if !isFullAccessEnabled {
             statusLabel.text = "入力。Skill Keyはフルアクセスが必要"
@@ -108,6 +116,8 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func applyShortcutSnapshot(_ snapshot: ShortcutSnapshotV1?) {
+        let paletteWasVisible = isSkillPaletteVisible
+        let previousPaletteIdentity = activePaletteEntries().map { "\($0.0.id)|\($0.0.skillDigest)" }
         guard let snapshot,
               let boundary = shortcutStore.loadActiveBoundary(),
               (try? ShortcutSnapshotValidator.validate(snapshot, expectedDeviceID: ShortcutDeviceIdentity.localFixtureID, expectedOwnerSubjectHash: boundary.ownerSubjectHash, expectedPolicyEpoch: boundary.sessionEpoch)) != nil else {
@@ -127,28 +137,41 @@ final class KeyboardViewController: UIInputViewController {
         }.map { ($0.keyCode, $0) })
         shortcutSkills = Dictionary(uniqueKeysWithValues: snapshot.skills.filter { $0.executionRoute == .keyboardLocal }.map { ("\($0.id)|\($0.versionID)", $0) })
         updateBoundKeyPresentation()
+        if paletteWasVisible {
+            let nextPaletteIdentity = activePaletteEntries().map { "\($0.0.id)|\($0.0.skillDigest)" }
+            if previousPaletteIdentity != nextPaletteIdentity {
+                isSkillPaletteVisible = false
+                if nextPaletteIdentity.isEmpty { showTyping() } else { showSkillPalette() }
+            }
+        }
     }
 
     private func updateBoundKeyPresentation() {
         let shortcutsAllowed: Bool
         if case .locked = machine.screen { shortcutsAllowed = false } else { shortcutsAllowed = true }
+        let paletteCount = activePaletteEntries().count
+        skillPaletteButton.isEnabled = shortcutsAllowed && isFullAccessEnabled && paletteCount > 0
+        skillPaletteButton.isHidden = !shortcutsAllowed
+        skillPaletteButton.accessibilityValue = paletteCount == 0 ? "割り当てなし" : "\(paletteCount)件"
         for (key, button) in letterButtonsByKey {
             guard shortcutsAllowed, let binding = shortcutBindings[key], let skill = shortcutSkills["\(binding.skillID)|\(binding.versionID)"] else {
                 button.layer.borderWidth = 0.5
                 button.layer.borderColor = UIColor.separator.cgColor
                 button.accessibilityLabel = key.displayLabel
+                button.accessibilityValue = nil
                 button.accessibilityHint = isFullAccessEnabled ? "タップで通常入力" : "タップで通常入力。AI機能とSkill Key同期にはフルアクセスが必要です"
                 button.accessibilityCustomActions = nil
                 continue
             }
             button.layer.borderWidth = 1.5
             button.layer.borderColor = UIColor.systemCyan.cgColor
-            button.accessibilityLabel = "\(key.displayLabel)、\(skill.name)"
-            button.accessibilityHint = isFullAccessEnabled ? "タップで通常入力。長押しで\(skill.name)を実行" : "タップで通常入力。フルアクセスを許可すると長押しで\(skill.name)を実行できます"
-            button.accessibilityCustomActions = [UIAccessibilityCustomAction(name: "\(skill.name)を実行") { [weak self] _ in
+            button.accessibilityLabel = "\(key.displayLabel)、\(skill.name)、端末内の選択文変換"
+            button.accessibilityValue = isFullAccessEnabled ? "利用可能" : "フルアクセスが必要"
+            button.accessibilityHint = isFullAccessEnabled ? "タップで通常入力。長押し、またはSkill一覧から実行" : "タップで通常入力。フルアクセスを許可するとSkillを実行できます"
+            button.accessibilityCustomActions = isFullAccessEnabled ? [UIAccessibilityCustomAction(name: "\(skill.name)を実行") { [weak self] _ in
                 self?.invokeShortcut(skill, binding: binding)
                 return true
-            }]
+            }] : nil
         }
     }
 
@@ -175,7 +198,22 @@ final class KeyboardViewController: UIInputViewController {
             actionButtonConfigured = true
         }
 
-        let header = UIStackView(arrangedSubviews: [statusLabel, actionButton])
+        skillPaletteButton.setTitle("Skills", for: .normal)
+        skillPaletteButton.titleLabel?.font = .preferredFont(forTextStyle: .body)
+        skillPaletteButton.titleLabel?.adjustsFontForContentSizeCategory = true
+        skillPaletteButton.accessibilityIdentifier = "skill-palette"
+        skillPaletteButton.accessibilityLabel = "Skill一覧を開く"
+        skillPaletteButton.accessibilityHint = "長押しせず、割り当て済みSkillを選んで実行します"
+        if !skillPaletteButtonConfigured {
+            skillPaletteButton.addTarget(self, action: #selector(showSkillPalette), for: .touchUpInside)
+            skillPaletteButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+            skillPaletteButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+            actionButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+            actionButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+            skillPaletteButtonConfigured = true
+        }
+
+        let header = UIStackView(arrangedSubviews: [statusLabel, skillPaletteButton, actionButton])
         header.axis = .horizontal
         header.alignment = .center
         header.distribution = .equalSpacing
@@ -208,6 +246,65 @@ final class KeyboardViewController: UIInputViewController {
         updateShiftAppearance()
         updateReturnKeyPresentation()
         install(stack, height: 252)
+        updateBoundKeyPresentation()
+    }
+
+    private func activePaletteEntries() -> [(ShortcutBindingV1, ShortcutSkillProjectionV1)] {
+        shortcutBindings.values.compactMap { binding in
+            shortcutSkills["\(binding.skillID)|\(binding.versionID)"].map { (binding, $0) }
+        }.sorted { lhs, rhs in
+            lhs.0.keyCode.displayLabel.localizedStandardCompare(rhs.0.keyCode.displayLabel) == .orderedAscending
+        }
+    }
+
+    /// Visible, non-hold alternative for Switch Control, VoiceOver, motor
+    /// accessibility, and users who prefer discovery over memorized keys.
+    /// Every entry routes through the same exact-version activation checks as
+    /// the physical long-press and accessibility custom action.
+    @objc private func showSkillPalette() {
+        if case .locked = machine.screen { return }
+        guard isFullAccessEnabled else { presentRecoverableError(.unavailable); return }
+        let entries = activePaletteEntries()
+        guard !entries.isEmpty else {
+            presentRecoverableError(.unavailable)
+            return
+        }
+        isSkillPaletteVisible = true
+        let title = UILabel()
+        title.text = "Skill一覧"
+        title.font = .preferredFont(forTextStyle: .headline)
+        title.adjustsFontForContentSizeCategory = true
+        title.accessibilityTraits = .header
+        let detail = UILabel()
+        detail.text = "タップして実行。文字キーの長押しは不要です。"
+        detail.numberOfLines = 0
+        detail.font = .preferredFont(forTextStyle: .footnote)
+        detail.adjustsFontForContentSizeCategory = true
+        let stack = UIStackView(arrangedSubviews: [title, detail])
+        stack.axis = .vertical
+        stack.spacing = 6
+        stack.isLayoutMarginsRelativeArrangement = true
+        stack.layoutMargins = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        for (binding, skill) in entries {
+            let button = makeActionButton("\(binding.keyCode.displayLabel)  \(skill.name)", label: "\(binding.keyCode.displayLabel)、\(skill.name)を実行")
+            button.accessibilityHint = "選択中の文章を確認してから端末内で実行します"
+            button.addAction(UIAction { [weak self] _ in
+                self?.isSkillPaletteVisible = false
+                self?.invokeShortcut(skill, binding: binding)
+            }, for: .touchUpInside)
+            stack.addArrangedSubview(button)
+        }
+        let close = makeActionButton("閉じる", label: "Skill一覧を閉じて通常入力へ戻る")
+        close.addTarget(self, action: #selector(closeSkillPalette), for: .touchUpInside)
+        stack.addArrangedSubview(close)
+        install(stack, height: 252)
+        UIAccessibility.post(notification: .screenChanged, argument: title)
+    }
+
+    @objc private func closeSkillPalette() {
+        isSkillPaletteVisible = false
+        showTyping()
+        UIAccessibility.post(notification: .screenChanged, argument: skillPaletteButton)
     }
 
     private func makeLetterRow(_ letters: String, leading: UIView? = nil, trailing: UIView? = nil) -> UIStackView {
@@ -336,6 +433,7 @@ final class KeyboardViewController: UIInputViewController {
         }
         shiftButton.accessibilityValue = inputState.shift.accessibilityValue
         shiftButton.backgroundColor = inputState.shift == .lower ? .systemBackground : .systemBlue.withAlphaComponent(0.2)
+        updateBoundKeyPresentation()
     }
 
     private func returnKeyDisplay() -> KeyboardReturnAction {
@@ -412,6 +510,7 @@ final class KeyboardViewController: UIInputViewController {
     private func invokeShortcut(_ skill: ShortcutSkillProjectionV1, binding: ShortcutBindingV1) {
         guard isFullAccessEnabled else {
             presentRecoverableError(.unavailable)
+            showTyping()
             return
         }
         if case .locked = machine.screen { return }
@@ -427,7 +526,7 @@ final class KeyboardViewController: UIInputViewController {
                   $0.id == skill.id && $0.versionID == skill.versionID && $0.skillDigest == skill.skillDigest
               }) else {
             applyShortcutSnapshot(nil)
-            statusLabel.text = "Skill Keyの設定が変わりました。もう一度長押ししてください。"
+            presentRecoverableError(.staleField)
             return
         }
         guard skill.executionRoute == .keyboardLocal else {
@@ -470,6 +569,7 @@ final class KeyboardViewController: UIInputViewController {
         selectedSource = .command
         commandTextView = UITextView()
         commandTextView.font = .preferredFont(forTextStyle: .body)
+        commandTextView.adjustsFontForContentSizeCategory = true
         commandTextView.backgroundColor = .systemBackground
         commandTextView.layer.cornerRadius = 8
         commandTextView.layer.borderWidth = 0.5
@@ -482,9 +582,12 @@ final class KeyboardViewController: UIInputViewController {
         let title = UILabel()
         title.text = "コマンド"
         title.font = .preferredFont(forTextStyle: .headline)
+        title.adjustsFontForContentSizeCategory = true
+        title.accessibilityTraits = .header
         let hint = UILabel()
         hint.text = "端末内で処理します。入力内容は外部送信しません。"
         hint.font = .preferredFont(forTextStyle: .footnote)
+        hint.adjustsFontForContentSizeCategory = true
         hint.textColor = .secondaryLabel
         hint.numberOfLines = 0
 
@@ -517,6 +620,7 @@ final class KeyboardViewController: UIInputViewController {
         stack.layoutMargins = UIEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
         commandTextView.heightAnchor.constraint(greaterThanOrEqualToConstant: 48).isActive = true
         install(stack, height: 432)
+        postScreenChange(title)
     }
 
     private func makeSourceButton(_ source: CaptureSource) -> UIButton {
@@ -584,13 +688,13 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func showCaptureReview(_ draft: CaptureDraft, redactionBlocked: Bool) {
-        let title = UILabel(); title.text = pendingShortcutSkill.map { "\($0.name) — 入力内容の確認" } ?? "送信内容の確認"; title.font = .preferredFont(forTextStyle: .headline)
+        let title = UILabel(); title.text = pendingShortcutSkill.map { "\($0.name) — 入力内容の確認" } ?? "送信内容の確認"; title.font = .preferredFont(forTextStyle: .headline); title.adjustsFontForContentSizeCategory = true; title.accessibilityTraits = .header
         let exact = makeExactContentView("入力内容（\(draft.characterCount)文字）", value: draft.text)
         let redacted = makePreviewLabel("ローカル検出後の表示", value: draft.redactedText)
         let destination = makePreviewLabel("実行先", value: pendingShortcutSkill?.executionRoute == .keyboardLocal ? "端末内のみ / 外部送信なし" : "host確認が必要")
         let source = makePreviewLabel("入力ソース", value: draft.source == .command ? "コマンド" : draft.source.rawValue)
         let warning = UILabel(); warning.text = draft.fallbackMessage ?? (redactionBlocked ? "秘密情報候補を検出したため処理を停止します。" : "内容を確認してから続けてください。")
-        warning.textColor = redactionBlocked ? .systemRed : .secondaryLabel; warning.numberOfLines = 0; warning.font = .preferredFont(forTextStyle: .footnote)
+        warning.textColor = redactionBlocked ? .systemRed : .secondaryLabel; warning.numberOfLines = 0; warning.font = .preferredFont(forTextStyle: .footnote); warning.adjustsFontForContentSizeCategory = true
         let acknowledge = makeActionButton(captureAcknowledged ? "確認済み" : "内容を確認しました", label: "送信内容を確認しました")
         acknowledge.accessibilityValue = captureAcknowledged ? "オン" : "オフ"
         acknowledge.addTarget(self, action: #selector(acknowledgeCapture), for: .touchUpInside)
@@ -603,6 +707,7 @@ final class KeyboardViewController: UIInputViewController {
         let buttons = UIStackView(arrangedSubviews: [cancel, acknowledge, proceed]); buttons.axis = .vertical; buttons.spacing = 6
         let stack = UIStackView(arrangedSubviews: [title, exact, redacted, source, destination, warning, buttons]); stack.axis = .vertical; stack.spacing = 7; stack.isLayoutMarginsRelativeArrangement = true; stack.layoutMargins = UIEdgeInsets(top: 7, left: 10, bottom: 7, right: 10)
         install(stack, height: 368)
+        postScreenChange(title)
     }
 
     @objc private func acknowledgeCapture() {
@@ -638,9 +743,9 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func showResultReview(_ result: RewriteResult) {
-        resultTextView = UITextView(); resultTextView.text = result.rewritten; resultTextView.selectedRange = NSRange(location: (result.rewritten as NSString).length, length: 0); resultTextView.font = .preferredFont(forTextStyle: .body); resultTextView.isEditable = false; resultTextView.inputView = UIView(); resultTextView.accessibilityLabel = "書き換え結果"; resultTextView.layer.cornerRadius = 8; resultTextView.layer.borderWidth = 0.5; resultTextView.layer.borderColor = UIColor.separator.cgColor
-        let title = UILabel(); title.text = "結果を確認"; title.font = .preferredFont(forTextStyle: .headline)
-        let hint = UILabel(); hint.text = "編集・再生成・コピー・適用を選べます。適用前にentityを保護します。"; hint.textColor = .secondaryLabel; hint.numberOfLines = 0; hint.font = .preferredFont(forTextStyle: .footnote)
+        resultTextView = UITextView(); resultTextView.text = result.rewritten; resultTextView.selectedRange = NSRange(location: (result.rewritten as NSString).length, length: 0); resultTextView.font = .preferredFont(forTextStyle: .body); resultTextView.adjustsFontForContentSizeCategory = true; resultTextView.isEditable = false; resultTextView.inputView = UIView(); resultTextView.accessibilityLabel = "書き換え結果"; resultTextView.layer.cornerRadius = 8; resultTextView.layer.borderWidth = 0.5; resultTextView.layer.borderColor = UIColor.separator.cgColor
+        let title = UILabel(); title.text = "結果を確認"; title.font = .preferredFont(forTextStyle: .headline); title.adjustsFontForContentSizeCategory = true; title.accessibilityTraits = .header
+        let hint = UILabel(); hint.text = "編集・再生成・コピー・適用を選べます。適用前にentityを保護します。"; hint.textColor = .secondaryLabel; hint.numberOfLines = 0; hint.font = .preferredFont(forTextStyle: .footnote); hint.adjustsFontForContentSizeCategory = true
         let edit = makeActionButton("編集", label: "結果を編集"); edit.addTarget(self, action: #selector(editResult), for: .touchUpInside)
         let regenerate = makeActionButton("再生成", label: "結果を端末内で再生成"); regenerate.addTarget(self, action: #selector(regenerateResult), for: .touchUpInside)
         let copy = makeActionButton("コピー", label: "結果をクリップボードへコピー"); copy.addTarget(self, action: #selector(copyResult), for: .touchUpInside)
@@ -652,6 +757,7 @@ final class KeyboardViewController: UIInputViewController {
         let stack = UIStackView(arrangedSubviews: [title, hint, resultTextView, editorKeyboard, row1, row2]); stack.axis = .vertical; stack.spacing = 7; stack.isLayoutMarginsRelativeArrangement = true; stack.layoutMargins = UIEdgeInsets(top: 7, left: 10, bottom: 7, right: 10)
         resultTextView.heightAnchor.constraint(greaterThanOrEqualToConstant: 76).isActive = true
         install(stack, height: 456)
+        postScreenChange(title)
     }
 
     @objc private func editResult() { resultTextView.isEditable = true; resultTextView.becomeFirstResponder(); transition(.editResult) }
@@ -717,12 +823,13 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func showUndoView(_ token: UndoToken) {
-        let title = UILabel(); title.text = "適用しました"; title.font = .preferredFont(forTextStyle: .headline)
-        let detail = UILabel(); detail.text = "入力欄が変わるとUndoは無効になります。"; detail.textColor = .secondaryLabel; detail.numberOfLines = 0
+        let title = UILabel(); title.text = "適用しました"; title.font = .preferredFont(forTextStyle: .headline); title.adjustsFontForContentSizeCategory = true; title.accessibilityTraits = .header
+        let detail = UILabel(); detail.text = "入力欄が変わるとUndoは無効になります。"; detail.textColor = .secondaryLabel; detail.numberOfLines = 0; detail.font = .preferredFont(forTextStyle: .body); detail.adjustsFontForContentSizeCategory = true
         let undo = makeActionButton("Undo", label: "元の選択範囲を復元"); undo.addTarget(self, action: #selector(undoResult), for: .touchUpInside)
         let done = makeActionButton("完了", label: "キーボードへ戻る"); done.addTarget(self, action: #selector(cancelAction), for: .touchUpInside)
         let stack = UIStackView(arrangedSubviews: [title, detail, undo, done]); stack.axis = .vertical; stack.spacing = 8; stack.isLayoutMarginsRelativeArrangement = true; stack.layoutMargins = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
         install(stack, height: 252)
+        postScreenChange(title)
     }
 
     @objc private func undoResult() {
@@ -860,6 +967,12 @@ final class KeyboardViewController: UIInputViewController {
         UIAccessibility.post(notification: .announcement, argument: error.recoveryMessage)
     }
 
+    private func postScreenChange(_ target: UIView) {
+        DispatchQueue.main.async {
+            UIAccessibility.post(notification: .screenChanged, argument: target)
+        }
+    }
+
     private func install(_ content: UIView, height: CGFloat) {
         view.subviews.forEach { $0.removeFromSuperview() }
         let scrollView = UIScrollView()
@@ -889,11 +1002,13 @@ final class KeyboardViewController: UIInputViewController {
 
     private func showTyping() {
         guard let typingStack else { return }
+        isSkillPaletteVisible = false
         statusLabel.text = isFullAccessEnabled ? "入力" : "入力。Skill Keyはフルアクセスが必要"
         statusLabel.accessibilityValue = statusLabel.text
         actionButton.accessibilityLabel = "AIコマンドを開く（端末内）"
         actionButton.isEnabled = true
         install(typingStack, height: 252)
+        postScreenChange(statusLabel)
     }
 
     @objc private func cancelAction() { transition(.cancel); captureDraft = nil; captureAcknowledged = false; hasSelectionCapture = false; pendingShortcutSkill = nil; pendingShortcutActivation = nil; showTyping() }
@@ -909,6 +1024,7 @@ final class KeyboardViewController: UIInputViewController {
         pendingShortcutActivation = nil
         consumedLongPressKey = nil
         longPressBeganKey = nil
+        isSkillPaletteVisible = false
         commandTextView.text = nil
         resultTextView.text = nil
         if showTypingView { showTyping() }
@@ -920,6 +1036,7 @@ final class KeyboardViewController: UIInputViewController {
 
     private func shortcutActivationStillCurrent(now: Date = Date()) -> Bool {
         guard let activation = pendingShortcutActivation else { return true }
+        guard isFullAccessEnabled else { return false }
         guard activation.editorSessionID == documentIdentifier, activation.expiresAt >= now,
               let current = shortcutStore.loadLastKnownGood(), current.generation == activation.snapshotGeneration,
               current.deviceID == activation.deviceID else {
@@ -979,8 +1096,14 @@ final class KeyboardViewController: UIInputViewController {
     /// A document/field transition invalidates capture, result and undo state. An Apply callback
     /// is accepted only when the resulting document identity and whole-field fingerprint match.
     func textDidChange(_ textInput: UITextInput) {
+        consumedLongPressKey = nil
+        longPressBeganKey = nil
         updateReturnKeyPresentation()
         refreshFieldSecurityFromProxy()
+        if isSkillPaletteVisible {
+            showTyping()
+            return
+        }
         if case .applied(let token) = machine.screen {
             let identityMatches = token.documentIdentifier == nil || token.documentIdentifier == documentIdentifier
             if identityMatches && currentAppliedFingerprint() == token.appliedFingerprint { return }

@@ -145,6 +145,13 @@ class InputConnectionAdapterTest {
     }
 
     @Test
+    fun deleteBackwardAtBeginningIsASuccessfulNoOp() {
+        val editor = FakeEditor("", 0, 0)
+        assertTrue(InputConnectionAdapter(editor.connection).deleteBackward())
+        assertEquals("", editor.text)
+    }
+
+    @Test
     fun ordinaryInsertAndDeleteContainEditorExceptions() {
         val editor = FakeEditor("x", 1, 1).apply {
             throwOnCommit = true

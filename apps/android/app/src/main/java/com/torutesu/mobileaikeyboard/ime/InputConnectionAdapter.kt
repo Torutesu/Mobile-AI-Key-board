@@ -139,7 +139,7 @@ class InputConnectionAdapter(
         val selected = safely { inputConnection.getSelectedText(0)?.toString() }
         if (!selected.isNullOrEmpty()) return safelyBoolean { inputConnection.commitText("", 1) } == true
         val before = safely { inputConnection.getTextBeforeCursor(64, 0)?.toString() } ?: return false
-        if (before.isEmpty()) return false
+        if (before.isEmpty()) return true
         val count = previousGraphemeUtf16Length(before)
         return count > 0 && safelyBoolean { inputConnection.deleteSurroundingText(count, 0) } == true
     }

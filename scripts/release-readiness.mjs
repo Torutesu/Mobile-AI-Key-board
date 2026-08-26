@@ -9,7 +9,7 @@
  * still records not_proven in the JSON report.
  */
 import fs from 'node:fs';
-import { createHash } from 'node:crypto';
+import { createHash, createPublicKey, verify as verifySignature } from 'node:crypto';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -47,6 +47,11 @@ const requiredApps = {
   ios: ['Messages', 'Mail', 'Safari', 'LINE', 'Slack', 'Gmail', 'Notion'],
   android: ['Messages', 'Mail', 'Chrome', 'LINE', 'Slack', 'Gmail', 'Notion'],
 };
+const requiredDeviceClasses = {
+  ios: ['iphone_baseline', 'iphone_current', 'iphone_small', 'ipad_portrait_landscape'],
+  android: ['android11_baseline', 'pixel_current', 'samsung_current', 'android_low_memory'],
+};
+const evidenceDigest = /^sha256:[a-f0-9]{64}$/;
 const requiredMetrics = [
   'key_to_commit_p50_ms', 'key_to_commit_p95_ms', 'keyboard_cold_open_p95_ms',
   'keyboard_warm_open_p95_ms', 'long_press_false_activation_rate',
@@ -230,14 +235,34 @@ function validateCandidate(candidate, status, label, expectedSha = null) {
   return null;
 }
 
-function validateMatrix(matrix, expectedSha = null) {
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
+  return JSON.stringify(value);
+}
+
+function attestationPayload(run) {
+  const copy = structuredClone(run);
+  if (copy.attestation) delete copy.attestation.signature;
+  return Buffer.from(stableJson({ schema: 'mobile-ai-keyboard.protected-run.v1', run: copy }), 'utf8');
+}
+
+function validateMatrix(matrix, expectedSha = null, trustedAttestationKeys = {}, nowMillis = Date.now()) {
   const errors = [];
+  const attestationNonces = new Set();
+  const verificationIDs = new Set();
   if (matrix.schema_version !== 'mobile-ai-keyboard.real-device-e2e.v1') errors.push('wrong schema_version');
   if (matrix.evidence_class !== 'protected_external') errors.push('evidence_class must be protected_external');
   if (!VALID_STATUSES.has(matrix.status)) errors.push(`invalid matrix status ${matrix.status ?? 'missing'}`);
-  for (const scenario of requiredScenarios) if (!matrix.required_scenarios?.includes(scenario)) errors.push(`missing scenario ${scenario}`);
-  for (const fieldClass of requiredFieldClasses) if (!matrix.required_field_classes?.includes(fieldClass)) errors.push(`missing field class ${fieldClass}`);
-  for (const lifecycleEvent of requiredLifecycleEvents) if (!matrix.required_lifecycle_events?.includes(lifecycleEvent)) errors.push(`missing lifecycle event ${lifecycleEvent}`);
+  const exactContract = (declared, required, label) => {
+    if (!Array.isArray(declared) || declared.length !== required.length || new Set(declared).size !== declared.length || declared.some((id) => !required.includes(id))) {
+      errors.push(`${label} contract must contain exactly the known required IDs`);
+    }
+    for (const id of required) if (!Array.isArray(declared) || !declared.includes(id)) errors.push(`missing ${label} ${id}`);
+  };
+  exactContract(matrix.required_scenarios, requiredScenarios, 'scenario');
+  exactContract(matrix.required_field_classes, requiredFieldClasses, 'field class');
+  exactContract(matrix.required_lifecycle_events, requiredLifecycleEvents, 'lifecycle event');
   const platforms = new Set((matrix.targets ?? []).map((target) => target.platform));
   if (!Array.isArray(matrix.targets) || matrix.targets.length !== 2 || platforms.size !== 2) errors.push('E2E matrix must contain exactly one iOS and one Android target');
   for (const platform of ['ios', 'android']) if (!platforms.has(platform)) errors.push(`missing ${platform} target`);
@@ -245,6 +270,7 @@ function validateMatrix(matrix, expectedSha = null) {
     if (!requiredApps[target.platform]) errors.push(`unknown target platform ${target.platform ?? 'missing'}`);
     if (!Array.isArray(target.devices) || target.devices.length === 0) errors.push(`${target.platform} has no devices`);
     const platformApps = requiredApps[target.platform];
+    const platformDevices = requiredDeviceClasses[target.platform];
     if (!Array.isArray(target.apps)) errors.push(`${target.platform} has no app contract`);
     else if (platformApps) {
       if (new Set(target.apps).size !== target.apps.length) errors.push(`${target.platform} app contract contains duplicates`);
@@ -253,37 +279,87 @@ function validateMatrix(matrix, expectedSha = null) {
     }
     if (!['not_proven', 'in_progress', 'passed', 'failed'].includes(target.status)) errors.push(`${target.platform} has an invalid status`);
     if (target.status === 'passed') {
-      for (const run of target.runs ?? []) {
-        if (run.evidence_class !== 'protected_external' || !run.run_id || !run.runner_id || run.attested !== true) errors.push(`${target.platform} passed run is not protected/attested`);
+      if (!Array.isArray(target.device_classes) || target.device_classes.length !== platformDevices?.length || new Set(target.device_classes).size !== target.device_classes.length || target.device_classes.some((deviceClass) => !platformDevices.includes(deviceClass))) errors.push(`${target.platform} passed target must declare exactly the required device classes`);
+      if (!Array.isArray(target.runs) || target.runs.length === 0) errors.push(`${target.platform} passed without a protected run`);
+      const runIDs = new Set();
+      const coveredDeviceClasses = new Set();
+      for (const runValue of Array.isArray(target.runs) ? target.runs : []) {
+        const run = runValue && typeof runValue === 'object' ? runValue : {};
+        if (run.status !== 'passed') errors.push(`${target.platform} passed target contains a run without status passed`);
+        if (run.evidence_class !== 'protected_external' || !run.run_id || !run.runner_id) errors.push(`${target.platform} passed run is not protected/attested`);
+        if (runIDs.has(run.run_id)) errors.push(`${target.platform} passed evidence contains duplicate run_id ${run.run_id}`);
+        if (run.run_id) runIDs.add(run.run_id);
         if (run.environment !== 'protected_device') errors.push(`${target.platform} passed run is not explicitly classified as protected_device`);
-        if (!run.device_id || !run.source_commit || !run.artifact_digest) errors.push(`${target.platform} passed run is missing device_id/source_commit/artifact_digest binding`);
+        if (!run.device_id || !run.device_class || !run.device_model || !run.os_version || !run.source_commit || !run.artifact_digest) errors.push(`${target.platform} passed run is missing concrete device/source/artifact binding`);
+        if (platformDevices && !platformDevices.includes(run.device_class)) errors.push(`${target.platform} passed run has an unknown device class`);
+        if (Array.isArray(target.device_classes) && !target.device_classes.includes(run.device_class)) errors.push(`${target.platform} passed run device class is not declared by target`);
+        if (run.device_class) coveredDeviceClasses.add(run.device_class);
         if (run.source_commit !== matrix.candidate?.source_commit) errors.push(`${target.platform} passed run source_commit does not match matrix candidate`);
         if (run.artifact_digest !== matrix.candidate?.artifact_digest) errors.push(`${target.platform} passed run artifact_digest does not match matrix candidate`);
         if (!DIGEST.test(run.artifact_digest ?? '')) errors.push(`${target.platform} passed run artifact_digest is invalid`);
-        if (!Array.isArray(run.scenarios) || run.scenarios.length === 0) errors.push(`${target.platform} passed run is missing scenario coverage`);
-        if (!Array.isArray(run.accessibility_tools) || run.accessibility_tools.length === 0) errors.push(`${target.platform} passed run is missing accessibility tool evidence`);
-        if (!Array.isArray(run.field_classes) || run.field_classes.length === 0) errors.push(`${target.platform} passed run is missing field-class coverage`);
-        if (!Array.isArray(run.lifecycle_events) || run.lifecycle_events.length === 0) errors.push(`${target.platform} passed run is missing lifecycle-event coverage`);
-        if (!Array.isArray(run.apps) || run.apps.length === 0) errors.push(`${target.platform} passed run is missing app coverage`);
+        if (['attested', 'scenarios', 'field_classes', 'lifecycle_events', 'apps'].some((field) => Object.prototype.hasOwnProperty.call(run, field))) errors.push(`${target.platform} passed run contains legacy label/self-attestation fields`);
+        const attestation = run.attestation ?? {};
+        if (attestation.status !== 'verified' || attestation.verifier_kind !== 'protected_runner' || !attestation.verifier_id || !attestation.verification_id || !attestation.signature) errors.push(`${target.platform} passed run is missing verified protected-runner attestation`);
+        if (attestation.verifier_id !== run.runner_id) errors.push(`${target.platform} passed run attestation verifier_id does not match runner_id`);
+        for (const [field, expected] of [['run_id', run.run_id], ['device_id', run.device_id], ['source_commit', run.source_commit], ['artifact_digest', run.artifact_digest]]) if (attestation[field] !== expected) errors.push(`${target.platform} passed run attestation ${field} does not match run`);
+        const trustedKey = trustedAttestationKeys?.[attestation.verifier_id];
+        if (!trustedKey) errors.push(`${target.platform} passed run attestation verifier is not trusted by release environment`);
+        else {
+          try {
+            const publicKey = createPublicKey(trustedKey);
+            const signature = Buffer.from(attestation.signature ?? '', 'base64');
+            const strictBase64 = signature.toString('base64') === attestation.signature;
+            if (publicKey.asymmetricKeyType !== 'ed25519' || !strictBase64 || signature.length !== 64 || !verifySignature(null, attestationPayload(run), publicKey, signature)) errors.push(`${target.platform} passed run attestation signature verification failed`);
+          } catch {
+            errors.push(`${target.platform} passed run attestation signature verification failed`);
+          }
+        }
+        const issuedAt = Date.parse(attestation.issued_at ?? '');
+        const expiresAt = Date.parse(attestation.expires_at ?? '');
+        if (!Number.isFinite(issuedAt) || !Number.isFinite(expiresAt) || issuedAt > nowMillis + 5 * 60_000 || expiresAt < nowMillis || expiresAt <= issuedAt || expiresAt - issuedAt > 30 * 24 * 60 * 60_000) errors.push(`${target.platform} passed run attestation freshness window is invalid`);
+        if (typeof attestation.nonce !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(attestation.nonce)) errors.push(`${target.platform} passed run attestation nonce is invalid`);
+        else if (attestationNonces.has(attestation.nonce)) errors.push(`${target.platform} passed evidence reuses an attestation nonce`);
+        else attestationNonces.add(attestation.nonce);
+        if (verificationIDs.has(attestation.verification_id)) errors.push(`${target.platform} passed evidence reuses verification_id ${attestation.verification_id}`);
+        else if (attestation.verification_id) verificationIDs.add(attestation.verification_id);
+        const validateResults = (results, key, required, label) => {
+          if (!Array.isArray(results) || results.length !== required.length) {
+            errors.push(`${target.platform} passed run is missing exact ${label} results`);
+            return;
+          }
+          const seen = new Set();
+          for (const result of results) {
+            const id = result?.[key];
+            if (!required.includes(id)) errors.push(`${target.platform} passed run has unknown ${label} ${id ?? 'missing'}`);
+            if (seen.has(id)) errors.push(`${target.platform} passed run has duplicate ${label} ${id}`);
+            seen.add(id);
+            if (result?.run_id !== run.run_id) errors.push(`${target.platform} passed run ${label} ${id ?? 'missing'} evidence is not bound to run_id`);
+            if (result?.status !== 'passed' || !result?.evidence_ref || !evidenceDigest.test(result?.evidence_digest ?? '')) errors.push(`${target.platform} passed run ${label} ${id ?? 'missing'} lacks passed outcome/evidence binding`);
+          }
+          for (const id of required) if (!seen.has(id)) errors.push(`${target.platform} passed run does not cover ${label} ${id}`);
+        };
+        validateResults(run.scenario_results, 'scenario_id', requiredScenarios, 'scenario');
+        validateResults(run.field_class_results, 'field_class', requiredFieldClasses, 'field class');
+        validateResults(run.lifecycle_results, 'lifecycle_event', requiredLifecycleEvents, 'lifecycle event');
+        if (!Array.isArray(run.accessibility_tools) || run.accessibility_tools.length === 0 || run.accessibility_tools.some((tool) => !['voiceover', 'talkback'].includes(tool))) errors.push(`${target.platform} passed run has invalid accessibility tool evidence`);
+        const requiredAccessibilityTool = target.platform === 'ios' ? 'voiceover' : 'talkback';
+        if (!run.accessibility_tools?.includes(requiredAccessibilityTool)) errors.push(`${target.platform} passed run does not name ${requiredAccessibilityTool}`);
+        if (!Array.isArray(run.app_evidence) || run.app_evidence.length !== platformApps?.length) errors.push(`${target.platform} passed run is missing exact app evidence`);
+        const seenApps = new Set();
+        for (const app of run.app_evidence ?? []) {
+          if (!platformApps?.includes(app?.app_id)) errors.push(`${target.platform} passed run has unknown app evidence ${app?.app_id ?? 'missing'}`);
+          if (seenApps.has(app?.app_id)) errors.push(`${target.platform} passed run has duplicate app evidence ${app.app_id}`);
+          seenApps.add(app?.app_id);
+          if (app?.run_id !== run.run_id) errors.push(`${target.platform} app evidence ${app?.app_id ?? 'missing'} evidence is not bound to run_id`);
+          if (!app?.app_identifier || !app?.evidence_ref || !evidenceDigest.test(app?.evidence_digest ?? '')) errors.push(`${target.platform} app evidence ${app?.app_id ?? 'missing'} lacks concrete identifier/evidence binding`);
+        }
+        for (const app of platformApps ?? []) if (!seenApps.has(app)) errors.push(`${target.platform} passed run does not cover app ${app}`);
         if (/(fixture|simulator|emulator|jvm|ui[-_ ]?test|local|self[-_ ]?attest)/i.test(JSON.stringify(run))) errors.push(`${target.platform} passed run contains a fixture/simulator/emulator/UI-test/local marker`);
       }
-      const coveredScenarios = new Set((target.runs ?? []).flatMap((run) => Array.isArray(run.scenarios) ? run.scenarios : []));
-      for (const scenario of requiredScenarios) if (!coveredScenarios.has(scenario)) errors.push(`${target.platform} passed evidence does not cover scenario ${scenario}`);
-      const coveredFieldClasses = new Set((target.runs ?? []).flatMap((run) => Array.isArray(run.field_classes) ? run.field_classes : []));
-      for (const fieldClass of requiredFieldClasses) if (!coveredFieldClasses.has(fieldClass)) errors.push(`${target.platform} passed evidence does not cover field class ${fieldClass}`);
-      const coveredLifecycleEvents = new Set((target.runs ?? []).flatMap((run) => Array.isArray(run.lifecycle_events) ? run.lifecycle_events : []));
-      for (const lifecycleEvent of requiredLifecycleEvents) if (!coveredLifecycleEvents.has(lifecycleEvent)) errors.push(`${target.platform} passed evidence does not cover lifecycle event ${lifecycleEvent}`);
-      const coveredApps = new Set((target.runs ?? []).flatMap((run) => Array.isArray(run.apps) ? run.apps : []));
-      for (const app of requiredApps[target.platform] ?? []) if (!coveredApps.has(app)) errors.push(`${target.platform} passed evidence does not cover required app ${app}`);
-      const requiredAccessibilityTool = target.platform === 'ios' ? 'voiceover' : 'talkback';
-      if (!(target.runs ?? []).some((run) => run.accessibility_tools?.includes(requiredAccessibilityTool))) errors.push(`${target.platform} passed evidence does not include ${requiredAccessibilityTool} coverage`);
+      for (const deviceClass of platformDevices ?? []) if (!coveredDeviceClasses.has(deviceClass)) errors.push(`${target.platform} passed evidence does not cover device class ${deviceClass}`);
     }
   }
-  if (matrix.status === 'passed') {
-    for (const target of matrix.targets ?? []) {
-      if (target.status !== 'passed' || !Array.isArray(target.runs) || target.runs.length === 0) errors.push(`${target.platform} passed without a protected run`);
-    }
-  }
+  if (matrix.status === 'passed') for (const target of matrix.targets ?? []) if (target.status !== 'passed' || !Array.isArray(target.runs) || target.runs.length === 0) errors.push(`${target.platform} passed without a protected run`);
   const candidateError = validateCandidate(matrix.candidate, matrix.status === 'passed' || (matrix.targets ?? []).some((target) => target.status === 'passed') ? 'passed' : matrix.status, 'E2E matrix', expectedSha);
   if (candidateError) errors.push(candidateError);
   return errors;
@@ -464,7 +540,7 @@ function evidenceChecks(args) {
     try { benchmark = readJson(args.benchmark).value; } catch (error) { results.push(check('evidence.benchmark.schema', 'fail', error.message)); }
   }
   if (matrix) {
-    const errors = validateMatrix(matrix, args.candidateSha);
+    const errors = validateMatrix(matrix, args.candidateSha, args.trustedAttestationKeys, args.nowMillis);
     results.push(check('evidence.e2e.schema', errors.length ? 'fail' : 'pass', errors.length ? errors.join('; ') : 'E2E matrix contains both platforms and all required dimensions'));
     results.push(check('evidence.e2e.proof', errors.length ? 'fail' : (matrix.status === 'passed' ? 'pass' : 'not_proven'), matrix.status === 'not_proven' ? 'no protected physical-device/app runs are recorded' : (errors.length ? 'matrix contains invalid proof' : 'protected physical-device/app runs are bound to this candidate')));
   }
@@ -492,7 +568,12 @@ function evidenceChecks(args) {
 }
 
 export function evaluate(options = {}) {
-  const args = { ...parseArgs([]), ...options };
+  let envTrustedAttestationKeys = {};
+  if (process.env.MOBILE_AI_KEYBOARD_TRUSTED_ATTESTATION_KEYS_JSON) {
+    try { envTrustedAttestationKeys = JSON.parse(process.env.MOBILE_AI_KEYBOARD_TRUSTED_ATTESTATION_KEYS_JSON); }
+    catch { envTrustedAttestationKeys = {}; }
+  }
+  const args = { ...parseArgs([]), trustedAttestationKeys: envTrustedAttestationKeys, nowMillis: Date.now(), ...options };
   const manifest = readJson(args.manifest).value;
   const checks = [...sourceChecks(args, manifest), ...evidenceChecks(args)];
   const hasFailure = checks.some((result) => result.status === 'fail');

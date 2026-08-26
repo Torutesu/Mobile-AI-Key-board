@@ -67,18 +67,32 @@ class KeyboardImeService : InputMethodService() {
 
     override fun onCreateInputView(): View {
         surface?.cancelPendingGestures()
+        // A recreated IME view is a fresh editor capability boundary even when
+        // an OEM omits a matching onStartInput callback. Never carry review,
+        // Apply, or Undo authority into the replacement view.
+        appliedEdit = null
+        activeShortcut = null
+        session = CommandSession()
         shortcutSnapshot = shortcutStore.read()
         surface = KeyboardSurface(this, KeyboardSurface.Callbacks(
             onCommand = { enterCommand() },
             onShortcut = { binding -> invokeShortcut(binding) },
-            onText = { text -> if (currentAdapter()?.insertAtCursor(text) != true) surface?.reportOrdinaryInputFailure() },
-            onDelete = { currentAdapter()?.deleteBackward() },
+            onText = { text ->
+                val committed = currentAdapter()?.insertAtCursor(text) == true
+                if (!committed) surface?.reportOrdinaryInputFailure()
+                committed
+            },
+            onDelete = { if (currentAdapter()?.deleteBackward() != true) surface?.reportOrdinaryInputFailure() },
             onEnter = {
-                currentInputConnection?.let { input ->
+                val input = currentInputConnection
+                if (input == null) {
+                    surface?.reportOrdinaryInputFailure()
+                } else {
                     val action = ReturnKeyModel.from(currentEditorInfo).editorAction
                     if (action == null || !input.performEditorAction(action)) {
-                        input.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_ENTER))
-                        input.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_ENTER))
+                        val down = input.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_ENTER))
+                        val up = input.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_ENTER))
+                        if (!down || !up) surface?.reportOrdinaryInputFailure()
                     }
                 }
             },

@@ -24,6 +24,10 @@ import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.Gravity
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
 import com.torutesu.mobileaikeyboard.core.ExecutableLocalSkills
 import com.torutesu.mobileaikeyboard.core.AccountBoundaryStore
 import com.torutesu.mobileaikeyboard.core.HostAppState
@@ -31,6 +35,12 @@ import com.torutesu.mobileaikeyboard.core.HostEvent
 import com.torutesu.mobileaikeyboard.core.HostFixtureClient
 import com.torutesu.mobileaikeyboard.core.InstalledSkillStore
 import com.torutesu.mobileaikeyboard.core.KeyboardState
+import com.torutesu.mobileaikeyboard.core.ImeConsumableConfig
+import com.torutesu.mobileaikeyboard.core.KeyboardTheme
+import com.torutesu.mobileaikeyboard.core.HapticMode
+import com.torutesu.mobileaikeyboard.core.KeySize
+import com.torutesu.mobileaikeyboard.core.OneHandedMode
+import com.torutesu.mobileaikeyboard.core.JapaneseWorkflowPack
 import com.torutesu.mobileaikeyboard.core.LocalSkillDescriptor
 import com.torutesu.mobileaikeyboard.core.LocalSkillExecutorKind
 import com.torutesu.mobileaikeyboard.core.LocalSkillRegistry
@@ -166,7 +176,7 @@ class VerticalSliceUiTest {
     }
 
     @Test
-    fun physicalKeyboardTapAndAccessibleLongClickAreDistinctActions() {
+    fun physicalTapAccessibleLongClickAndVisiblePaletteRemainDistinctActions() {
         var typed = ""
         var triggered = 0
         val descriptor = LocalSkillDescriptor(
@@ -175,7 +185,7 @@ class VerticalSliceUiTest {
         LocalSkillRegistry.install(descriptor)
         val binding = TriggerKeyBinding("binding-gesture", descriptor.skillId, descriptor.skillVersion, descriptor.skillDigest, keyCode = "KeyZ", skillName = descriptor.skillName)
         val surface = KeyboardSurface(composeRule.activity, KeyboardSurface.Callbacks(
-                onCommand = {}, onShortcut = { triggered++ }, onText = { typed += it }, onDelete = {}, onEnter = {},
+                onCommand = {}, onShortcut = { triggered++ }, onText = { typed += it; true }, onDelete = {}, onEnter = {},
                 onSwitchKeyboard = {}, onCapture = { _, _, _ -> }, onAcknowledge = {}, onEditResult = {}, onRegenerate = {},
                 onApply = {}, onCopy = {}, onUndo = {}, onCancel = {},
             ))
@@ -186,10 +196,46 @@ class VerticalSliceUiTest {
         composeRule.waitForIdle()
 
         onView(withContentDescription("q")).perform(click())
-        onView(withContentDescription("Z、${descriptor.skillName}、長押しで実行")).perform(longClick())
+        onView(withContentDescription("Z、${descriptor.skillName}、利用可能、端末内の選択文変換、長押しまたはSkill一覧から実行")).perform(longClick())
+        onView(withContentDescription("Skill一覧を開く、1件")).perform(click())
+        onView(withContentDescription("Z、${descriptor.skillName}を実行、利用可能、端末内の選択文変換")).perform(click())
         composeRule.runOnIdle {
             assertEquals("q", typed)
-            assertEquals(1, triggered)
+            assertEquals(2, triggered)
+        }
+    }
+
+    @Test
+    fun imeConsumesThemeKeySizeAndOneHandedRuntimeSettings() {
+        val surface = KeyboardSurface(composeRule.activity, KeyboardSurface.Callbacks(
+            onCommand = {}, onShortcut = {}, onText = { true }, onDelete = {}, onEnter = {}, onSwitchKeyboard = {},
+            onCapture = { _, _, _ -> }, onAcknowledge = {}, onEditResult = {}, onRegenerate = {},
+            onApply = {}, onCopy = {}, onUndo = {}, onCancel = {},
+        ))
+        val config = ImeConsumableConfig(
+            theme = KeyboardTheme.DARK,
+            haptics = HapticMode.OFF,
+            keySize = KeySize.LARGE,
+            oneHanded = OneHandedMode.RIGHT,
+            workflowPack = JapaneseWorkflowPack.POLITE,
+        )
+        composeRule.activity.runOnUiThread {
+            composeRule.activity.setContentView(surface)
+            surface.render(KeyboardState(), config = config)
+        }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle {
+            val root = surface.getChildAt(0) as LinearLayout
+            val params = root.layoutParams as FrameLayout.LayoutParams
+            assertEquals(Gravity.END, params.gravity)
+            assertEquals((composeRule.activity.resources.displayMetrics.widthPixels * 0.84f).toInt(), params.width)
+            val q = findViewWithDescription(surface, "q") as TextView
+            val p = findViewWithDescription(surface, "p") as TextView
+            assertEquals((58 * composeRule.activity.resources.displayMetrics.density).toInt(), q.layoutParams.height)
+            assertEquals(android.graphics.Color.WHITE, q.currentTextColor)
+            assertTrue(root.width > 0)
+            assertTrue(q.left >= 0)
+            assertTrue(p.right <= root.width)
         }
     }
 
@@ -203,7 +249,7 @@ class VerticalSliceUiTest {
         LocalSkillRegistry.install(descriptor)
         val binding = TriggerKeyBinding("binding-cancel-gesture", descriptor.skillId, descriptor.skillVersion, descriptor.skillDigest, keyCode = "KeyZ", skillName = descriptor.skillName)
         val surface = KeyboardSurface(composeRule.activity, KeyboardSurface.Callbacks(
-            onCommand = {}, onShortcut = { triggered++ }, onText = { typed += it }, onDelete = {}, onEnter = {},
+            onCommand = {}, onShortcut = { triggered++ }, onText = { typed += it; true }, onDelete = {}, onEnter = {},
             onSwitchKeyboard = {}, onCapture = { _, _, _ -> }, onAcknowledge = {}, onEditResult = {}, onRegenerate = {},
             onApply = {}, onCopy = {}, onUndo = {}, onCancel = {},
         ))
@@ -211,7 +257,7 @@ class VerticalSliceUiTest {
         composeRule.activity.runOnUiThread {
             composeRule.activity.setContentView(surface)
             surface.render(KeyboardState(), ShortcutSnapshot(generation = 1, bindings = listOf(binding)))
-            boundKey = findViewWithDescription(surface, "Z、${descriptor.skillName}、長押しで実行")
+            boundKey = findViewWithDescription(surface, "Z、${descriptor.skillName}、利用可能、端末内の選択文変換、長押しまたはSkill一覧から実行")
                 ?: error("bound key missing")
             val downAt = SystemClock.uptimeMillis()
             val downEvent = MotionEvent.obtain(downAt, downAt, MotionEvent.ACTION_DOWN, 8f, 8f, 0)

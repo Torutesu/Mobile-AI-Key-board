@@ -29,7 +29,10 @@ This is a strong beta foundation, not yet a world-leading keyboard. The largest 
 - Native owner/session/exact-version circuit breakers on both platforms: three consecutive executor failures within ten minutes suppress only that Skill version and decoration; ordinary typing remains available, corruption fails Skill execution closed, and success clears the failure window.
 - Android onboarding now requires enabled + currently selected IME + a content-free activation probe from this exact `InputMethodService` + nonblank test input, preventing another keyboard from completing setup.
 - iOS onboarding refreshes on foreground return, expires capability observations after five minutes, and discloses the actual App Group metadata categories instead of understating them.
-- Protected evidence schemas now bind the exact seven-app matrix, metric units and fixed pass thresholds, candidate artifact, and a signed Android AAB/certificate/merged-manifest inspection. Fake app lists and over-budget measurements cannot self-report `passed`.
+- A visible non-hold Skill palette on both keyboards routes each item through the same exact-version Capture Review path as its bound key; iOS moves accessibility focus on review transitions and Android emits content-free mode announcements.
+- Android ordinary-input hardening now respects sound/haptic-off configuration, uses locale-stable letter mapping, invalidates stale review authority on IME view recreation, and reports delete/return mutation failure.
+- Android now consumes persisted theme, key-size, and left/right one-handed layout settings in the real IME; rejected character insertion no longer consumes one-shot Shift, and empty-field backspace is a successful no-op rather than an error.
+- Protected evidence schemas now bind the exact seven-app/device-class matrix, metric units and fixed pass thresholds, candidate artifact, and a signed Android AAB/certificate/merged-manifest inspection. Physical run records require an Ed25519 signature over the complete canonical run from an out-of-band trusted verifier key; fake app lists, arbitrary coverage labels, self-attestation fields, and over-budget measurements cannot self-report `passed`.
 
 ## P0 — required before an external beta claim
 
@@ -71,7 +74,7 @@ Qualify VoiceOver and TalkBack, Switch Control, Dynamic Type/font scale, reduced
 - Private/team/public visibility with clear trust differences; no public marketplace until the safety supply chain is real.
 - Builder schema for typed inputs, output contract, tools, retention, fixtures, cost ceiling, timeout, and failure policy.
 - Explicit upgrade-required state when installed version/digest/executor compatibility changes.
-- Searchable overflow palette and accessible action list for users who cannot or do not want to hold letter keys.
+- Search and grouping within the implemented visible overflow palette; physical VoiceOver/TalkBack and Switch Control operation remains `not_proven`.
 - Authenticated cross-device metadata sync with conflict resolution and tombstones; never sync editor content or credentials through the shortcut snapshot.
 
 ### Keyboard quality and personalization
@@ -104,6 +107,7 @@ Qualify VoiceOver and TalkBack, Switch Control, Dynamic Type/font scale, reduced
 | A–Z keys can be assigned and managed | Implemented; local builds/tests pass |
 | Number/symbol/control keys can be assigned | Intentionally unsupported for beta; collision policy and zero-input-loss physical evidence required first |
 | Tap types and long press invokes a local Skill | Implemented; simulator/emulator/source evidence, physical matrix `not_proven` |
+| Assigned Skills have a visible non-hold action | Implemented on iOS/Android; physical VoiceOver/TalkBack and Switch Control `not_proven` |
 | Repeated Skill failure is contained per exact version | Implemented and fault-tested locally; physical crash/memory-pressure evidence `not_proven` |
 | Onboarding proves this Android IME was used | Implemented with selected-IME + content-free activation handshake; physical OEM matrix `not_proven` |
 | Settings survive authorized Android process death | Implemented with integrity-bound lease; physical memory-pressure run `not_proven` |
