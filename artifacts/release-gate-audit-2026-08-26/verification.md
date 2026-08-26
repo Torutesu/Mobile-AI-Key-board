@@ -27,6 +27,7 @@ physical-device, emulator, UI-test, store-signing, or production qualification.
 | `swift test` | PASS: 102 tests |
 | iOS Simulator UI test | PASS: Builder → private deploy → Add → H assignment → local fixture → save |
 | Android `testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest` | PASS |
+| Accessibility-size diagnostics | CI covers iOS Dynamic Type accessibility size and Android 1.3 font scale; physical VoiceOver/TalkBack remain `not_proven` |
 | `pnpm release:readiness -- --static-only` | PASS source/schema checks; aggregate `not_proven` |
 | E2E candidate/run binding adversarial test | PASS |
 | Performance candidate/measurement binding adversarial test | PASS |

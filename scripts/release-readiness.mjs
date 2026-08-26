@@ -179,7 +179,8 @@ function sourceChecks(args, manifest) {
     ? check('ci.artifact.release_readiness', 'pass', 'CI writes and uploads a release-readiness report')
     : check('ci.artifact.release_readiness', 'fail', 'CI must preserve the machine-readable release-readiness report'));
   const hasIosUiTestCommand = /\bxcodebuild[\s\S]{0,1200}\btest\b/.test(workflow);
-  const hasAndroidInstrumentationCommand = /\bconnected(?:Debug|Release)AndroidTest\b/.test(workflow);
+  const hasAndroidInstrumentationCommand = /\bconnected(?:Debug|Release)AndroidTest\b/.test(workflow)
+    || /\badb\s+shell\s+am\s+instrument\b/.test(workflow);
   results.push(hasIosUiTestCommand && hasAndroidInstrumentationCommand
     ? check('ci.ui_test_lane', 'pass', 'CI declares both iOS UI-test and Android instrumentation lanes')
     : check('ci.ui_test_lane', 'not_proven', 'CI currently builds the iOS Simulator and Android debug APK but does not execute both UI-test/instrumentation lanes'));

@@ -2,6 +2,29 @@ import XCTest
 
 @MainActor
 final class MobileAIKeyboardUITests: XCTestCase {
+    func testTriggerKeySheetAtAccessibilityTextSizeKeepsAllKeysAndSafetyActionsReachable() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-trigger-key-sheet-qa", "-ui-test-reset", "-accessibility-text-size-qa"]
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["キーを選ぶ"].waitForExistence(timeout: 5))
+        let triggerKeys = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'trigger-key-'"))
+        XCTAssertEqual(triggerKeys.count, 26)
+        app.buttons["trigger-key-q"].tap()
+
+        let runFixture = app.buttons["run-local-fixture"]
+        XCTAssertTrue(runFixture.waitForExistence(timeout: 3))
+        XCTAssertTrue(runFixture.isHittable)
+        runFixture.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["fixture-success"].waitForExistence(timeout: 3))
+
+        let save = app.buttons["save-skill-key"]
+        XCTAssertTrue(save.isHittable)
+        save.tap()
+        XCTAssertTrue(app.alerts["割り当てを保存しました"].waitForExistence(timeout: 3))
+    }
+
     func testBuilderAddAndAssignPrivateSkillWithoutLosingOrdinaryInputBoundary() throws {
         continueAfterFailure = false
         let app = XCUIApplication()

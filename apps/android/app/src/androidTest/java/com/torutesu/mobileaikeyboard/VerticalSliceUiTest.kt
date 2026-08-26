@@ -2,11 +2,14 @@ package com.torutesu.mobileaikeyboard
 
 import androidx.activity.ComponentActivity
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.unit.Density
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.longClick
@@ -99,6 +102,36 @@ class VerticalSliceUiTest {
             assertEquals(version.skillId, snapshot.bindings.single().skillId)
             assertEquals(version.digest, snapshot.bindings.single().skillDigest)
             assertTrue(ExecutableLocalSkills.isExecutable(snapshot.bindings.single()))
+        }
+    }
+
+    @Test
+    fun shortcutPickerRemainsOperableAtLargeFontScale() {
+        val version = deployedVersion("private.ui.large-font")
+        val descriptor = LocalSkillRegistry.fromPrivateVersion(version)!!
+        LocalSkillRegistry.install(descriptor)
+        var published: ShortcutSnapshot? = null
+        val deviceDensity = composeRule.activity.resources.displayMetrics.density
+        composeRule.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(deviceDensity, fontScale = 1.3f)) {
+                MaterialTheme {
+                    ShortcutKeysDashboard(
+                        snapshot = ShortcutSnapshot.empty(),
+                        onPublish = { published = it; true },
+                        candidates = listOf(descriptor),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("Skill Keyを追加").performClick()
+        composeRule.onNodeWithText("${version.skillName}（端末内 v${version.version}）").performClick()
+        composeRule.onNodeWithContentDescription("Q、割り当て可能").performClick()
+        composeRule.onNodeWithText("端末内fixtureをテスト").performClick()
+        composeRule.onNodeWithText("保存").assertIsEnabled().performClick()
+        composeRule.runOnIdle {
+            assertEquals("KeyQ", published!!.bindings.single().keyCode)
+            assertTrue(ExecutableLocalSkills.isExecutable(published!!.bindings.single()))
         }
     }
 

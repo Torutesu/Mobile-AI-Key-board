@@ -72,6 +72,7 @@ jobs:
           CODE_SIGNING_ALLOWED=NO
           build
       - name: Exercise private Skill to A-Z assignment on iOS Simulator
+        timeout-minutes: 15
         run: |
           set -euo pipefail
           device_id="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; devices=json.load(sys.stdin)["devices"]; print(next(device["udid"] for runtime in devices.values() for device in runtime if device["name"].startswith("iPhone") and device.get("isAvailable", False)))')"
@@ -116,6 +117,7 @@ jobs:
       # physical IME; release evidence must remain not_proven until protected.
       - run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
       - name: Exercise A-Z assignment and ordinary-input boundary on Android Emulator
+        timeout-minutes: 15
         run: |
           set -euo pipefail
           echo no | avdmanager create avd --force --name mobile-ai-keyboard-ci --package 'system-images;android-35;google_apis;x86_64'
@@ -127,7 +129,13 @@ jobs:
           adb shell settings put global window_animation_scale 0
           adb shell settings put global transition_animation_scale 0
           adb shell settings put global animator_duration_scale 0
-          ./gradlew --no-daemon connectedDebugAndroidTest
+          adb install -r app/build/outputs/apk/debug/app-debug.apk
+          adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          timeout 300 adb shell am instrument -w -r com.torutesu.mobileaikeyboard.test/androidx.test.runner.AndroidJUnitRunner | tee "$RUNNER_TEMP/android-instrumentation.log"
+          grep -Eq '^OK \([0-9]+ tests?\)$' "$RUNNER_TEMP/android-instrumentation.log"
+          adb emu kill || true
+          wait "$emulator_pid" 2>/dev/null || true
+          trap - EXIT
       - name: Verify Android offline keyboard boundary
         run: |
           set -euo pipefail

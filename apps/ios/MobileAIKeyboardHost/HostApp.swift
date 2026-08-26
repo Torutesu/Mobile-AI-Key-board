@@ -11,6 +11,12 @@ struct MobileAIKeyboardHostApp: App {
             if ProcessInfo.processInfo.arguments.contains("-skill-keys-qa") || ProcessInfo.processInfo.arguments.contains("-trigger-key-sheet-qa") {
                 NavigationStack { SkillKeysView() }
                     .environmentObject(shortcutRegistry)
+                    .environment(\.dynamicTypeSize, ProcessInfo.processInfo.arguments.contains("-accessibility-text-size-qa") ? .accessibility3 : .large)
+                    .onAppear {
+                        if ProcessInfo.processInfo.arguments.contains("-ui-test-reset") {
+                            shortcutRegistry.resetForUITest()
+                        }
+                    }
             } else if ProcessInfo.processInfo.arguments.contains("-skill-builder-qa") {
                 NavigationStack { SkillBuilderView() }
                     .environmentObject(accountStore)
