@@ -34,6 +34,9 @@ Working title only. Product naming and visual identity are intentionally deferre
 - [W7 store and privacy declaration baseline](docs/16-store-privacy-declarations.md)
 - [W8 beyond-parity foundation](docs/17-w8-beyond-parity.md)
 - [W8 Trust Preview acceptance baseline](docs/18-w8-trust-preview-acceptance.md)
+- [Keyboard shortcut platform product requirements](docs/19-keyboard-shortcut-product-requirements.md)
+- [Shortcut runtime architecture and implementation plan](docs/20-shortcut-runtime-architecture.md)
+- [Acti screenshot parity specification](docs/21-acti-screenshot-parity.md)
 
 ## Current status
 

@@ -84,6 +84,17 @@ Exit: Acti-class core experience is publicly usable without relying on marketpla
 
 Exit: the local/provider-neutral trust foundation passes adversarial shared and native tests, while every absent production verifier, marketplace, device, provider, and R4 gate remains explicitly `not_proven`. W8 fixture completion is not public-marketplace or R4 qualification.
 
+### W9: Keyboard shortcut platform
+
+- Canonical physical `A-Z` trigger-key bindings plus optional ordered palette layout, sanitized immutable snapshots, generation/digest validation, tombstones, and last-known-good rollback.
+- iOS host-to-extension App Group publication and Android host-to-IME DataStore synchronization.
+- Host `Add To My Keyboard` flow, QWERTY trigger-key picker, conflict/reassignment, disable/remove, explicit version upgrade, and connection/access state management.
+- Tap-to-type/long-press-to-invoke keyboard semantics, subtle bound-key indicators, permanent Command/palette fallback, and accessible equivalent actions.
+- Exact shortcut activation binding into Capture Review, Trust Preview, local execution, Result Preview, Apply, receipt, and Undo.
+- One connected read and one separately confirmed write only after physical-device, permission, provider, security, and release-evidence gates.
+
+Exit: a nondeveloper can deploy a private Skill, assign it to the keyboard, use it safely in representative third-party apps, and manage or revoke it across process death/restart without regressing ordinary typing. See `docs/19-keyboard-shortcut-product-requirements.md` and `docs/20-shortcut-runtime-architecture.md`.
+
 ## 3. Recommended implementation order
 
 1. Android IME feasibility and iOS extension feasibility in parallel conceptually, but keep shared schemas platform-neutral.

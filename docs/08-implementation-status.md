@@ -96,6 +96,7 @@ This checkpoint implements the W0/W1 local-first foundation, W2 local text-actio
 - Durable transactional Skill storage, trusted test executors, signed Skill packages, external cost settlement, moderation/reporting/kill switches, public marketplace publication, and cross-device production binding synchronization.
 - Protected publisher/package verification, hardware-backed publisher signing custody, real team administration, durable governance/revocation state, external moderation, public safety metrics, marketplace distribution, and separately qualified R4 connectors.
 - Host-to-extension/App Group and Host-to-IME settings persistence/runtime synchronization, plus persistence across process death or device restart.
+- User-configurable physical letter-key assignment, QWERTY trigger picker, tap-to-type/long-press-to-invoke gesture handling, Skill Keys management, optional searchable palette, canonical shortcut snapshots, exact activation routing, live Host-to-keyboard refresh, and Acti-class key-binding parity. The W6 `shortcut` trigger and native installed-binding fixtures are models only; they are not a keyboard runtime implementation.
 - Exact-candidate protected CI identity, durable incident/kill-switch storage, real crash/performance collection, independently repeatable beta migration/rollback, and configured on-call/support/privacy endpoints.
 - App Store/Play product identity, legal/privacy copy, signed archive/AAB inspection, store privacy aggregation, review submissions, approval, rollout, and rollback evidence.
 
