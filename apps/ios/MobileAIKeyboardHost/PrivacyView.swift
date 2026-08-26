@@ -34,6 +34,14 @@ struct PrivacyView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+            Section("公開準備") {
+                NavigationLink {
+                    LaunchReadinessView()
+                } label: {
+                    Label("Store readinessを確認", systemImage: "checkmark.shield")
+                }
+                .frame(minHeight: 44)
+            }
         }
         .navigationTitle("プライバシー")
         .navigationBarTitleDisplayMode(.inline)

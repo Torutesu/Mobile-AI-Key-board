@@ -18,6 +18,29 @@ struct OnboardingView: View {
                     }
 
                     privacyCard
+                    NavigationLink {
+                        LaunchReadinessView()
+                    } label: {
+                        Label {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("公開準備を確認")
+                                    .font(.headline)
+                                Text("Full Access無効・収集なし・ネットワーク未接続のfixture")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .accessibilityHidden(true)
+                        } icon: {
+                            Image(systemName: "checkmark.shield")
+                                .foregroundStyle(.green)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding()
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    .accessibilityHint("プライバシー宣言と未証明の公開準備項目を確認します")
                     SandboxView()
 
                     NavigationLink {

@@ -116,6 +116,7 @@ data class HostAppState(
     val readOnlyQueries: List<ReadOnlyQueryState> = emptyList(),
     val calendarWrite: CalendarWriteState = CalendarWriteState(),
     val skillBuilder: SkillBuilderState = SkillBuilderState(),
+    val keyboardSettings: KeyboardSettingsState = KeyboardSettingsState(),
 )
 
 sealed interface HostEvent {
@@ -155,6 +156,7 @@ sealed interface HostEvent {
     data object ExpireCalendarUndo : HostEvent
     data class ObserveCalendarTime(val now: String) : HostEvent
     data class SkillBuilderAction(val action: SkillBuilderEvent) : HostEvent
+    data class KeyboardSettingsAction(val action: KeyboardSettingsEvent) : HostEvent
 }
 
 object HostFixtureClient {
@@ -220,22 +222,26 @@ object HostFixtureClient {
                 sessionExpiresAt = "2026-08-26T10:00:00Z",
             ),
         )
-        HostEvent.SimulateSessionExpiry -> state.copy(account = state.account.copy(sessionStatus = SessionStatus.EXPIRED), calendarWrite = CalendarWriteState(), skillBuilder = SkillBuilderState())
-        HostEvent.SimulateSessionRevocation -> state.copy(account = state.account.copy(sessionStatus = SessionStatus.REVOKED), calendarWrite = CalendarWriteState(), skillBuilder = SkillBuilderState())
+        HostEvent.SimulateSessionExpiry -> state.copy(account = state.account.copy(sessionStatus = SessionStatus.EXPIRED), calendarWrite = CalendarWriteState(), skillBuilder = SkillBuilderState(), keyboardSettings = KeyboardSettingsReducer.reduce(state.keyboardSettings, KeyboardSettingsEvent.ClearQualification))
+        HostEvent.SimulateSessionRevocation -> state.copy(account = state.account.copy(sessionStatus = SessionStatus.REVOKED), calendarWrite = CalendarWriteState(), skillBuilder = SkillBuilderState(), keyboardSettings = KeyboardSettingsReducer.reduce(state.keyboardSettings, KeyboardSettingsEvent.ClearQualification))
         is HostEvent.RequestDeviceRevoke -> if (state.devices.any { it.id == event.deviceId && it.status == DeviceStatus.ACTIVE }) {
             state.copy(pendingRevokeDeviceId = event.deviceId)
         } else state
         HostEvent.CancelDeviceRevoke -> state.copy(pendingRevokeDeviceId = null)
         HostEvent.ConfirmDeviceRevoke -> {
             val id = state.pendingRevokeDeviceId
+            val revokesCurrentDevice = state.devices.firstOrNull { it.id == id }?.isCurrent == true
             if (id == null) state else state.copy(
                 devices = state.devices.map { device ->
                     if (device.id == id) device.copy(status = DeviceStatus.REVOKED, revokedAt = NOW) else device
                 },
                 pendingRevokeDeviceId = null,
-                account = if (state.devices.firstOrNull { it.id == id }?.isCurrent == true) {
+                account = if (revokesCurrentDevice) {
                     state.account.copy(sessionStatus = SessionStatus.REVOKED)
                 } else state.account,
+                calendarWrite = if (revokesCurrentDevice) CalendarWriteState() else state.calendarWrite,
+                skillBuilder = if (revokesCurrentDevice) SkillBuilderState() else state.skillBuilder,
+                keyboardSettings = if (revokesCurrentDevice) KeyboardSettingsReducer.reduce(state.keyboardSettings, KeyboardSettingsEvent.ClearQualification) else state.keyboardSettings,
             )
         }
         is HostEvent.SelectRun -> if (event.runId == null || state.runs.any { it.id == event.runId }) state.copy(selectedRunId = event.runId) else state
@@ -255,6 +261,7 @@ object HostFixtureClient {
                 readOnlyQueries = emptyList(),
                 calendarWrite = CalendarWriteState(),
                 skillBuilder = SkillBuilderState(),
+                keyboardSettings = KeyboardSettingsState(),
                 deletion = state.deletion.copy(
                     status = DeletionStatus.COMPLETED,
                     completedAt = NOW,
@@ -324,6 +331,7 @@ object HostFixtureClient {
         HostEvent.ExpireCalendarUndo -> state.expireCalendarUndo()
         is HostEvent.ObserveCalendarTime -> state.observeCalendarTime(event.now)
         is HostEvent.SkillBuilderAction -> state.copy(skillBuilder = SkillBuilderReducer.reduce(state.skillBuilder, event.action, state.account, state.deletion))
+        is HostEvent.KeyboardSettingsAction -> if (event.action is KeyboardSettingsEvent.RecordFixtureQualification && (state.account.authStatus != AuthStatus.SIGNED_IN || state.account.sessionStatus != SessionStatus.ACTIVE || state.deletion.status == DeletionStatus.COMPLETED)) state else state.copy(keyboardSettings = KeyboardSettingsReducer.reduce(state.keyboardSettings, event.action))
     }
 
     private fun HostAppState.updateConnection(provider: Provider, update: (ProviderConnection) -> ProviderConnection): HostAppState =

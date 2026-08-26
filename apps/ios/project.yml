@@ -13,6 +13,8 @@ targets:
     platform: iOS
     sources:
       - path: MobileAIKeyboardHost
+    resources:
+      - path: MobileAIKeyboardHost/PrivacyInfo.xcprivacy
     dependencies:
       - package: MobileAIKeyboardCore
       - target: MobileAIKeyboardExtension
@@ -38,6 +40,8 @@ targets:
     platform: iOS
     sources:
       - path: MobileAIKeyboardExtension
+    resources:
+      - path: MobileAIKeyboardExtension/PrivacyInfo.xcprivacy
     dependencies:
       - package: MobileAIKeyboardCore
     entitlements:

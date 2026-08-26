@@ -29,10 +29,13 @@ Working title only. Product naming and visual identity are intentionally deferre
 - [W4 read-only connections](docs/11-w4-read-only-connections.md)
 - [W5 confirmed private Calendar write](docs/12-w5-confirmed-calendar-write.md)
 - [W6 private Skills, bindings, and quota controls](docs/13-w6-skills-bindings.md)
+- [W7 parity and launch qualification contracts](docs/14-w7-parity-launch.md)
+- [W7 support and incident runbook](docs/15-support-incident-runbook.md)
+- [W7 store and privacy declaration baseline](docs/16-store-privacy-declarations.md)
 
 ## Current status
 
-The W0-W6 local and provider-neutral foundations are implemented:
+The W0-W7 local and provider-neutral foundations are implemented:
 
 - iOS host app and keyboard extension with Command, explicit source selection, Capture Review, local rewrite, editable Result Preview, stale-safe Apply, and Undo;
 - Android host app and IME with the equivalent local workflow, bounded `InputConnection` capture, implicit-replacement rejection, stale-safe Apply, and Undo;
@@ -45,10 +48,13 @@ The W0-W6 local and provider-neutral foundations are implemented:
 - iOS and Android draft/review/confirm/receipt/reconciliation/Undo fixture surfaces that clearly label OAuth, provider network, and real external effects as unconnected;
 - typed private Skill definitions, fixture-test receipts, immutable version digests, exact device bindings, explicit upgrades, private-only sharing, and quota reservations in the shared packages;
 - iOS and Android private Skill Builder fixture surfaces with visible schema/policy/static checks, quota and cost disclosure, private deploy review, exact-version pinning, and public publishing disabled;
+- release-candidate, protected-evidence, fixed quality-budget, kill-switch, content-free incident, and migration/rollback contracts that fail closed when evidence is fixture, simulator, stale, incomplete, or not exact-candidate bound;
+- iOS and Android host-app customization models and Japanese workflow-pack fixtures, with platform quality-budget displays, source-declared privacy manifests on iOS, and explicit `not_proven` labels where extension/IME persistence, runtime sync, physical devices, or archives have not been verified;
+- store/privacy declaration and support/incident baselines that preserve ordinary typing as the protected fallback and prohibit content in operational records;
 - API identity boundary, worker receipt projection, execution ledger, and tests;
 - content-free telemetry contracts and three-platform CI.
 
-This is not a production release. Real-device keyboard lifecycle, Japanese conversion, third-party app compatibility, signed distribution, external identity verification, live OAuth/provider APIs and writes, encrypted credential custody, hardware-backed device proof, durable multi-instance infrastructure, signed Skill packages, marketplace moderation, and an external R3 security assessment remain explicit qualification gates. See [implementation status](docs/08-implementation-status.md).
+This is not a production release. Real-device keyboard lifecycle, production Japanese conversion, extension/IME settings persistence, third-party app compatibility, signed release archives and store submission, configured support/on-call endpoints, external identity verification, live OAuth/provider APIs and writes, encrypted credential custody, hardware-backed device proof, durable multi-instance infrastructure, signed Skill packages, marketplace moderation, and an external R3 security assessment remain explicit qualification gates. See [implementation status](docs/08-implementation-status.md).
 
 ## Local verification
 
