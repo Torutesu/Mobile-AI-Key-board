@@ -76,10 +76,13 @@ Exit: Acti-class core experience is publicly usable without relying on marketpla
 
 ### W8: Beyond parity
 
-- Verified Skill publishers and team policies.
-- Local-only contextual suggestions.
-- User-visible completion-rate and safety metadata.
-- Additional R4 connectors after separate review.
+- Verified Skill publisher/package contracts and immutable team policies, with fixture provenance kept visibly `not_proven` until protected external evidence exists.
+- Local-only contextual suggestions that retain no captured/output content and carry no insertion, installation, connector, or execution authority.
+- User-visible, digest-bound completion counts, derived rate/confidence, review freshness, typed issue counts, requested operations/scopes, and revocation state.
+- Moderation, control, rollback, and explicit upgrade contracts bound to exact owner/team/version/package/epoch state.
+- Additional R4 connectors only after the separate security, privacy, physical-device, provider, support, and release-evidence review in the W8 acceptance baseline.
+
+Exit: the local/provider-neutral trust foundation passes adversarial shared and native tests, while every absent production verifier, marketplace, device, provider, and R4 gate remains explicitly `not_proven`. W8 fixture completion is not public-marketplace or R4 qualification.
 
 ## 3. Recommended implementation order
 

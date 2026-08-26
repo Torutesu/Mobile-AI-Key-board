@@ -53,6 +53,7 @@ fun HostAppDashboard(
     CalendarWriteDashboard(state, dispatch)
     SkillBuilderDashboard(state, dispatch)
     KeyboardSettingsDashboard(state, dispatch)
+    SuggestionTrustDashboard(state, dispatch)
     ActivityCard(state, dispatch)
     PrivacyControlsCard(state, dispatch)
 }

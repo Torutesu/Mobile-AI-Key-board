@@ -20,6 +20,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      - run: pnpm audit --prod --audit-level high
 
   ios:
     name: iOS host, extension, and core
@@ -40,8 +41,18 @@ jobs:
           -scheme MobileAIKeyboard
           -sdk iphonesimulator
           -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath "$RUNNER_TEMP/mobile-ai-keyboard-derived"
           CODE_SIGNING_ALLOWED=NO
           build
+      - name: Verify iOS privacy and extension boundary
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/mobile-ai-keyboard-derived/Build/Products/Debug-iphonesimulator/MobileAIKeyboardHost.app"
+          extension="$app/PlugIns/MobileAIKeyboardExtension.appex"
+          plutil -lint MobileAIKeyboardHost/PrivacyInfo.xcprivacy MobileAIKeyboardExtension/PrivacyInfo.xcprivacy
+          test -f "$app/PrivacyInfo.xcprivacy"
+          test -f "$extension/PrivacyInfo.xcprivacy"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionAttributes:RequestsOpenAccess' "$extension/Info.plist")" = "false"
 
   android:
     name: Android app, IME, and core
@@ -62,3 +73,13 @@ jobs:
       - run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
       - run: chmod +x gradlew
       - run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+      - name: Verify Android offline keyboard boundary
+        run: |
+          set -euo pipefail
+          apk=app/build/outputs/apk/debug/app-debug.apk
+          test -f "$apk"
+          permissions="$($ANDROID_HOME/build-tools/35.0.0/aapt2 dump permissions "$apk")"
+          if grep -Fq android.permission.INTERNET <<<"$permissions"; then
+            echo "Unexpected INTERNET permission in keyboard APK" >&2
+            exit 1
+          fi

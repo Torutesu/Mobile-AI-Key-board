@@ -14,6 +14,10 @@ struct AccountDashboardView: View {
                 navigationCard(title: "Calendar write", subtitle: "R3・招待なしprivate event（fixture）", systemImage: "calendar.badge.plus") { CalendarWriteView() }
                 navigationCard(title: "Private Skill Builder", subtitle: "コードなし・private v1・fixture deploy", systemImage: "wand.and.stars") { SkillBuilderView() }
                 navigationCard(title: "キーボード設定", subtitle: "テーマ・キーサイズ・片手モード・workflow packs", systemImage: "keyboard") { KeyboardSettingsView() }
+                navigationCard(title: "Contextual suggestions", subtitle: "端末内候補・raw textなし・自動適用なし", systemImage: "sparkles") { ContextualSuggestionsView() }
+                navigationCard(title: "Trust Preview / Skill catalog", subtitle: "SK-006 metadata・provenance・not_proven表示", systemImage: "checkmark.seal") { TrustCatalogView() }
+                navigationCard(title: "Team policy", subtitle: "owner/version/digest・explicit upgrade・revoke", systemImage: "person.3") { TeamPolicyView() }
+                navigationCard(title: "R4 connector gate", subtitle: "別承認・証拠がないためdisabled", systemImage: "exclamationmark.octagon") { R4ConnectorGateView() }
                 navigationCard(title: "Launch qualification", subtitle: "content-free予算と実端末not_proven表示", systemImage: "speedometer") { QualificationView() }
                 navigationCard(title: "Store readiness", subtitle: "PrivacyInfo・Full Access・support入口", systemImage: "checkmark.shield") { LaunchReadinessView() }
                 navigationCard(title: "Activity", subtitle: "実行履歴とcontent-free監査情報", systemImage: "clock.arrow.circlepath") { ActivityView() }

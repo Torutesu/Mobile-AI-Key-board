@@ -2,7 +2,7 @@
 
 ## Milestone boundary
 
-This checkpoint implements the W0/W1 local-first foundation, W2 local text-action vertical slice, W3 provider-neutral identity/receipt lifecycle, W4 read-only connection contracts plus native fixtures, the W5 single confirmed-write fixture, the W6 private Skill/binding/quota fixture, and the W7 parity/launch qualification foundation. It deliberately does not connect a remote LLM, external identity provider, live OAuth account, durable database, credential vault, external provider adapter, crash collector, protected release runner, or store backend.
+This checkpoint implements the W0/W1 local-first foundation, W2 local text-action vertical slice, W3 provider-neutral identity/receipt lifecycle, W4 read-only connection contracts plus native fixtures, the W5 single confirmed-write fixture, the W6 private Skill/binding/quota fixture, the W7 parity/launch qualification foundation, and the W8 beyond-parity trust foundation. It deliberately does not connect a remote LLM, external identity provider, live OAuth account, durable database, credential vault, external provider adapter, crash collector, protected release runner, publisher verifier, moderation service, public marketplace, or store backend.
 
 ## Implemented
 
@@ -31,6 +31,10 @@ This checkpoint implements the W0/W1 local-first foundation, W2 local text-actio
 - W7 fixed release-quality policy requires all documented performance/crash metrics for both iOS and Android; caller-relaxed diagnostic budgets cannot qualify a beta or broad release.
 - W7 kill switches are exact-target, owner/epoch-bound, monotonically revised, and unable to disable ordinary typing. Incident records are append-only and content-free.
 - W7 forward migration requires exact-candidate protected qualification and fixed-policy quality decisions; migration and rollback are environment/candidate bound and idempotent.
+- W8 publisher identities, signed Skill packages, protected-verifier evidence, immutable team policies, local contextual suggestions, safety metadata, reports, moderation, control actions, and rollback requests are exact owner/version/package/epoch bound.
+- W8 completion rates are derived from bounded integer counts, zero attempts have no rate, low samples remain low confidence, review evidence expires, and public issue metadata is content-free and categorized.
+- W8 suggestions contain typed/opaque local metadata only, have no network or execution authority, and cannot insert text, call tools, install a Skill, or widen connector access.
+- Team policy install, upgrade, revocation, and rollback are explicit and fail closed on digest, owner, team, version, epoch, scope, risk, confirmation, chronology, or evidence mismatch. R4 remains disabled pending a separate review.
 
 ### iOS
 
@@ -47,6 +51,7 @@ This checkpoint implements the W0/W1 local-first foundation, W2 local text-actio
 - Calendar write fixture UI with separate capability enablement, draft/edit invalidation, data/service/effect review, canonical SHA-256 confirmation, execution expiry/owner/epoch recheck, succeeded/failed/partial/unknown receipts, reconciliation-only unknown recovery, and one-shot exact-resource Undo.
 - Private Skill Builder fixture UI with desired-outcome intake, explicit missing fields, typed manifest/schema review, allowlisted SF Symbols, static/policy validation, visible fixture results, quota/cost disclosure, digest confirmation, immutable private versions, exact binding pins, explicit upgrades, and private share/revoke.
 - Versioned keyboard customization and Japanese workflow-pack fixture models, qualification-budget surfaces, source-declared privacy manifests, and launch-readiness copy that distinguishes source presence from archive/runtime verification. Extension runtime settings sync and persistence remain `not_proven`.
+- Local contextual-suggestion, Trust Preview, team-policy, and R4-denial fixture screens. They expose provenance, immutable digests, derived completion confidence, typed issue counts, explicit upgrade/revoke state, and `not_proven` boundaries without claiming publisher/package verification.
 
 ### Android
 
@@ -60,6 +65,7 @@ This checkpoint implements the W0/W1 local-first foundation, W2 local text-actio
 - Calendar write fixture UI with active-session and connected-Calendar gates, separately enabled exact write capability, digest-bound owner/epoch/version/expiry, honest step projection, unknown blind-retry prevention, reconciliation, and bounded one-shot Undo.
 - Private Skill Builder fixture UI with bounded strict JSON parsing, typed local-only authority, injection/binding checks, visible fixture tests, quota accounting, owner/session-bound digests, immutable private versions, explicit upgrades, private share/revoke, and Material icons.
 - Versioned keyboard customization and Japanese workflow-pack fixture models plus qualification-budget surfaces. Session/revocation boundaries preserve ordinary preferences while account deletion resets them; the configuration is IME-consumable as a typed model, but Host-to-IME runtime sync and persistence remain `not_proven`.
+- Local contextual-suggestion and Trust Preview fixtures with secure-input suppression, content-free typed metadata, exact team-policy checks, explicit install/upgrade/revoke actions, and a permanently disabled R4 boundary. Public catalog and runtime synchronization remain `not_proven`.
 
 ## Verified in this checkpoint
 
@@ -72,6 +78,7 @@ This checkpoint implements the W0/W1 local-first foundation, W2 local text-actio
 - W5 digest tamper, attendee/invite injection, confirmation expiry/replay, cross-owner/grant/epoch/resource confusion, concurrent idempotency, unknown retry/reconciliation, delimiter-safe native canonicalization, session/disconnect cleanup, Undo expiry/double-use, and content-minimized receipt tests.
 - W6 stale/tampered/incomplete fixture-result, schema/effect/scope, injection, duplicate input/source, immutable version, explicit-upgrade, typing/accessibility, private-share, quota/idempotency, owner/epoch, strict-JSON, and delimiter-escape tests.
 - W7 candidate/evidence tamper, incomplete two-platform metrics, fixed-threshold, crash-rate, kill-switch authority, content-free incident, protected-evidence freshness, and migration/rollback binding tests.
+- W8 publisher/package/evidence, team-policy, suggestion/telemetry, safety-metric, report/moderation, revocation/control, and rollback adversarial tests across shared, iOS, and Android reducers.
 - Source-level iOS privacy manifests and current Android no-INTERNET boundary; archive/AAB privacy aggregation and physical-device traffic capture remain separate gates.
 
 ## Not yet qualified
@@ -87,6 +94,7 @@ This checkpoint implements the W0/W1 local-first foundation, W2 local text-actio
 - Live OAuth authorization/redirect allowlisting/revocation, Google Calendar/Notion/Maps provider calls, KMS-backed credential envelopes, multi-instance replay safety, external writes, reconciliation, and receipts backed by real provider state.
 - Real Calendar event creation/deletion, provider-side idempotency and lookup semantics, externally verified reconciliation/Undo, and the required independent security assessment for R3 write promotion.
 - Durable transactional Skill storage, trusted test executors, signed Skill packages, external cost settlement, moderation/reporting/kill switches, public marketplace publication, and cross-device production binding synchronization.
+- Protected publisher/package verification, hardware-backed publisher signing custody, real team administration, durable governance/revocation state, external moderation, public safety metrics, marketplace distribution, and separately qualified R4 connectors.
 - Host-to-extension/App Group and Host-to-IME settings persistence/runtime synchronization, plus persistence across process death or device restart.
 - Exact-candidate protected CI identity, durable incident/kill-switch storage, real crash/performance collection, independently repeatable beta migration/rollback, and configured on-call/support/privacy endpoints.
 - App Store/Play product identity, legal/privacy copy, signed archive/AAB inspection, store privacy aggregation, review submissions, approval, rollout, and rollback evidence.

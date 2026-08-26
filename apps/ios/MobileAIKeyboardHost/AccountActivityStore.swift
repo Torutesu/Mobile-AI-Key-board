@@ -11,6 +11,10 @@ final class AccountActivityStore: ObservableObject {
     @Published private(set) var skillBuilder: SkillBuilderState
     @Published private(set) var settings: KeyboardSettingsState
     @Published private(set) var qualification: QualificationState
+    @Published private(set) var suggestions: ContextualSuggestionState
+    @Published private(set) var trustCatalog: [CommunitySkillMetadata]
+    @Published private(set) var teamPolicy: TeamPolicyState
+    @Published private(set) var r4Gate: R4ConnectorGateState
     private var qualificationOwnerSubject: String?
     private var qualificationSessionExpiresAt: Date?
     private let reducer = AccountActivityReducer()
@@ -20,6 +24,9 @@ final class AccountActivityStore: ObservableObject {
     private let skillBuilderReducer = SkillBuilderReducer()
     private let settingsReducer = KeyboardSettingsReducer()
     private let qualificationReducer = QualificationReducer()
+    private let suggestionsReducer = ContextualSuggestionReducer()
+    private let teamPolicyReducer = TeamPolicyReducer()
+    private let r4GateReducer = R4ConnectorGateReducer()
 
     init() {
         state = fixture.initialState()
@@ -28,6 +35,10 @@ final class AccountActivityStore: ObservableObject {
         skillBuilder = SkillBuilderFixtureClient().initialState()
         settings = .defaultFixture
         qualification = QualificationState()
+        suggestions = ContextualSuggestionState()
+        trustCatalog = [CommunitySkillCatalogFixture.metadata]
+        teamPolicy = TeamPolicyState()
+        r4Gate = R4ConnectorGateState()
         qualificationOwnerSubject = nil
         qualificationSessionExpiresAt = nil
     }
@@ -42,6 +53,7 @@ final class AccountActivityStore: ObservableObject {
                 skillBuilder = skillBuilderReducer.reduce(skillBuilder, .clearBoundary)
                 settings = settingsReducer.reduce(settings, .clearBoundary)
                 qualification = qualificationReducer.reduce(qualification, .clearBoundary)
+                clearW8Boundary()
                 qualificationOwnerSubject = nil
                 qualificationSessionExpiresAt = nil
             }
@@ -58,6 +70,7 @@ final class AccountActivityStore: ObservableObject {
                 settings = settingsReducer.reduce(settings, .clearBoundary)
             }
             qualification = qualificationReducer.reduce(qualification, .clearBoundary)
+            clearW8Boundary()
             qualificationOwnerSubject = nil
             qualificationSessionExpiresAt = nil
         } else if case .completeDeletion = action {
@@ -65,10 +78,12 @@ final class AccountActivityStore: ObservableObject {
             skillBuilder = skillBuilderReducer.reduce(skillBuilder, .clearBoundary)
             settings = settingsReducer.reduce(settings, .reset)
             qualification = qualificationReducer.reduce(qualification, .clearBoundary)
+            clearW8Boundary()
             qualificationOwnerSubject = nil
             qualificationSessionExpiresAt = nil
         } else if case .revokeSession = action {
             qualification = qualificationReducer.reduce(qualification, .clearBoundary)
+            clearW8Boundary()
             qualificationOwnerSubject = nil
             qualificationSessionExpiresAt = nil
         } else if case .requestDeletion = action {
@@ -76,6 +91,7 @@ final class AccountActivityStore: ObservableObject {
             calendarWrite = calendarWriteReducer.reduce(calendarWrite, .clearBoundary)
             skillBuilder = skillBuilderReducer.reduce(skillBuilder, .clearBoundary)
             qualification = qualificationReducer.reduce(qualification, .clearBoundary)
+            clearW8Boundary()
             qualificationOwnerSubject = nil
             qualificationSessionExpiresAt = nil
         }
@@ -137,5 +153,32 @@ final class AccountActivityStore: ObservableObject {
         case .clearBoundary:
             qualification = qualificationReducer.reduce(qualification, action)
         }
+    }
+
+    func send(_ action: ContextualSuggestionAction) {
+        suggestions = suggestionsReducer.reduce(suggestions, action)
+    }
+
+    func send(_ action: TeamPolicyAction) {
+        switch action {
+        case .clearBoundary:
+            teamPolicy = teamPolicyReducer.reduce(teamPolicy, action)
+        case .preview, .install, .upgrade:
+            guard state.account.canUseAuthenticatedFeatures else { return }
+            teamPolicy = teamPolicyReducer.reduce(teamPolicy, action)
+        case .revoke:
+            guard state.account.canUseAuthenticatedFeatures else { return }
+            teamPolicy = teamPolicyReducer.reduce(teamPolicy, action)
+        }
+    }
+
+    func send(_ action: R4ConnectorGateAction) {
+        r4Gate = r4GateReducer.reduce(r4Gate, action)
+    }
+
+    private func clearW8Boundary() {
+        suggestions = suggestionsReducer.reduce(suggestions, .clearBoundary)
+        teamPolicy = teamPolicyReducer.reduce(teamPolicy, .clearBoundary)
+        r4Gate = r4GateReducer.reduce(r4Gate, .clearBoundary)
     }
 }
