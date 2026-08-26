@@ -20,6 +20,26 @@ class KeyboardFoundationTest {
     }
 
     @Test
+    fun failedRegenerationCanRetryWithoutLosingThePreviousResult() {
+        var session = CommandSession(
+            phase = SessionPhase.RESULT_REVIEW,
+            target = "original",
+            resultText = "previous result",
+        )
+        session = CommandSessionReducer.reduce(session, SessionEvent.Regenerate)
+        session = CommandSessionReducer.reduce(session, SessionEvent.Failed("temporary failure"))
+        assertEquals(SessionPhase.ERROR, session.phase)
+        assertEquals("previous result", session.resultText)
+
+        session = CommandSessionReducer.reduce(session, SessionEvent.Regenerate)
+        assertEquals(SessionPhase.TRANSFORMING, session.phase)
+        assertEquals(null, session.error)
+        session = CommandSessionReducer.reduce(session, SessionEvent.Generated("retry result"))
+        assertEquals(SessionPhase.RESULT_REVIEW, session.phase)
+        assertEquals("retry result", session.resultText)
+    }
+
+    @Test
     fun lockedState_cannotEnterCommand() {
         val locked = KeyboardReducer.reduce(KeyboardState(), KeyboardAction.Lock("password"))
         assertEquals(KeyboardMode.LOCKED, KeyboardReducer.reduce(locked, KeyboardAction.EnterCommand).mode)
@@ -35,9 +55,22 @@ class KeyboardFoundationTest {
             privateImeOptions = "com.example.otp"
         }
         val phone = EditorInfo().apply { inputType = InputType.TYPE_CLASS_PHONE }
+        val numeric = EditorInfo().apply { inputType = InputType.TYPE_CLASS_NUMBER }
+        val payment = EditorInfo().apply {
+            inputType = InputType.TYPE_CLASS_TEXT
+            hintText = "Credit card number"
+        }
+        val hintedOtp = EditorInfo().apply {
+            inputType = InputType.TYPE_CLASS_TEXT
+            hintText = "one-time-code"
+        }
+        assertFalse(SensitiveFieldClassifier.classify(null).aiCaptureAllowed)
         assertFalse(SensitiveFieldClassifier.classify(password).aiCaptureAllowed)
         assertFalse(SensitiveFieldClassifier.classify(otp).aiCaptureAllowed)
+        assertFalse(SensitiveFieldClassifier.classify(hintedOtp).aiCaptureAllowed)
         assertFalse(SensitiveFieldClassifier.classify(phone).aiCaptureAllowed)
+        assertFalse(SensitiveFieldClassifier.classify(numeric).aiCaptureAllowed)
+        assertFalse(SensitiveFieldClassifier.classify(payment).aiCaptureAllowed)
         assertTrue(SensitiveFieldClassifier.classify(EditorInfo().apply { inputType = InputType.TYPE_CLASS_TEXT }).aiCaptureAllowed)
     }
 

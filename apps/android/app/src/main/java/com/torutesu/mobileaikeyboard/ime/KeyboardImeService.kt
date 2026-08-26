@@ -50,8 +50,8 @@ class KeyboardImeService : InputMethodService() {
         surface = KeyboardSurface(this, KeyboardSurface.Callbacks(
             onCommand = { enterCommand() },
             onShortcut = { binding -> invokeShortcut(binding) },
-            onText = { text -> adapter?.insertAtCursor(text) },
-            onDelete = { adapter?.deleteBackward() },
+            onText = { text -> currentAdapter()?.insertAtCursor(text) },
+            onDelete = { currentAdapter()?.deleteBackward() },
             onEnter = {
                 currentInputConnection?.let { input ->
                     val action = ReturnKeyModel.from(currentEditorInfo).editorAction
@@ -183,7 +183,7 @@ class KeyboardImeService : InputMethodService() {
         val target = session.target ?: return
         // Deliberately local and synchronous: acknowledgement is required before
         // this fixture runs, and there is no transport or provider dependency.
-        val rewritten = rewriteForActiveSkill(target) ?: run {
+        val rewritten = safelyRewriteForActiveSkill(target) ?: run {
             session = CommandSessionReducer.reduce(session, SessionEvent.Failed("このSkill versionは端末内で利用できません"))
             activeShortcut = null
             syncSurface()
@@ -199,11 +199,16 @@ class KeyboardImeService : InputMethodService() {
     }
 
     private fun regenerate() {
-        if (session.phase != SessionPhase.RESULT_REVIEW) return
+        if (session.phase != SessionPhase.RESULT_REVIEW && session.phase != SessionPhase.ERROR) return
         val target = session.target ?: return
         session = CommandSessionReducer.reduce(session, SessionEvent.Regenerate)
+        if (session.phase != SessionPhase.TRANSFORMING) return
         syncSurface()
-        val rewritten = rewriteForActiveSkill(target) ?: return
+        val rewritten = safelyRewriteForActiveSkill(target) ?: run {
+            session = CommandSessionReducer.reduce(session, SessionEvent.Failed("このSkill versionは端末内で利用できません。結果をコピーするか、キャンセルしてください"))
+            syncSurface()
+            return
+        }
         session = CommandSessionReducer.reduce(session, SessionEvent.Generated(rewritten.rewritten, rewritten.preservedEntities.map { it.value }))
         syncSurface()
     }
@@ -232,7 +237,11 @@ class KeyboardImeService : InputMethodService() {
         val edit = if (selectionEnabled) {
             input.applySelection(capture.fieldFingerprint, capture.selected, result, selectionEnabled = true)
         } else {
-            input.applyInsertion(capture.fieldFingerprint, result)
+            // Without an explicitly captured non-empty selection Android does
+            // not expose a trustworthy, content-free cursor revision token.
+            // Auto-insertion could silently replace an undeclared selection,
+            // so Copy remains the safe recovery path.
+            null
         }
         if (edit == null) {
             session = CommandSessionReducer.reduce(session, SessionEvent.ApplyRejected("入力欄の内容が変更されたため、自動適用を停止しました。結果をコピーしてください"))
@@ -315,6 +324,17 @@ class KeyboardImeService : InputMethodService() {
         // Falling back to another transform would execute behavior the user did
         // not assign to this physical key.
         return com.torutesu.mobileaikeyboard.core.ExecutableLocalSkills.executeResult(binding, target)
+    }
+
+    private fun safelyRewriteForActiveSkill(target: String): com.torutesu.mobileaikeyboard.core.RewriteResult? = try {
+        rewriteForActiveSkill(target)
+    } catch (_: RuntimeException) {
+        null
+    }
+
+    private fun currentAdapter(): InputConnectionAdapter? {
+        adapter?.let { return it }
+        return currentInputConnection?.let(::InputConnectionAdapter)?.also { adapter = it }
     }
 
     private fun bucket(count: Int) = when {

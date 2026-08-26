@@ -206,7 +206,11 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
         }
         if (state.mode == KeyboardMode.ERROR) {
             root.addView(label(state.errorMessage.orEmpty(), 14f).apply { setTextColor(Color.rgb(150, 30, 30)) })
-            root.addView(actionButton("戻る", "通常入力へ戻る") { callbacks.onCancel() })
+            state.resultText?.takeIf { it.isNotBlank() }?.let { result ->
+                root.addView(actionButton("結果をコピー", "失敗前の結果をクリップボードへコピー") { callbacks.onCopy(result) })
+                root.addView(actionButton("再試行", "同じ入力から端末内で再生成を再試行") { callbacks.onRegenerate() })
+            }
+            root.addView(actionButton("キャンセル", "通常入力へ戻る") { callbacks.onCancel() })
             return
         }
         val command = EditText(context).apply {

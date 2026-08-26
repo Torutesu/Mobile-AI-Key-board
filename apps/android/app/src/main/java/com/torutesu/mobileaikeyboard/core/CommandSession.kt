@@ -10,7 +10,7 @@ data class BoundedCapture(
     val after: String,
     val selectionAvailable: Boolean,
     val surroundingAvailable: Boolean,
-    val fieldFingerprint: String,
+    val fieldFingerprint: String?,
     val selectionOverLimit: Boolean = false,
 ) {
     fun target(sources: Set<InputSource>): String {
@@ -138,7 +138,10 @@ object CommandSessionReducer {
                 state.copy(error = "結果は${CaptureLimits.resultCodePoints}文字以内にしてください")
             } else state.copy(resultText = event.value, error = null)
         } else state
-        SessionEvent.Regenerate -> if (state.phase == SessionPhase.RESULT_REVIEW) state.copy(phase = SessionPhase.TRANSFORMING) else state
+        SessionEvent.Regenerate -> if (
+            state.phase == SessionPhase.RESULT_REVIEW ||
+            (state.phase == SessionPhase.ERROR && state.target != null && state.resultText != null)
+        ) state.copy(phase = SessionPhase.TRANSFORMING, error = null) else state
         is SessionEvent.Applied -> if (state.phase == SessionPhase.RESULT_REVIEW) {
             state.copy(phase = SessionPhase.RECEIPT, undoTicket = event.ticket)
         } else state
