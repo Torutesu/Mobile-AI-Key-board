@@ -23,13 +23,19 @@ class InputConnectionAdapter(
     private val afterLimit: Int = CaptureLimits.surroundingAfterCodePoints,
 ) {
     private val revisionContextLimit = 64
+    private data class SelectionInspection(val text: String?, val overLimit: Boolean)
 
-    fun captureSelection(): String = safely { inputConnection.getSelectedText(0)?.toString() }.orEmpty()
+    fun captureSelection(): String {
+        val inspected = inspectSelection() ?: return ""
+        return if (inspected.overLimit) "" else inspected.text.orEmpty().substringToCodePoints(CaptureLimits.selectionCodePoints)
+    }
 
     fun captureContext(useSelection: Boolean, useSurrounding: Boolean): CapturedContext {
         // Reading editor content is itself a capability. Never touch a source
         // that the user did not explicitly enable for this capture.
-        val selectedRaw = if (useSelection) safely { inputConnection.getSelectedText(0)?.toString() } else null
+        val inspectedSelection = if (useSelection) inspectSelection() else null
+        val definitelyOverLimit = inspectedSelection?.overLimit == true
+        val selectedRaw = inspectedSelection?.text
         // Selection-only Skills do not expose surrounding text to the Skill or
         // review model. We still read a small bounded window locally to mint a
         // revision lock; hashing only the selected bytes aliases duplicate
@@ -45,7 +51,7 @@ class InputConnectionAdapter(
             else -> null
         }
         val selectedValue = selectedRaw.orEmpty()
-        val selectionOverLimit = selectedValue.codePointCount(0, selectedValue.length) > CaptureLimits.selectionCodePoints
+        val selectionOverLimit = definitelyOverLimit || selectedValue.codePointCount(0, selectedValue.length) > CaptureLimits.selectionCodePoints
         val selected = if (selectionOverLimit) {
             selectedValue.substringToCodePoints(CaptureLimits.selectionCodePoints)
         } else selectedValue
@@ -143,6 +149,17 @@ class InputConnectionAdapter(
         val after = safely { inputConnection.getTextAfterCursor(revisionContextLimit, 0)?.toString() } ?: return null
         val selected = safely { inputConnection.getSelectedText(0)?.toString() }.orEmpty()
         return TextFingerprint.of("cursor-lock\u0000$before\u0000$selected\u0000$after")
+    }
+
+    private fun inspectSelection(): SelectionInspection? = safely {
+        val sequence = inputConnection.getSelectedText(0) ?: return@safely SelectionInspection(null, false)
+        // Keep both length inspection and materialization inside the hostile
+        // editor boundary. A custom CharSequence may throw from either call.
+        if (sequence.length > CaptureLimits.selectionCodePoints * 2) {
+            SelectionInspection(null, true)
+        } else {
+            SelectionInspection(sequence.toString(), false)
+        }
     }
 
     private fun <T> safely(block: () -> T): T? = try {

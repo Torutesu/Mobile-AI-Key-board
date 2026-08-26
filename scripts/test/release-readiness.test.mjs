@@ -80,6 +80,7 @@ test('passed E2E evidence is bound to a real-device classification and one candi
       accessibility_tools: [target.platform === 'ios' ? 'voiceover' : 'talkback'],
       field_classes: matrix.required_field_classes,
       lifecycle_events: matrix.required_lifecycle_events,
+      apps: target.apps,
     }],
   }));
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mobile-ai-keyboard-e2e-'));
@@ -100,6 +101,19 @@ test('passed E2E evidence is bound to a real-device classification and one candi
     const rejectedCoverage = evaluate({ staticOnly: true, matrix: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.e2e.schema');
     assert.equal(rejectedCoverage.status, 'fail');
     assert.match(rejectedCoverage.detail, /field-class|lifecycle-event/);
+
+    const fakeAppCoverage = {
+      ...matrix,
+      targets: matrix.targets.map((target) => ({
+        ...target,
+        apps: target.apps.map((app, index) => index === 0 ? 'Unbound Test App' : app),
+        runs: target.runs.map((run) => ({ ...run, apps: run.apps.map((app, index) => index === 0 ? 'Unbound Test App' : app) })),
+      })),
+    };
+    fs.writeFileSync(file, `${JSON.stringify(fakeAppCoverage)}\n`);
+    const rejectedApps = evaluate({ staticOnly: true, matrix: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.e2e.schema');
+    assert.equal(rejectedApps.status, 'fail');
+    assert.match(rejectedApps.detail, /required app/);
 
     const tampered = { ...matrix, targets: matrix.targets.map((target) => ({ ...target, runs: target.runs.map((run) => ({ ...run, artifact_digest: `sha256:${'c'.repeat(64)}` })) })) };
     fs.writeFileSync(file, `${JSON.stringify(tampered)}\n`);
@@ -122,13 +136,14 @@ test('passed performance evidence binds every measurement to the candidate artif
   const artifactDigest = `sha256:${'e'.repeat(64)}`;
   performance.status = 'passed';
   performance.candidate = { source_commit: sourceCommit, artifact_digest: artifactDigest };
+  const successMinimumMetrics = new Set(['crash_free_sessions_rate', 'offline_success_rate', 'provider_timeout_recovery_rate']);
   performance.measurements = performance.required_metrics.flatMap((metric, metricIndex) => ['ios', 'android'].map((platform, platformIndex) => ({
     metric_id: metric,
     platform,
     device: `${platform}-device-${metricIndex}`,
     status: 'passed',
-    value: 1,
-    unit: 'ms',
+    value: metric.endsWith('_ms') ? 1 : successMinimumMetrics.has(metric) ? 1 : 0,
+    unit: metric.endsWith('_ms') ? 'ms' : 'ratio',
     sample_count: 100,
     evidence: {
       class: 'protected_external',
@@ -162,6 +177,17 @@ test('passed performance evidence binds every measurement to the candidate artif
     assert.equal(rejectedMeasurement.status, 'fail');
     assert.match(rejectedMeasurement.detail, /finite value|sample_count/);
 
+    const aboveThreshold = {
+      ...performance,
+      measurements: performance.measurements.map((measurement) => measurement.metric_id === 'keyboard_cold_open_p95_ms' && measurement.platform === 'ios'
+        ? { ...measurement, value: 60_000 }
+        : measurement),
+    };
+    fs.writeFileSync(file, `${JSON.stringify(aboveThreshold)}\n`);
+    const rejectedThreshold = evaluate({ staticOnly: true, performance: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.performance.schema');
+    assert.equal(rejectedThreshold.status, 'fail');
+    assert.match(rejectedThreshold.detail, /exceeds maximum/);
+
     const tampered = { ...performance, measurements: performance.measurements.map((measurement, index) => index === 0 ? { ...measurement, evidence: { ...measurement.evidence, artifact_digest: `sha256:${'f'.repeat(64)}` } } : measurement) };
     fs.writeFileSync(file, `${JSON.stringify(tampered)}\n`);
     const rejected = evaluate({ staticOnly: true, performance: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.performance.schema');
@@ -190,6 +216,49 @@ test('archive evidence distinguishes extension Info.plist from code-signing enti
     assert.match(result.detail, /Info\.plist/);
   } finally {
     fs.writeFileSync(file, original);
+  }
+});
+
+test('signed Android AAB evidence is candidate-bound and enforces the offline IME manifest', () => {
+  const sourceCommit = '9'.repeat(40);
+  const artifactDigest = `sha256:${'8'.repeat(64)}`;
+  const report = JSON.parse(fs.readFileSync(path.join(root, 'docs/android-aab-signing-manifest.json'), 'utf8'));
+  Object.assign(report, {
+    status: 'passed',
+    candidate: { source_commit: sourceCommit, artifact_digest: artifactDigest },
+    artifact: { signed: true, digest: artifactDigest, signing_certificate_sha256: `sha256:${'7'.repeat(64)}` },
+    merged_manifest: {
+      internet_permission: false,
+      ime_service_permission: 'android.permission.BIND_INPUT_METHOD',
+      ime_service_exported: true,
+      allow_backup: false,
+      data_extraction_rules_present: true,
+      full_backup_rules_present: true,
+    },
+    evidence: {
+      class: 'protected_external', environment: 'protected_release_runner', source_commit: sourceCommit,
+      artifact_digest: artifactDigest, run_id: 'release-aab-1', runner_id: 'protected-release-1', attested: true,
+    },
+    notes: 'protected release archive inspection',
+  });
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mobile-ai-keyboard-aab-'));
+  const file = path.join(tempDir, 'aab.json');
+  try {
+    fs.writeFileSync(file, `${JSON.stringify(report)}\n`);
+    const valid = evaluate({ staticOnly: true, androidAab: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.android_aab.schema');
+    assert.equal(valid.status, 'pass');
+
+    fs.writeFileSync(file, `${JSON.stringify({ ...report, merged_manifest: { ...report.merged_manifest, internet_permission: true } })}\n`);
+    const networked = evaluate({ staticOnly: true, androidAab: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.android_aab.schema');
+    assert.equal(networked.status, 'fail');
+    assert.match(networked.detail, /INTERNET/);
+
+    fs.writeFileSync(file, `${JSON.stringify({ ...report, artifact: { ...report.artifact, signing_certificate_sha256: null } })}\n`);
+    const unsigned = evaluate({ staticOnly: true, androidAab: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.android_aab.schema');
+    assert.equal(unsigned.status, 'fail');
+    assert.match(unsigned.detail, /signed|certificate/);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
 

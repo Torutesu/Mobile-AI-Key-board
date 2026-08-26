@@ -26,6 +26,7 @@ final class KeyboardViewController: UIInputViewController {
     private var sourceButtons: [CaptureSource: UIButton] = [:]
     private var keyboardHeightConstraint: NSLayoutConstraint?
     private let shortcutStore = AppGroupShortcutSnapshotStore()
+    private let nativeSkillFailureStore = AppGroupNativeSkillFailureStore()
     private let accessStatusStore = AppGroupKeyboardAccessStatusStore()
     private var shortcutSnapshot: ShortcutSnapshotV1?
     private var shortcutBindings: [ShortcutKeyCode: ShortcutBindingV1] = [:]
@@ -61,7 +62,9 @@ final class KeyboardViewController: UIInputViewController {
         refreshShortcutSnapshot()
         boundaryRefreshTimer?.invalidate()
         boundaryRefreshTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            self?.refreshVisibleShortcutAuthority()
+            Task { @MainActor [weak self] in
+                self?.refreshVisibleShortcutAuthority()
+            }
         }
     }
 
@@ -119,7 +122,9 @@ final class KeyboardViewController: UIInputViewController {
         // Host handoffs are intentionally not exposed to the extension until
         // their return path is implemented end-to-end. An old snapshot may
         // still contain one, so fail closed at the consumer boundary too.
-        shortcutBindings = Dictionary(uniqueKeysWithValues: snapshot.bindings.filter { $0.enabled && $0.executionRoute == .keyboardLocal }.map { ($0.keyCode, $0) })
+        shortcutBindings = Dictionary(uniqueKeysWithValues: snapshot.bindings.filter {
+            $0.enabled && $0.executionRoute == .keyboardLocal && nativeSkillFailureStore.decision(for: $0, boundary: boundary) == .allowed
+        }.map { ($0.keyCode, $0) })
         shortcutSkills = Dictionary(uniqueKeysWithValues: snapshot.skills.filter { $0.executionRoute == .keyboardLocal }.map { ("\($0.id)|\($0.versionID)", $0) })
         updateBoundKeyPresentation()
     }
@@ -410,7 +415,9 @@ final class KeyboardViewController: UIInputViewController {
             return
         }
         if case .locked = machine.screen { return }
-        guard let snapshot = shortcutStore.loadLastKnownGood(),
+        guard let boundary = shortcutStore.loadActiveBoundary(),
+              nativeSkillFailureStore.decision(for: binding, boundary: boundary) == .allowed,
+              let snapshot = shortcutStore.loadLastKnownGood(),
               snapshot.generation == shortcutSnapshot?.generation,
               let exactBinding = snapshot.bindings.first(where: {
                   $0.id == binding.id && $0.skillID == binding.skillID && $0.versionID == binding.versionID &&
@@ -617,7 +624,13 @@ final class KeyboardViewController: UIInputViewController {
         } else {
             local = LocalRewriteEngine().politeRewrite(draft.text)
         }
-        guard let local else { transition(.fail(.emptyInput)); return }
+        guard let local else {
+            recordNativeSkillFailureIfNeeded()
+            transition(.fail(.emptyInput))
+            refreshShortcutSnapshot()
+            return
+        }
+        recordNativeSkillSuccessIfNeeded()
         guard shortcutActivationStillCurrent() else { presentRecoverableError(.staleField); return }
         let result = RewriteResult(original: local.original, rewritten: local.rewritten, preservedEntities: local.preservedEntities, fieldFingerprint: draft.fieldFingerprint, documentIdentifier: draft.documentIdentifier)
         transition(.showRewrite(result))
@@ -651,7 +664,12 @@ final class KeyboardViewController: UIInputViewController {
         } else {
             regenerated = LocalRewriteEngine().politeRewrite(draft.text)
         }
-        guard let regenerated else { return }
+        guard let regenerated else {
+            recordNativeSkillFailureIfNeeded()
+            refreshShortcutSnapshot()
+            return
+        }
+        recordNativeSkillSuccessIfNeeded()
         guard shortcutActivationStillCurrent() else { presentRecoverableError(.staleField); return }
         let result = RewriteResult(original: regenerated.original, rewritten: regenerated.rewritten, preservedEntities: regenerated.preservedEntities, fieldFingerprint: draft.fieldFingerprint, documentIdentifier: draft.documentIdentifier)
         resultTextView.text = result.rewritten
@@ -908,12 +926,39 @@ final class KeyboardViewController: UIInputViewController {
             applyShortcutSnapshot(nil)
             return false
         }
-        let isCurrent = current.bindings.contains {
+        guard let boundary = shortcutStore.loadActiveBoundary() else {
+            applyShortcutSnapshot(nil)
+            return false
+        }
+        let binding = current.bindings.first {
             $0.id == activation.bindingID && $0.skillID == activation.skillID && $0.versionID == activation.versionID &&
             $0.skillDigest == activation.skillDigest && $0.enabled
         }
+        let isCurrent = binding.map { nativeSkillFailureStore.decision(for: $0, boundary: boundary) == .allowed } ?? false
         if !isCurrent { applyShortcutSnapshot(nil) }
         return isCurrent
+    }
+
+    private func activeNativeSkillContext() -> (ShortcutBindingV1, ShortcutAccountBoundaryV1)? {
+        guard let activation = pendingShortcutActivation,
+              let boundary = shortcutStore.loadActiveBoundary(),
+              let snapshot = shortcutStore.loadLastKnownGood(),
+              snapshot.generation == activation.snapshotGeneration,
+              let binding = snapshot.bindings.first(where: {
+                  $0.id == activation.bindingID && $0.skillID == activation.skillID && $0.versionID == activation.versionID &&
+                  $0.skillDigest == activation.skillDigest && $0.enabled
+              }) else { return nil }
+        return (binding, boundary)
+    }
+
+    private func recordNativeSkillFailureIfNeeded() {
+        guard let (binding, boundary) = activeNativeSkillContext() else { return }
+        _ = try? nativeSkillFailureStore.recordFailure(for: binding, boundary: boundary)
+    }
+
+    private func recordNativeSkillSuccessIfNeeded() {
+        guard let (binding, boundary) = activeNativeSkillContext() else { return }
+        try? nativeSkillFailureStore.recordSuccess(for: binding, boundary: boundary)
     }
 
     private func transition(_ action: KeyboardAction) {

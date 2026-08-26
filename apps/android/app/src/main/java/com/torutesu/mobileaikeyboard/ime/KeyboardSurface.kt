@@ -14,6 +14,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import com.torutesu.mobileaikeyboard.core.KeyboardMode
 import com.torutesu.mobileaikeyboard.core.KeyboardState
 import com.torutesu.mobileaikeyboard.core.ImeConsumableConfig
@@ -95,6 +96,15 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
     fun resetTypingState() {
         cancelPendingGestures()
         typingMode = TypingModeReducer.resetForInput()
+    }
+
+    /** System Toast plus reject haptic for a rejected ordinary editor mutation. */
+    fun reportOrdinaryInputFailure() {
+        val message = "入力欄がキー操作を受け付けませんでした"
+        performHapticFeedback(HapticFeedbackConstants.REJECT)
+        // Toast is rendered by the system and announced by TalkBack without
+        // repurposing this keyboard root's stable accessibility label.
+        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
     }
 
     /** Cancels delayed long-press callbacks before an editor/view boundary. */

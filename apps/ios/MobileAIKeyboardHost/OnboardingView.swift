@@ -5,6 +5,7 @@ import MobileAIKeyboardCore
 struct OnboardingView: View {
     @State private var showKeyboardInstructions = false
     @State private var accessStatus: KeyboardAccessStatus?
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var accountStore: AccountActivityStore
     @EnvironmentObject private var shortcutRegistry: ShortcutRegistryStore
     private let accessStatusStore = AppGroupKeyboardAccessStatusStore()
@@ -30,7 +31,7 @@ struct OnboardingView: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text("公開準備を確認")
                                     .font(.headline)
-                                Text("Full Access無効・収集なし・ネットワーク未接続のfixture")
+                                Text("Full Access要求あり・収集なし・ネットワーク未接続。Archive証跡は未確認")
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                             }
@@ -77,8 +78,11 @@ struct OnboardingView: View {
                 KeyboardInstructionsView()
             }
             .onAppear {
-                accessStatus = accessStatusStore.load()
+                refreshAccessStatus()
                 accountStore.bindShortcutRegistry(shortcutRegistry)
+            }
+            .onChange(of: scenePhase) { phase in
+                if phase == .active { refreshAccessStatus() }
             }
             .alert("Private Skill Keysを削除できませんでした", isPresented: Binding(
                 get: { accountStore.shortcutBoundaryError != nil },
@@ -108,7 +112,7 @@ struct OnboardingView: View {
                 Button("設定を開く") { openSettings() }
                     .buttonStyle(.borderedProminent)
                     .frame(minHeight: 44)
-                Button("状態を更新") { accessStatus = accessStatusStore.load() }
+                Button("状態を更新") { refreshAccessStatus() }
                     .buttonStyle(.bordered)
                     .frame(minHeight: 44)
             }
@@ -120,7 +124,7 @@ struct OnboardingView: View {
     }
 
     private func setupStep(_ number: String, title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        return HStack(alignment: .top, spacing: 10) {
             Text(number)
                 .font(.headline)
                 .foregroundStyle(.white)
@@ -134,13 +138,15 @@ struct OnboardingView: View {
     }
 
     private var accessStatusRow: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: accessStatus?.fullAccessEnabled == true ? "checkmark.circle.fill" : "questionmark.circle")
-                .foregroundStyle(accessStatus?.fullAccessEnabled == true ? .green : .secondary)
+        let fresh = accessStatus?.isFresh() == true
+        let fullAccessConfirmed = fresh && accessStatus?.fullAccessEnabled == true
+        return HStack(alignment: .top, spacing: 10) {
+            Image(systemName: fullAccessConfirmed ? "checkmark.circle.fill" : "questionmark.circle")
+                .foregroundStyle(fullAccessConfirmed ? .green : .secondary)
             VStack(alignment: .leading, spacing: 2) {
-                Text(accessStatus?.fullAccessEnabled == true ? "フルアクセス: 有効（最後に確認）" : "フルアクセス: 未確認")
+                Text(fullAccessConfirmed ? "フルアクセス: 有効（直近5分に確認）" : "フルアクセス: 未確認または期限切れ")
                     .font(.subheadline.weight(.semibold))
-                Text(accessStatus?.fullAccessEnabled == true
+                Text(fullAccessConfirmed
                      ? "App Groupのキー設定を共有できます。入力内容はこの状態レコードに保存しません。"
                      : "設定後にキーボードを一度表示すると状態を確認できます。未確認でも通常入力は利用できます。")
                     .font(.footnote)
@@ -163,7 +169,7 @@ struct OnboardingView: View {
             Text("データの境界")
                 .font(.subheadline.weight(.semibold))
             Text("端末内: 通常入力とローカルworkflow。ネットワーク通信なし。")
-            Text("App Group: キー・Skill version/digest・表示名だけをHostと拡張間で共有。")
+            Text("App Group: キー割当、Skill/version/digest、表示・入力ソース・リスク/保持ポリシー、接続状態、匿名化したowner/session境界をHostと拡張間で共有。入力本文・結果・prompt・token・資格情報は保存しません。")
             Text("ネットワーク: 現在のベータでは未接続。外部AI・CalendarのHost handoffは実行不可。")
         }
         .font(.footnote)
@@ -174,6 +180,10 @@ struct OnboardingView: View {
     private func openSettings() {
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         UIApplication.shared.open(url)
+    }
+
+    private func refreshAccessStatus() {
+        accessStatus = accessStatusStore.load()
     }
 
     private var privacyCard: some View {

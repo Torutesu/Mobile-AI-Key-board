@@ -24,6 +24,7 @@ const DEFAULTS = {
   performance: 'docs/release-performance-evidence.json',
   workflow: '.github/workflows/ci.yml',
   iosArchive: 'docs/ios-archive-entitlement-privacy.json',
+  androidAab: 'docs/android-aab-signing-manifest.json',
   benchmark: null,
 };
 
@@ -42,6 +43,10 @@ const requiredLifecycleEvents = [
   'input_field_switch', 'app_switch', 'keyboard_switch', 'rotation',
   'background_resume', 'process_restart',
 ];
+const requiredApps = {
+  ios: ['Messages', 'Mail', 'Safari', 'LINE', 'Slack', 'Gmail', 'Notion'],
+  android: ['Messages', 'Mail', 'Chrome', 'LINE', 'Slack', 'Gmail', 'Notion'],
+};
 const requiredMetrics = [
   'key_to_commit_p50_ms', 'key_to_commit_p95_ms', 'keyboard_cold_open_p95_ms',
   'keyboard_warm_open_p95_ms', 'long_press_false_activation_rate',
@@ -58,6 +63,22 @@ const benchmarkMetrics = {
   long_press_false_activation_rate: { unit: 'ratio', maximum: 0.001 },
   ordinary_tap_drop_rate: { unit: 'ratio', maximum: 0.001 },
 };
+const performanceMetrics = {
+  key_to_commit_p50_ms: { unit: 'ms', maximum: 35 },
+  key_to_commit_p95_ms: { unit: 'ms', maximum: 50 },
+  keyboard_cold_open_p95_ms: { unit: 'ms', maximum: 400 },
+  keyboard_warm_open_p95_ms: { unit: 'ms', maximum: 150 },
+  long_press_false_activation_rate: { unit: 'ratio', maximum: 0.001 },
+  ordinary_tap_drop_rate: { unit: 'ratio', maximum: 0.001 },
+  skill_completion_p95_ms: { unit: 'ms', maximum: 5_000 },
+  skill_failure_rate: { unit: 'ratio', maximum: 0.05 },
+  skill_cancel_rate: { unit: 'ratio', maximum: 1 },
+  memory_pressure_extension_ime_kill_rate: { unit: 'ratio', maximum: 0.01 },
+  crash_free_sessions_rate: { unit: 'ratio', minimum: 0.998, maximum: 1 },
+  android_anr_rate: { unit: 'ratio', maximum: 0.001 },
+  offline_success_rate: { unit: 'ratio', minimum: 0.99, maximum: 1 },
+  provider_timeout_recovery_rate: { unit: 'ratio', minimum: 0.99, maximum: 1 },
+};
 
 function parseArgs(argv) {
   const args = { staticOnly: false, report: null, candidateSha: process.env.GITHUB_SHA ?? null, ...DEFAULTS };
@@ -72,6 +93,7 @@ function parseArgs(argv) {
     else if (arg === '--performance') args.performance = argv[++i];
     else if (arg === '--workflow') args.workflow = argv[++i];
     else if (arg === '--ios-archive') args.iosArchive = argv[++i];
+    else if (arg === '--android-aab') args.androidAab = argv[++i];
     else if (arg === '--benchmark') args.benchmark = argv[++i];
     else throw new Error(`unknown argument: ${arg}`);
   }
@@ -169,6 +191,8 @@ function sourceChecks(args, manifest) {
         try { proof = readJson(args.performance).value.status === 'passed'; } catch { proof = false; }
       } else if (artifact.id === 'ios_archive_entitlement_privacy_report' && args.iosArchive) {
         try { proof = readJson(args.iosArchive).value.status === 'passed'; } catch { proof = false; }
+      } else if (artifact.id === 'android_aab_signing_manifest_report' && args.androidAab) {
+        try { proof = readJson(args.androidAab).value.status === 'passed'; } catch { proof = false; }
       }
       results.push(proof
         ? check(`evidence.artifact.${artifact.id}`, 'pass', `${artifact.path} is supplied as protected evidence`)
@@ -215,10 +239,18 @@ function validateMatrix(matrix, expectedSha = null) {
   for (const fieldClass of requiredFieldClasses) if (!matrix.required_field_classes?.includes(fieldClass)) errors.push(`missing field class ${fieldClass}`);
   for (const lifecycleEvent of requiredLifecycleEvents) if (!matrix.required_lifecycle_events?.includes(lifecycleEvent)) errors.push(`missing lifecycle event ${lifecycleEvent}`);
   const platforms = new Set((matrix.targets ?? []).map((target) => target.platform));
+  if (!Array.isArray(matrix.targets) || matrix.targets.length !== 2 || platforms.size !== 2) errors.push('E2E matrix must contain exactly one iOS and one Android target');
   for (const platform of ['ios', 'android']) if (!platforms.has(platform)) errors.push(`missing ${platform} target`);
   for (const target of matrix.targets ?? []) {
+    if (!requiredApps[target.platform]) errors.push(`unknown target platform ${target.platform ?? 'missing'}`);
     if (!Array.isArray(target.devices) || target.devices.length === 0) errors.push(`${target.platform} has no devices`);
-    if (!Array.isArray(target.apps) || target.apps.length < 7) errors.push(`${target.platform} has fewer than seven apps`);
+    const platformApps = requiredApps[target.platform];
+    if (!Array.isArray(target.apps)) errors.push(`${target.platform} has no app contract`);
+    else if (platformApps) {
+      if (new Set(target.apps).size !== target.apps.length) errors.push(`${target.platform} app contract contains duplicates`);
+      if (target.apps.length !== platformApps.length || target.apps.some((app) => !platformApps.includes(app))) errors.push(`${target.platform} app contract must contain exactly the required seven apps`);
+      for (const app of platformApps) if (!target.apps.includes(app)) errors.push(`${target.platform} is missing required app ${app}`);
+    }
     if (!['not_proven', 'in_progress', 'passed', 'failed'].includes(target.status)) errors.push(`${target.platform} has an invalid status`);
     if (target.status === 'passed') {
       for (const run of target.runs ?? []) {
@@ -232,6 +264,7 @@ function validateMatrix(matrix, expectedSha = null) {
         if (!Array.isArray(run.accessibility_tools) || run.accessibility_tools.length === 0) errors.push(`${target.platform} passed run is missing accessibility tool evidence`);
         if (!Array.isArray(run.field_classes) || run.field_classes.length === 0) errors.push(`${target.platform} passed run is missing field-class coverage`);
         if (!Array.isArray(run.lifecycle_events) || run.lifecycle_events.length === 0) errors.push(`${target.platform} passed run is missing lifecycle-event coverage`);
+        if (!Array.isArray(run.apps) || run.apps.length === 0) errors.push(`${target.platform} passed run is missing app coverage`);
         if (/(fixture|simulator|emulator|jvm|ui[-_ ]?test|local|self[-_ ]?attest)/i.test(JSON.stringify(run))) errors.push(`${target.platform} passed run contains a fixture/simulator/emulator/UI-test/local marker`);
       }
       const coveredScenarios = new Set((target.runs ?? []).flatMap((run) => Array.isArray(run.scenarios) ? run.scenarios : []));
@@ -240,6 +273,8 @@ function validateMatrix(matrix, expectedSha = null) {
       for (const fieldClass of requiredFieldClasses) if (!coveredFieldClasses.has(fieldClass)) errors.push(`${target.platform} passed evidence does not cover field class ${fieldClass}`);
       const coveredLifecycleEvents = new Set((target.runs ?? []).flatMap((run) => Array.isArray(run.lifecycle_events) ? run.lifecycle_events : []));
       for (const lifecycleEvent of requiredLifecycleEvents) if (!coveredLifecycleEvents.has(lifecycleEvent)) errors.push(`${target.platform} passed evidence does not cover lifecycle event ${lifecycleEvent}`);
+      const coveredApps = new Set((target.runs ?? []).flatMap((run) => Array.isArray(run.apps) ? run.apps : []));
+      for (const app of requiredApps[target.platform] ?? []) if (!coveredApps.has(app)) errors.push(`${target.platform} passed evidence does not cover required app ${app}`);
       const requiredAccessibilityTool = target.platform === 'ios' ? 'voiceover' : 'talkback';
       if (!(target.runs ?? []).some((run) => run.accessibility_tools?.includes(requiredAccessibilityTool))) errors.push(`${target.platform} passed evidence does not include ${requiredAccessibilityTool} coverage`);
     }
@@ -259,7 +294,10 @@ function validatePerformance(performance, expectedSha = null) {
   if (performance.schema_version !== 'mobile-ai-keyboard.performance-evidence.v1') errors.push('wrong schema_version');
   if (performance.evidence_class !== 'protected_external') errors.push('evidence_class must be protected_external');
   if (!VALID_STATUSES.has(performance.status)) errors.push(`invalid performance status ${performance.status ?? 'missing'}`);
-  for (const metric of requiredMetrics) if (!performance.required_metrics?.includes(metric)) errors.push(`missing metric ${metric}`);
+  for (const metric of requiredMetrics) {
+    if (!performance.required_metrics?.includes(metric)) errors.push(`missing metric ${metric}`);
+    if (!performanceMetrics[metric]) errors.push(`missing fixed threshold contract for ${metric}`);
+  }
   const seen = new Set();
   for (const measurement of performance.measurements ?? []) {
     if (!requiredMetrics.includes(measurement.metric_id)) errors.push(`unknown performance metric ${measurement.metric_id ?? 'missing'}`);
@@ -269,7 +307,13 @@ function validatePerformance(performance, expectedSha = null) {
     if (seen.has(pair)) errors.push(`duplicate metric/platform pair ${pair}`);
     seen.add(pair);
     if (measurement.status === 'passed') {
+      const threshold = performanceMetrics[measurement.metric_id];
       if (typeof measurement.value !== 'number' || !Number.isFinite(measurement.value)) errors.push(`${measurement.metric_id} passed measurement has no finite value`);
+      if (threshold && measurement.unit !== threshold.unit) errors.push(`${measurement.metric_id} passed measurement has wrong unit; expected ${threshold.unit}`);
+      if (threshold && typeof measurement.value === 'number' && Number.isFinite(measurement.value)) {
+        if (measurement.value < (threshold.minimum ?? 0)) errors.push(`${measurement.metric_id} value is below minimum ${threshold.minimum}`);
+        if (measurement.value > threshold.maximum) errors.push(`${measurement.metric_id} value exceeds maximum ${threshold.maximum}`);
+      }
       if (!Number.isInteger(measurement.sample_count) || measurement.sample_count <= 0) errors.push(`${measurement.metric_id} passed measurement has an invalid sample_count`);
       const evidence = measurement.evidence ?? {};
       if (evidence.class !== 'protected_external' || !evidence.run_id || !evidence.runner_id || evidence.attested !== true || !evidence.artifact_digest) errors.push(`${measurement.metric_id} passed without protected evidence binding`);
@@ -314,6 +358,30 @@ function validateIosArchive(archive, expectedSha = null) {
     }
   }
   const candidateError = validateCandidate(archive.candidate, archive.status, 'iOS archive evidence', expectedSha);
+  if (candidateError) errors.push(candidateError);
+  return errors;
+}
+
+function validateAndroidAab(report, expectedSha = null) {
+  const errors = [];
+  if (report.schema_version !== 'mobile-ai-keyboard.android-aab.v1') errors.push('wrong schema_version');
+  if (report.evidence_class !== 'protected_external') errors.push('evidence_class must be protected_external');
+  if (!VALID_STATUSES.has(report.status)) errors.push(`invalid Android AAB status ${report.status ?? 'missing'}`);
+  if (report.status === 'passed') {
+    const evidence = report.evidence ?? {};
+    if (evidence.class !== 'protected_external' || evidence.environment !== 'protected_release_runner' || !evidence.run_id || !evidence.runner_id || evidence.attested !== true) errors.push('Android AAB passed without protected release-runner attestation');
+    if (evidence.source_commit !== report.candidate?.source_commit || evidence.artifact_digest !== report.candidate?.artifact_digest) errors.push('Android AAB evidence is not bound to the candidate');
+    if (!DIGEST.test(evidence.artifact_digest ?? '')) errors.push('Android AAB evidence artifact_digest is invalid');
+    if (report.package_id !== 'com.torutesu.mobileaikeyboard') errors.push('Android AAB package_id is invalid');
+    if (report.artifact?.signed !== true || !DIGEST.test(report.artifact?.digest ?? '') || !DIGEST.test(report.artifact?.signing_certificate_sha256 ?? '')) errors.push('Android AAB must be signed and bind artifact/certificate SHA-256 digests');
+    if (report.artifact?.digest !== report.candidate?.artifact_digest) errors.push('Android AAB artifact digest does not match candidate');
+    const manifest = report.merged_manifest ?? {};
+    if (manifest.internet_permission !== false) errors.push('Android AAB merged manifest must prove INTERNET is absent');
+    if (manifest.ime_service_permission !== 'android.permission.BIND_INPUT_METHOD' || manifest.ime_service_exported !== true) errors.push('Android AAB merged manifest has an invalid IME service boundary');
+    if (manifest.allow_backup !== false || manifest.data_extraction_rules_present !== true || manifest.full_backup_rules_present !== true) errors.push('Android AAB merged manifest must disable backup and embed extraction/backup rules');
+    if (/(fixture|simulator|emulator|jvm|ui[-_ ]?test|local|self[-_ ]?attest|debug)/i.test(JSON.stringify(report))) errors.push('Android AAB passed evidence contains a debug/fixture/local marker');
+  }
+  const candidateError = validateCandidate(report.candidate, report.status, 'Android AAB evidence', expectedSha);
   if (candidateError) errors.push(candidateError);
   return errors;
 }
@@ -382,11 +450,15 @@ function evidenceChecks(args) {
   let matrix;
   let performance;
   let archive;
+  let androidAab;
   let benchmark;
   try { matrix = readJson(args.matrix).value; } catch (error) { results.push(check('evidence.e2e.schema', 'fail', error.message)); }
   try { performance = readJson(args.performance).value; } catch (error) { results.push(check('evidence.performance.schema', 'fail', error.message)); }
   if (args.iosArchive) {
     try { archive = readJson(args.iosArchive).value; } catch (error) { results.push(check('evidence.ios_archive.schema', 'fail', error.message)); }
+  }
+  if (args.androidAab) {
+    try { androidAab = readJson(args.androidAab).value; } catch (error) { results.push(check('evidence.android_aab.schema', 'fail', error.message)); }
   }
   if (args.benchmark) {
     try { benchmark = readJson(args.benchmark).value; } catch (error) { results.push(check('evidence.benchmark.schema', 'fail', error.message)); }
@@ -405,6 +477,11 @@ function evidenceChecks(args) {
     const errors = validateIosArchive(archive, args.candidateSha);
     results.push(check('evidence.ios_archive.schema', errors.length ? 'fail' : 'pass', errors.length ? errors.join('; ') : 'archive report contains the required entitlement/privacy inspection fields'));
     results.push(check('evidence.ios_archive.proof', errors.length ? 'fail' : (archive.status === 'passed' ? 'pass' : 'not_proven'), archive.status === 'not_proven' ? 'no protected signed archive inspection is recorded' : (errors.length ? 'archive evidence contains invalid proof' : 'protected archive inspection is bound to this candidate')));
+  }
+  if (androidAab) {
+    const errors = validateAndroidAab(androidAab, args.candidateSha);
+    results.push(check('evidence.android_aab.schema', errors.length ? 'fail' : 'pass', errors.length ? errors.join('; ') : 'Android AAB report contains signing and merged-manifest inspection fields'));
+    results.push(check('evidence.android_aab.proof', errors.length ? 'fail' : (androidAab.status === 'passed' ? 'pass' : 'not_proven'), androidAab.status === 'not_proven' ? 'no protected signed Android AAB inspection is recorded' : (errors.length ? 'Android AAB evidence contains invalid proof' : 'protected signed Android AAB is bound to this candidate')));
   }
   if (benchmark) {
     const errors = validateBenchmark(benchmark, args.candidateSha);

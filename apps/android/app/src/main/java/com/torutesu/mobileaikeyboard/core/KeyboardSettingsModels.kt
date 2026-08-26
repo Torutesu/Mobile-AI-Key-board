@@ -38,10 +38,15 @@ data class ImeConsumableConfig(
     val characterPreview: Boolean = true,
 )
 
-/** Setup status is deliberately derived from both Android enablement and a real test-field edit. */
-data class ImeOnboardingStatus(val imeEnabled: Boolean, val testInput: String) {
+/** Setup completes only after Android selected this IME and it emitted a fresh activation probe. */
+data class ImeOnboardingStatus(
+    val imeEnabled: Boolean,
+    val imeSelected: Boolean,
+    val activationProbeObserved: Boolean,
+    val testInput: String,
+) {
     val testFieldComplete: Boolean get() = testInput.isNotBlank()
-    val complete: Boolean get() = imeEnabled && testFieldComplete
+    val complete: Boolean get() = imeEnabled && imeSelected && activationProbeObserved && testFieldComplete
 }
 
 sealed interface KeyboardSettingsEvent {

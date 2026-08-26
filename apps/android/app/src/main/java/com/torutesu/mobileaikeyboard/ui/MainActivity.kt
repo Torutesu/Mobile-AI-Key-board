@@ -1,6 +1,7 @@
 package com.torutesu.mobileaikeyboard.ui
 
 import android.os.Bundle
+import android.content.ComponentName
 import android.content.Intent
 import android.provider.Settings
 import android.content.Context
@@ -41,6 +42,7 @@ import com.torutesu.mobileaikeyboard.core.AccountBoundaryStore
 import com.torutesu.mobileaikeyboard.core.HostEvent
 import com.torutesu.mobileaikeyboard.core.HostFixtureClient
 import com.torutesu.mobileaikeyboard.core.ImeOnboardingStatus
+import com.torutesu.mobileaikeyboard.core.ImeActivationProbeStore
 import com.torutesu.mobileaikeyboard.core.KeyboardSettingsStore
 import com.torutesu.mobileaikeyboard.core.InstalledSkillStore
 import com.torutesu.mobileaikeyboard.core.LocalSkillRegistry
@@ -48,11 +50,13 @@ import com.torutesu.mobileaikeyboard.core.ShortcutSnapshotStore
 
 class MainActivity : ComponentActivity() {
     private val imeEnabled = mutableStateOf(false)
+    private val imeSelected = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         imeEnabled.value = isKeyboardEnabled()
-        setContent { MobileAiKeyboardApp(imeEnabled.value) }
+        imeSelected.value = isKeyboardSelected()
+        setContent { MobileAiKeyboardApp(imeEnabled.value, imeSelected.value) }
     }
 
     override fun onResume() {
@@ -60,16 +64,26 @@ class MainActivity : ComponentActivity() {
         // Returning from Android's keyboard settings is the important onboarding
         // boundary; refresh status instead of leaving a stale "not enabled" card.
         imeEnabled.value = isKeyboardEnabled()
+        imeSelected.value = isKeyboardSelected()
     }
 
     private fun isKeyboardEnabled(): Boolean {
         val manager = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         return manager.enabledInputMethodList.any { it.packageName == packageName }
     }
+
+    private fun isKeyboardSelected(): Boolean {
+        return isThisImeSelected(this)
+    }
+}
+
+private fun isThisImeSelected(context: Context): Boolean {
+    val selected = Settings.Secure.getString(context.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD) ?: return false
+    return ComponentName.unflattenFromString(selected)?.packageName == context.packageName
 }
 
 @androidx.compose.runtime.Composable
-private fun MobileAiKeyboardApp(imeEnabled: Boolean) {
+private fun MobileAiKeyboardApp(imeEnabled: Boolean, imeSelected: Boolean) {
     val fixtureClient = remember { HostFixtureClient }
     val context = LocalContext.current
     val installedSkillStore = remember(context) { InstalledSkillStore(context.applicationContext) }
@@ -91,7 +105,7 @@ private fun MobileAiKeyboardApp(imeEnabled: Boolean) {
             ) {
                 Text("Mobile AI Keyboard", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                 Text("入力の主導権を、あなたの手元に。", style = MaterialTheme.typography.titleMedium)
-                ReadinessCard(imeEnabled)
+                ReadinessCard(imeEnabled, imeSelected)
                 HostAppDashboard(
                     state = hostState,
                     dispatch = { event ->
@@ -151,31 +165,45 @@ private fun MobileAiKeyboardApp(imeEnabled: Boolean) {
 }
 
 @androidx.compose.runtime.Composable
-private fun ReadinessCard(imeEnabled: Boolean) {
+private fun ReadinessCard(imeEnabled: Boolean, imeSelected: Boolean) {
     val context = LocalContext.current
+    val activationProbeStore = remember(context) { ImeActivationProbeStore(context.applicationContext) }
+    val initialProbeCounter = remember { activationProbeStore.read()?.counter ?: 0L }
     var testText by remember { mutableStateOf("") }
-    val onboarding = ImeOnboardingStatus(imeEnabled, testText)
+    var selectedObserved by remember(imeSelected) { mutableStateOf(imeSelected) }
+    var activationProbeObserved by remember { mutableStateOf(false) }
+    val onboarding = ImeOnboardingStatus(imeEnabled, selectedObserved, activationProbeObserved, testText)
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("セットアップ", style = MaterialTheme.typography.titleLarge)
-            Text(if (imeEnabled) "キーボードは有効です。入力欄で選択して動作を確認してください。" else "まずAndroid設定でMobile AI Keyboardを有効にしてください。")
+            Text(if (imeEnabled) "キーボードは有効です。次にMobile AI Keyboardを選択し、この入力欄で起動を確認してください。" else "まずAndroid設定でMobile AI Keyboardを有効にしてください。")
+            Text("Androidは、キーボードが入力内容を受け取れるという警告を表示します。このビルドにはINTERNET権限がなく、通常入力を送信しません。いつでも設定から無効化できます。", style = MaterialTheme.typography.bodySmall)
             Text(
                 if (imeEnabled) "✓ 1. キーボードを有効化" else "1. キーボードを有効化（未完了）",
                 color = if (imeEnabled) androidx.compose.ui.graphics.Color(0xFF18794E) else MaterialTheme.colorScheme.onSurface,
             )
+            Text(
+                if (selectedObserved) "✓ 2. Mobile AI Keyboardを選択" else "2. Mobile AI Keyboardを選択（未完了）",
+                color = if (selectedObserved) androidx.compose.ui.graphics.Color(0xFF18794E) else MaterialTheme.colorScheme.onSurface,
+            )
             OutlinedTextField(
                 value = testText,
-                onValueChange = { testText = it },
+                onValueChange = {
+                    testText = it
+                    selectedObserved = isThisImeSelected(context)
+                    activationProbeObserved = selectedObserved && (activationProbeStore.read()?.counter ?: 0L) > initialProbeCounter
+                },
                 modifier = Modifier.fillMaxWidth().semantics { contentDescription = "IME onboarding test field" },
-                label = { Text("2. テスト入力") },
+                label = { Text("3. テスト入力") },
                 placeholder = { Text("ここに入力してキーボードを確認") },
                 singleLine = true,
             )
             Text(
                 when {
-                    onboarding.complete -> "✓ 2. テスト入力に成功 — セットアップ完了"
-                    imeEnabled -> "2. テスト入力を行うとセットアップ完了です"
-                    else -> "2. キーボード有効化後、ここでテスト入力してください"
+                    onboarding.complete -> "✓ 3. このIMEの起動とテスト入力を確認 — セットアップ完了"
+                    imeEnabled && selectedObserved -> "3. この欄をMobile AI Keyboardで入力してください"
+                    imeEnabled -> "3. キーボードを選択してから入力してください"
+                    else -> "3. キーボード有効化後、ここでテスト入力してください"
                 },
                 color = if (onboarding.complete) androidx.compose.ui.graphics.Color(0xFF18794E) else MaterialTheme.colorScheme.onSurface,
             )
@@ -234,7 +262,7 @@ private fun PrivacyCard() {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("プライバシー", style = MaterialTheme.typography.titleLarge)
             Text("通常のキー入力はネットワークへ送信しません。パスワード、ワンタイムコード、電話番号欄ではAI機能を無効化します。")
-            Text("W1/W2のローカル変換には、アカウント・Full Access・インターネット権限は不要です。", style = MaterialTheme.typography.bodySmall)
+            Text("W1/W2のローカル変換には、アカウントやインターネット権限は不要です。AndroidのIME警告は入力方式全般に表示されますが、このビルドのマニフェストにはINTERNET権限がありません。", style = MaterialTheme.typography.bodySmall)
         }
     }
 }

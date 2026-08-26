@@ -333,7 +333,7 @@ public struct LaunchReadinessFixture: Equatable, Sendable {
     public let supportEntry: String
     public let incidentEntry: String
 
-    public init(fullAccessEnabled: Bool = false, collectedDataTypes: [String] = [], networkConnected: Bool = false, privacyManifestSourceDeclared: Bool = true, privacyManifestArchivedVerified: Bool = false, supportEntry: String = "local-fixture support-entry (no endpoint)", incidentEntry: String = "local-fixture incident-entry (no endpoint)") {
+    public init(fullAccessEnabled: Bool = true, collectedDataTypes: [String] = [], networkConnected: Bool = false, privacyManifestSourceDeclared: Bool = true, privacyManifestArchivedVerified: Bool = false, supportEntry: String = "local-fixture support-entry (no endpoint)", incidentEntry: String = "local-fixture incident-entry (no endpoint)") {
         self.fullAccessEnabled = fullAccessEnabled
         self.collectedDataTypes = collectedDataTypes
         self.networkConnected = networkConnected
@@ -356,6 +356,10 @@ public struct KeyboardAccessStatus: Codable, Equatable, Sendable {
         self.fullAccessEnabled = fullAccessEnabled
         self.appGroupAvailable = appGroupAvailable
         self.checkedAt = checkedAt
+    }
+
+    public func isFresh(at now: Date = Date(), maximumAge: TimeInterval = 5 * 60) -> Bool {
+        maximumAge > 0 && checkedAt <= now && now.timeIntervalSince(checkedAt) <= maximumAge
     }
 }
 

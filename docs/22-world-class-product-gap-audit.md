@@ -26,6 +26,10 @@ This is a strong beta foundation, not yet a world-leading keyboard. The largest 
 - Password, OTP, phone pad, number pad, decimal pad, and unsupported field transitions clear ephemeral state and suppress Skill actions while preserving ordinary typing.
 - Dismissal, editor change, window hide, process teardown, and stale activation expiry clear capture/result/action state.
 - Content-free snapshot boundary: prompt, editor text, result, token, credential, and receipt are not persisted in the Skill Key snapshot.
+- Native owner/session/exact-version circuit breakers on both platforms: three consecutive executor failures within ten minutes suppress only that Skill version and decoration; ordinary typing remains available, corruption fails Skill execution closed, and success clears the failure window.
+- Android onboarding now requires enabled + currently selected IME + a content-free activation probe from this exact `InputMethodService` + nonblank test input, preventing another keyboard from completing setup.
+- iOS onboarding refreshes on foreground return, expires capability observations after five minutes, and discloses the actual App Group metadata categories instead of understating them.
+- Protected evidence schemas now bind the exact seven-app matrix, metric units and fixed pass thresholds, candidate artifact, and a signed Android AAB/certificate/merged-manifest inspection. Fake app lists and over-budget measurements cannot self-report `passed`.
 
 ## P0 — required before an external beta claim
 
@@ -45,9 +49,9 @@ The reference product exposes language, size/position, label weight, sound/hapti
 
 Exit: either ship an explicitly English-only beta with narrow store claims, or qualify a real Japanese IME pipeline. Do not market the current deterministic keyboard shell as a system-keyboard replacement.
 
-### 4. Native activation-only kill switch and failure containment
+### 4. Native activation-only kill switch and failure containment — implemented locally, physical fault injection pending
 
-Wire a durable, owner/epoch/version-bound native kill switch into both keyboard processes. Repeated executor corruption/crash/failure may disable only the affected Skill/version and its decoration; A–Z taps, space, delete, return, shift, and keyboard switch must remain usable. Add fault injection for snapshot read, render, callback, executor, and persistence failures.
+The durable owner/epoch/version-bound circuit breaker and executor/persistence corruption tests are now implemented on both keyboard processes. Remaining exit work is protected physical fault injection for snapshot read, render, callback, process death, and memory pressure while proving A–Z taps, space, delete, return, shift, and keyboard switch remain usable.
 
 ### 5. Connected Skills and host handoff
 
@@ -98,7 +102,10 @@ Qualify VoiceOver and TalkBack, Switch Control, Dynamic Type/font scale, reduced
 | Claim | Current status |
 | --- | --- |
 | A–Z keys can be assigned and managed | Implemented; local builds/tests pass |
+| Number/symbol/control keys can be assigned | Intentionally unsupported for beta; collision policy and zero-input-loss physical evidence required first |
 | Tap types and long press invokes a local Skill | Implemented; simulator/emulator/source evidence, physical matrix `not_proven` |
+| Repeated Skill failure is contained per exact version | Implemented and fault-tested locally; physical crash/memory-pressure evidence `not_proven` |
+| Onboarding proves this Android IME was used | Implemented with selected-IME + content-free activation handshake; physical OEM matrix `not_proven` |
 | Settings survive authorized Android process death | Implemented with integrity-bound lease; physical memory-pressure run `not_proven` |
 | Secure/unsupported fields suppress Skill execution | Implemented and unit-tested; representative third-party-device proof `not_proven` |
 | Cross-platform canonical contracts | Native golden-vector consumers pass; full runtime wire interoperability `not_proven` |
@@ -109,9 +116,9 @@ Qualify VoiceOver and TalkBack, Switch Control, Dynamic Type/font scale, reduced
 ## Next execution order
 
 1. Run CI for the exact commit and preserve all three lane artifacts.
-2. Add native kill switch plus ordinary-input fault-injection tests.
-3. Stand up protected physical-device E2E and performance runners.
-4. Produce signed archive/AAB inspection evidence.
-5. Choose and state the beta language/input-quality boundary.
-6. Implement one connected read-only Skill end to end before expanding the connector catalog.
+2. Stand up protected physical-device E2E, accessibility, failure-injection, and performance runners against the exact seven-app contract.
+3. Produce signed archive/AAB inspection evidence using the checked-in fail-closed schemas.
+4. Choose and state the beta language/input-quality boundary; current UI is an English QWERTY shell despite Japanese workflow labels.
+5. Implement one connected read-only Skill end to end before expanding the connector catalog.
+6. Consume every exposed keyboard setting in the real IME or remove the setting from beta UI.
 7. Only after those gates, begin public marketplace and creator-growth work.

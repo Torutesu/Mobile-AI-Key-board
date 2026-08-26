@@ -7,7 +7,7 @@ struct LaunchReadinessView: View {
     var body: some View {
         List {
             Section("プライバシー宣言") {
-                readinessRow("Full Access", value: readiness.fullAccessEnabled ? "有効" : "無効（false）", good: !readiness.fullAccessEnabled)
+                readinessRow("Full Access source request", value: readiness.fullAccessEnabled ? "RequestsOpenAccess=true" : "false", good: readiness.fullAccessEnabled)
                 readinessRow("収集データ", value: readiness.collectedDataTypes.isEmpty ? "なし" : readiness.collectedDataTypes.joined(separator: "、"), good: readiness.collectedDataTypes.isEmpty)
                 readinessRow("ネットワーク", value: readiness.networkConnected ? "接続" : "未接続", good: !readiness.networkConnected)
                 readinessRow("PrivacyInfo source", value: readiness.privacyManifestSourceDeclared ? "宣言済み" : "未宣言", good: readiness.privacyManifestSourceDeclared)

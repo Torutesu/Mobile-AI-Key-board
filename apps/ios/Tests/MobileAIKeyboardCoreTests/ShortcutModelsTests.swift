@@ -2,6 +2,23 @@ import Foundation
 import XCTest
 @testable import MobileAIKeyboardCore
 
+private final class MutableTestClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Date
+
+    init(_ value: Date) { self.value = value }
+
+    func current() -> Date {
+        lock.lock(); defer { lock.unlock() }
+        return value
+    }
+
+    func advance(by interval: TimeInterval) {
+        lock.lock(); defer { lock.unlock() }
+        value.addTimeInterval(interval)
+    }
+}
+
 final class ShortcutModelsTests: XCTestCase {
     func testCanonicalJSONUsesNormativeSnakeCaseIDsAndExcludesContent() throws {
         let snapshot = makeSnapshot().withComputedDigest()
@@ -261,6 +278,63 @@ final class ShortcutModelsTests: XCTestCase {
             outputType: .replaceSelection
         )
         XCTAssertNil(ShortcutCapturePolicy.localSelection(skill: unsafeContextOnly, selectedText: "選択した文章"))
+    }
+
+    func testNativeFailureCircuitBreakerDisablesOnlyExactVersionAndCorruptionFailsSkillsClosed() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("native-failure-store-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let snapshotStore = AppGroupShortcutSnapshotStore(appGroupIdentifier: "group.invalid.native-failure", fallbackDirectoryURL: root)
+        let boundary = try snapshotStore.activateBoundary(ownerSubjectHash: "sha256:native-failure-owner")
+        let clock = MutableTestClock(Date(timeIntervalSince1970: 1_000))
+        let store = AppGroupNativeSkillFailureStore(
+            appGroupIdentifier: "group.invalid.native-failure",
+            fallbackDirectoryURL: root,
+            now: { clock.current() }
+        )
+        let first = makeSnapshot(ownerSubjectHash: boundary.ownerSubjectHash, policyEpoch: boundary.sessionEpoch).bindings[0]
+        let secondDigest = ShortcutDigest.sha256("second-native-skill")
+        let second = ShortcutBindingV1(
+            id: "bind_second_native",
+            userID: "user",
+            deviceID: "device",
+            skillID: "skill_second_native",
+            versionID: "sv_second_native",
+            skillVersion: 1,
+            skillDigest: secondDigest,
+            keyCode: .keyM,
+            presentation: ShortcutPresentation(iconValue: "wand.and.stars", shortLabel: "Second", accessibilityLabel: "M Second", accessibilityHint: "長押しで実行")
+        )
+
+        XCTAssertEqual(try store.recordFailure(for: first, boundary: boundary), .allowed)
+        XCTAssertEqual(try store.recordFailure(for: first, boundary: boundary), .allowed)
+        XCTAssertEqual(try store.recordFailure(for: first, boundary: boundary), .disabled)
+        XCTAssertEqual(store.decision(for: first, boundary: boundary), .disabled)
+        XCTAssertEqual(store.decision(for: second, boundary: boundary), .allowed)
+        clock.advance(by: AppGroupNativeSkillFailureStore.failureWindow + 1)
+        XCTAssertEqual(store.decision(for: first, boundary: boundary), .allowed)
+        XCTAssertEqual(try store.recordFailure(for: first, boundary: boundary), .allowed)
+
+        let file = root.appendingPathComponent("NativeSkillFailures/native-skill-failures.current.json")
+        try Data("corrupt".utf8).write(to: file, options: .atomic)
+        XCTAssertEqual(store.decision(for: first, boundary: boundary), .storeUnavailable)
+        XCTAssertEqual(store.decision(for: second, boundary: boundary), .storeUnavailable)
+    }
+
+    func testNativeFailureWriteFailureLatchesExactSkillClosed() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("native-failure-write-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let snapshotStore = AppGroupShortcutSnapshotStore(appGroupIdentifier: "group.invalid.native-failure-write", fallbackDirectoryURL: root)
+        let boundary = try snapshotStore.activateBoundary(ownerSubjectHash: "sha256:native-write-failure-owner")
+        let store = AppGroupNativeSkillFailureStore(
+            appGroupIdentifier: "group.invalid.native-failure-write",
+            fallbackDirectoryURL: root,
+            now: { Date(timeIntervalSince1970: 1_000) }
+        )
+        let binding = makeSnapshot(ownerSubjectHash: boundary.ownerSubjectHash, policyEpoch: boundary.sessionEpoch).bindings[0]
+
+        store.failWritesForTesting()
+        XCTAssertThrowsError(try store.recordFailure(for: binding, boundary: boundary))
+        XCTAssertEqual(store.decision(for: binding, boundary: boundary), .storeUnavailable)
     }
 
     private func makeSnapshot(ownerSubjectHash: String? = "sha256:test-owner", policyEpoch: Int = 1) -> ShortcutSnapshotV1 {

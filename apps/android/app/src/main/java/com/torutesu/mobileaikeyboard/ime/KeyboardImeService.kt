@@ -13,8 +13,11 @@ import com.torutesu.mobileaikeyboard.core.CommandSessionReducer
 import com.torutesu.mobileaikeyboard.core.ContentFreeTelemetry
 import com.torutesu.mobileaikeyboard.core.ExecutableLocalSkills
 import com.torutesu.mobileaikeyboard.core.InputSource
+import com.torutesu.mobileaikeyboard.core.ImeActivationProbeStore
 import com.torutesu.mobileaikeyboard.core.KeyboardSettingsStore
 import com.torutesu.mobileaikeyboard.core.LocalPoliteRewriteService
+import com.torutesu.mobileaikeyboard.core.NativeSkillExecutionDecision
+import com.torutesu.mobileaikeyboard.core.NativeSkillFailureStore
 import com.torutesu.mobileaikeyboard.core.NoOpTelemetry
 import com.torutesu.mobileaikeyboard.core.SensitiveFieldClassifier
 import com.torutesu.mobileaikeyboard.core.SessionEvent
@@ -41,6 +44,8 @@ class KeyboardImeService : InputMethodService() {
     private lateinit var shortcutStore: ShortcutSnapshotStore
     private lateinit var settingsStore: KeyboardSettingsStore
     private lateinit var accountBoundaryStore: AccountBoundaryStore
+    private lateinit var nativeSkillFailureStore: NativeSkillFailureStore
+    private lateinit var imeActivationProbeStore: ImeActivationProbeStore
     private var currentEditorInfo: EditorInfo? = null
     private var shortcutSnapshot: ShortcutSnapshot = ShortcutSnapshot.empty()
     private var activeShortcut: ShortcutActivation? = null
@@ -55,6 +60,8 @@ class KeyboardImeService : InputMethodService() {
         shortcutStore = ShortcutSnapshotStore(this)
         settingsStore = KeyboardSettingsStore(this)
         accountBoundaryStore = AccountBoundaryStore(this)
+        nativeSkillFailureStore = NativeSkillFailureStore(this)
+        imeActivationProbeStore = ImeActivationProbeStore(this)
         shortcutSnapshot = shortcutStore.read()
     }
 
@@ -64,7 +71,7 @@ class KeyboardImeService : InputMethodService() {
         surface = KeyboardSurface(this, KeyboardSurface.Callbacks(
             onCommand = { enterCommand() },
             onShortcut = { binding -> invokeShortcut(binding) },
-            onText = { text -> currentAdapter()?.insertAtCursor(text) },
+            onText = { text -> if (currentAdapter()?.insertAtCursor(text) != true) surface?.reportOrdinaryInputFailure() },
             onDelete = { currentAdapter()?.deleteBackward() },
             onEnter = {
                 currentInputConnection?.let { input ->
@@ -111,6 +118,9 @@ class KeyboardImeService : InputMethodService() {
 
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
         super.onStartInput(attribute, restarting)
+        // Content-free handshake consumed by host onboarding. It proves this
+        // exact IME entered an editor without persisting any editor metadata.
+        imeActivationProbeStore.publish()
         editorSessionId += 1L
         adapter = currentInputConnection?.let(::InputConnectionAdapter)
         currentEditorInfo = attribute
@@ -197,6 +207,12 @@ class KeyboardImeService : InputMethodService() {
     private fun invokeShortcut(binding: TriggerKeyBinding) {
         if (lockReason != null || !binding.enabled || !ExecutableLocalSkills.isExecutable(binding)) return
         val boundary = accountBoundaryStore.read() ?: return
+        if (nativeSkillFailureStore.decision(binding, boundary) != NativeSkillExecutionDecision.ALLOWED) {
+            // The key remains an ordinary typing key; only its Skill action and
+            // decoration are suppressed by the version-bound circuit breaker.
+            syncSurface()
+            return
+        }
         val current = shortcutStore.readForBoundary(boundary) ?: return
         val exact = current.bindings.firstOrNull {
             it.bindingId == binding.bindingId && it.keyCode == binding.keyCode && it.skillDigest == binding.skillDigest && it.enabled
@@ -387,13 +403,27 @@ class KeyboardImeService : InputMethodService() {
         if (::settingsStore.isInitialized) {
             surface?.render(
                 session.asKeyboardState(lockReason),
-                shortcutSnapshot,
+                shortcutSnapshotForRendering(),
                 settingsStore.read(),
                 ReturnKeyModel.from(currentEditorInfo),
             )
         } else {
-            surface?.render(session.asKeyboardState(lockReason), shortcutSnapshot)
+            surface?.render(session.asKeyboardState(lockReason), shortcutSnapshotForRendering())
         }
+    }
+
+    private fun shortcutSnapshotForRendering(): ShortcutSnapshot {
+        if (!::nativeSkillFailureStore.isInitialized || !::accountBoundaryStore.isInitialized) return ShortcutSnapshot.empty()
+        val boundary = accountBoundaryStore.read() ?: return ShortcutSnapshot.empty()
+        val visible = shortcutSnapshot.bindings.filter {
+            nativeSkillFailureStore.decision(it, boundary) == NativeSkillExecutionDecision.ALLOWED
+        }
+        return if (visible.size == shortcutSnapshot.bindings.size) shortcutSnapshot else ShortcutSnapshot(
+            schemaVersion = shortcutSnapshot.schemaVersion,
+            generation = shortcutSnapshot.generation,
+            layoutId = shortcutSnapshot.layoutId,
+            bindings = visible,
+        )
     }
 
     private fun shortcutStillCurrent(): Boolean {
@@ -405,31 +435,45 @@ class KeyboardImeService : InputMethodService() {
         ) return false
         val boundary = ActiveAccountBoundary(activation.ownerSubject, activation.sessionEpoch)
         val current = shortcutStore.readForBoundary(boundary) ?: return false
+        val binding = current.bindings.firstOrNull {
+            it.bindingId == activation.bindingId && it.skillId == activation.skillId &&
+                it.skillVersion == activation.skillVersion && it.skillDigest == activation.skillDigest && it.enabled
+        } ?: return false
         return current.generation == activation.snapshotGeneration &&
             current.layoutId == activation.layoutId &&
-            current.bindings.any {
-                it.bindingId == activation.bindingId && it.skillId == activation.skillId &&
-                    it.skillVersion == activation.skillVersion && it.skillDigest == activation.skillDigest && it.enabled
-            }
+            nativeSkillFailureStore.decision(binding, boundary) == NativeSkillExecutionDecision.ALLOWED
     }
 
-    private fun rewriteForActiveSkill(target: String): com.torutesu.mobileaikeyboard.core.RewriteResult? {
-        val activation = activeShortcut ?: return rewriteService.rewrite(target)
+    private fun bindingForActiveSkill(): Pair<ActiveAccountBoundary, TriggerKeyBinding>? {
+        val activation = activeShortcut ?: return null
         val boundary = ActiveAccountBoundary(activation.ownerSubject, activation.sessionEpoch)
         val binding = shortcutStore.readForBoundary(boundary)?.bindings?.firstOrNull {
             it.bindingId == activation.bindingId && it.skillId == activation.skillId &&
                 it.skillVersion == activation.skillVersion && it.skillDigest == activation.skillDigest && it.enabled
         } ?: return null
-        // Fail closed when the catalog or exact immutable identity is stale.
-        // Falling back to another transform would execute behavior the user did
-        // not assign to this physical key.
-        return com.torutesu.mobileaikeyboard.core.ExecutableLocalSkills.executeResult(binding, target)
+        return boundary to binding
     }
 
     private fun safelyRewriteForActiveSkill(target: String): com.torutesu.mobileaikeyboard.core.RewriteResult? = withAccountBoundaryLock {
+        if (activeShortcut == null) return@withAccountBoundaryLock try { rewriteService.rewrite(target) } catch (_: RuntimeException) { null }
+        val (boundary, binding) = bindingForActiveSkill() ?: return@withAccountBoundaryLock null
+        if (nativeSkillFailureStore.decision(binding, boundary) != NativeSkillExecutionDecision.ALLOWED) return@withAccountBoundaryLock null
         try {
-            rewriteForActiveSkill(target)
+            // Fail closed when the catalog or exact immutable identity is stale.
+            // Falling back to another transform would execute behavior the user
+            // did not assign to this physical key.
+            val result = com.torutesu.mobileaikeyboard.core.ExecutableLocalSkills.executeResult(binding, target)
+            if (result == null) {
+                nativeSkillFailureStore.recordFailure(binding, boundary)
+                syncSurface()
+                null
+            } else {
+                nativeSkillFailureStore.recordSuccess(binding, boundary)
+                result
+            }
         } catch (_: RuntimeException) {
+            nativeSkillFailureStore.recordFailure(binding, boundary)
+            syncSurface()
             null
         }
     }

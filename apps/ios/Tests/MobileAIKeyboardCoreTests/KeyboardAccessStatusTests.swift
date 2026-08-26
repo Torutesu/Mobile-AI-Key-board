@@ -20,4 +20,11 @@ final class KeyboardAccessStatusTests: XCTestCase {
             XCTAssertNil(store.load())
         }
     }
+
+    func testStatusFreshnessRejectsFutureAndExpiredObservations() {
+        let status = KeyboardAccessStatus(fullAccessEnabled: true, appGroupAvailable: true, checkedAt: Date(timeIntervalSince1970: 1_000))
+        XCTAssertTrue(status.isFresh(at: Date(timeIntervalSince1970: 1_299), maximumAge: 300))
+        XCTAssertFalse(status.isFresh(at: Date(timeIntervalSince1970: 1_301), maximumAge: 300))
+        XCTAssertFalse(status.isFresh(at: Date(timeIntervalSince1970: 999), maximumAge: 300))
+    }
 }

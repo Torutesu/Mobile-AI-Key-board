@@ -16,6 +16,7 @@
     {"id": "release_readiness_report", "path": "release-readiness.json", "class": "static_ci_report"},
     {"id": "shortcut_native_consumer_report", "path": "shortcut-native-consumption.json", "class": "static_ci_report"},
     {"id": "ios_archive_entitlement_privacy_report", "path": "ios-archive-entitlement-privacy.json", "class": "protected_external", "status": "not_proven"},
+    {"id": "android_aab_signing_manifest_report", "path": "docs/android-aab-signing-manifest.json", "class": "protected_external", "status": "not_proven"},
     {"id": "real_device_e2e_matrix", "path": "docs/release-e2e-matrix.json", "class": "protected_external", "status": "not_proven"},
     {"id": "performance_evidence", "path": "docs/release-performance-evidence.json", "class": "protected_external", "status": "not_proven"},
     {"id": "performance_benchmark_diagnostic", "path": "performance-benchmark.json", "class": "local_diagnostic", "status": "not_proven"}

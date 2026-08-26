@@ -9,11 +9,13 @@ import org.junit.Test
 
 class KeyboardSettingsTest {
     @Test
-    fun imeOnboardingRequiresEnablementAndNonBlankTestField() {
-        assertFalse(ImeOnboardingStatus(false, "typed").complete)
-        assertFalse(ImeOnboardingStatus(true, "").complete)
-        assertTrue(ImeOnboardingStatus(true, "typed").complete)
-        assertFalse(ImeOnboardingStatus(true, "  \n").complete)
+    fun imeOnboardingRequiresEnablementSelectionFreshProbeAndNonBlankTestField() {
+        assertFalse(ImeOnboardingStatus(false, true, true, "typed").complete)
+        assertFalse(ImeOnboardingStatus(true, false, true, "typed").complete)
+        assertFalse(ImeOnboardingStatus(true, true, false, "typed").complete)
+        assertFalse(ImeOnboardingStatus(true, true, true, "").complete)
+        assertTrue(ImeOnboardingStatus(true, true, true, "typed").complete)
+        assertFalse(ImeOnboardingStatus(true, true, true, "  \n").complete)
     }
 
     @Test

@@ -36,7 +36,7 @@
       "device_class": "baseline",
       "os": "Android 11 or later",
       "devices": ["Android 11 baseline phone", "current Pixel", "current Samsung Galaxy", "low-memory Android phone"],
-      "apps": ["Messages", "Mail", "Safari/Chrome", "LINE", "Slack", "Gmail", "Notion"],
+      "apps": ["Messages", "Mail", "Chrome", "LINE", "Slack", "Gmail", "Notion"],
       "status": "not_proven",
       "runs": []
     }

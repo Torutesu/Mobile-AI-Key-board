@@ -18,9 +18,10 @@ test('Android selection-only shortcuts cannot use their label as transformable c
   const service = read('apps/android/app/src/main/java/com/torutesu/mobileaikeyboard/ime/KeyboardImeService.kt');
   assert.match(service, /capture\(command = "", useSelection = true, useSurrounding = false\)/);
   assert.doesNotMatch(service, /capture\(exact\.skillName, useSelection = true/);
-  const resolver = service.match(/private fun rewriteForActiveSkill[\s\S]*?private fun bucket/)?.[0] ?? '';
-  assert.match(resolver, /val activation = activeShortcut \?: return rewriteService\.rewrite\(target\)/);
-  assert.match(resolver, /\} \?: return null/);
+  const resolver = service.match(/private fun safelyRewriteForActiveSkill[\s\S]*?private fun bucket/)?.[0] ?? '';
+  assert.match(resolver, /if \(activeShortcut == null\) return@withAccountBoundaryLock try \{ rewriteService\.rewrite\(target\)/);
+  assert.match(resolver, /bindingForActiveSkill\(\) \?: return@withAccountBoundaryLock null/);
+  assert.match(resolver, /NativeSkillExecutionDecision\.ALLOWED\) return@withAccountBoundaryLock null/);
   assert.doesNotMatch(resolver, /activeShortcut\?\.let[\s\S]*?\?: rewriteService\.rewrite/);
 });
 

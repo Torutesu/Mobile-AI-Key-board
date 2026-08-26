@@ -4,6 +4,46 @@ import android.content.Context
 import android.text.InputType
 import android.view.inputmethod.EditorInfo
 
+data class ImeActivationProbe(val counter: Long, val observedAtMillis: Long)
+
+/** Content-free proof that this app's InputMethodService actually entered an editor. */
+class ImeActivationProbeStore(
+    context: Context,
+    private val nowMillis: () -> Long = System::currentTimeMillis,
+) {
+    private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+
+    @Synchronized fun publish(): Boolean {
+        val previous = read()?.counter ?: 0L
+        if (previous == Long.MAX_VALUE) return false
+        val counter = previous + 1L
+        val observedAt = nowMillis()
+        if (observedAt <= 0) return false
+        return preferences.edit()
+            .putLong(COUNTER, counter)
+            .putLong(OBSERVED_AT, observedAt)
+            .putString(DIGEST, digest(counter, observedAt))
+            .commit()
+    }
+
+    @Synchronized fun read(): ImeActivationProbe? {
+        val counter = preferences.getLong(COUNTER, 0L)
+        val observedAt = preferences.getLong(OBSERVED_AT, 0L)
+        if (counter <= 0 || observedAt <= 0 || preferences.getString(DIGEST, null) != digest(counter, observedAt)) return null
+        return ImeActivationProbe(counter, observedAt)
+    }
+
+    private fun digest(counter: Long, observedAt: Long) =
+        "sha256:${TextFingerprint.of("ime-activation-probe-v1\u0000$counter\u0000$observedAt")}"
+
+    companion object {
+        private const val PREFERENCES = "mobile_ai_keyboard_ime_activation_probe_v1"
+        private const val COUNTER = "counter"
+        private const val OBSERVED_AT = "observed_at_millis"
+        private const val DIGEST = "content_digest"
+    }
+}
+
 enum class ShiftState { OFF, ONE_SHOT, CAPS_LOCK }
 enum class KeyboardLayer { LETTERS, SYMBOLS }
 

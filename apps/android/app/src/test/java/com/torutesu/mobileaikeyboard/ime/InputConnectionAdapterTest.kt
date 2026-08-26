@@ -155,6 +155,40 @@ class InputConnectionAdapterTest {
         assertFalse(adapter.deleteBackward())
         assertEquals("x", editor.text)
     }
+
+    @Test
+    fun oversizedSelectionIsRejectedBeforeStringMaterializationBoundary() {
+        val value = "x".repeat(8_001)
+        val adapter = InputConnectionAdapter(FakeEditor(value, 0, value.length).connection)
+
+        val context = adapter.captureContext(useSelection = true, useSurrounding = false)
+
+        assertTrue(context.selectionOverLimit)
+        assertFalse(context.selectionAvailable)
+        assertEquals("", context.selected)
+        assertNull(context.fieldFingerprint)
+        assertEquals("", adapter.captureSelection())
+    }
+
+    @Test
+    fun hostileSelectedCharSequenceCannotEscapeTheEditorExceptionBoundary() {
+        val editor = FakeEditor("selected", 0, 8).apply {
+            selectedOverride = object : CharSequence {
+                override val length: Int get() = error("hostile length")
+                override fun get(index: Int): Char = error("hostile get")
+                override fun subSequence(startIndex: Int, endIndex: Int): CharSequence = error("hostile subsequence")
+                override fun toString(): String = error("hostile materialization")
+            }
+        }
+        val adapter = InputConnectionAdapter(editor.connection)
+
+        val context = adapter.captureContext(useSelection = true, useSurrounding = false)
+
+        assertFalse(context.selectionAvailable)
+        assertFalse(context.selectionOverLimit)
+        assertNull(context.fieldFingerprint)
+        assertEquals("", adapter.captureSelection())
+    }
 }
 
 private class FakeEditor(initialText: String, selectionStart: Int, selectionEnd: Int) : InvocationHandler {
@@ -171,6 +205,7 @@ private class FakeEditor(initialText: String, selectionStart: Int, selectionEnd:
     var throwOnDelete = false
     var nullSelectedRead = false
     var nullSurroundingRead = false
+    var selectedOverride: CharSequence? = null
 
     val connection: InputConnection = Proxy.newProxyInstance(
         InputConnection::class.java.classLoader,
@@ -200,7 +235,7 @@ private class FakeEditor(initialText: String, selectionStart: Int, selectionEnd:
         return when (method.name) {
             "getSelectedText" -> {
                 selectedReads++
-                if (nullSelectedRead || selectionStart == selectionEnd) null else text.substring(selectionStart, selectionEnd)
+                selectedOverride ?: if (nullSelectedRead || selectionStart == selectionEnd) null else text.substring(selectionStart, selectionEnd)
             }
             "getTextBeforeCursor" -> {
                 beforeReads++

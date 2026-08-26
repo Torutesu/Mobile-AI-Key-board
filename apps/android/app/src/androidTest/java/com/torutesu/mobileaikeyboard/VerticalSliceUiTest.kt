@@ -34,6 +34,8 @@ import com.torutesu.mobileaikeyboard.core.KeyboardState
 import com.torutesu.mobileaikeyboard.core.LocalSkillDescriptor
 import com.torutesu.mobileaikeyboard.core.LocalSkillExecutorKind
 import com.torutesu.mobileaikeyboard.core.LocalSkillRegistry
+import com.torutesu.mobileaikeyboard.core.NativeSkillExecutionDecision
+import com.torutesu.mobileaikeyboard.core.NativeSkillFailureStore
 import com.torutesu.mobileaikeyboard.core.PrivateSkillDraft
 import com.torutesu.mobileaikeyboard.core.PrivateSkillVersion
 import com.torutesu.mobileaikeyboard.core.SkillBuilderEvent
@@ -223,6 +225,72 @@ class VerticalSliceUiTest {
             assertEquals("", typed)
             assertEquals(0, triggered)
         }
+    }
+
+    @Test
+    fun repeatedExecutorFailureDisablesOnlyExactSkillVersionAndCorruptionFailsSkillsClosed() {
+        val appContext = composeRule.activity.applicationContext
+        val boundaryStore = AccountBoundaryStore(appContext)
+        var now = 1_000L
+        val failureStore = NativeSkillFailureStore(appContext) { now }
+        boundaryStore.resetForTesting()
+        failureStore.clear()
+        assertTrue(boundaryStore.activateForTesting("native-failure-owner", 1))
+        val boundary = boundaryStore.read()!!
+        val first = TriggerKeyBinding(
+            "binding-failure-a",
+            ExecutableLocalSkills.POLITE_REWRITE_ID,
+            1,
+            "sha256:${TextFingerprint.of("local.polite-rewrite:v1")}",
+            keyCode = "KeyA",
+            skillName = "丁寧に書き換え",
+        )
+        val second = TriggerKeyBinding(
+            "binding-failure-b",
+            ExecutableLocalSkills.PUNCTUATION_POLISH_ID,
+            1,
+            "sha256:${TextFingerprint.of("local.punctuation-polish:v1")}",
+            keyCode = "KeyB",
+            skillName = "句読点を整える",
+        )
+
+        assertEquals(NativeSkillExecutionDecision.ALLOWED, failureStore.recordFailure(first, boundary))
+        assertEquals(NativeSkillExecutionDecision.ALLOWED, failureStore.recordFailure(first, boundary))
+        assertEquals(NativeSkillExecutionDecision.DISABLED, failureStore.recordFailure(first, boundary))
+        assertEquals(NativeSkillExecutionDecision.DISABLED, failureStore.decision(first, boundary))
+        assertEquals(NativeSkillExecutionDecision.ALLOWED, failureStore.decision(second, boundary))
+        now += 10L * 60L * 1_000L + 1L
+        assertEquals(NativeSkillExecutionDecision.ALLOWED, failureStore.decision(first, boundary))
+        assertEquals(NativeSkillExecutionDecision.ALLOWED, failureStore.recordFailure(first, boundary))
+
+        // A damaged containment record cannot re-enable a Skill. The IME
+        // suppresses Skill actions but its ordinary keyboard remains mounted.
+        failureStore.corruptForTesting()
+        assertEquals(NativeSkillExecutionDecision.STORE_UNAVAILABLE, failureStore.decision(first, boundary))
+        assertEquals(NativeSkillExecutionDecision.STORE_UNAVAILABLE, failureStore.decision(second, boundary))
+    }
+
+    @Test
+    fun nativeFailureWriteFailureLatchesExactSkillClosed() {
+        val appContext = composeRule.activity.applicationContext
+        val boundaryStore = AccountBoundaryStore(appContext)
+        val failureStore = NativeSkillFailureStore(appContext) { 1_000L }
+        boundaryStore.resetForTesting()
+        failureStore.clear()
+        assertTrue(boundaryStore.activateForTesting("native-write-failure-owner", 1))
+        val boundary = boundaryStore.read()!!
+        val binding = TriggerKeyBinding(
+            "binding-write-failure",
+            ExecutableLocalSkills.POLITE_REWRITE_ID,
+            1,
+            "sha256:${TextFingerprint.of("local.polite-rewrite:v1")}",
+            keyCode = "KeyA",
+            skillName = "丁寧に書き換え",
+        )
+
+        failureStore.failWritesForTesting()
+        assertEquals(NativeSkillExecutionDecision.STORE_UNAVAILABLE, failureStore.recordFailure(binding, boundary))
+        assertEquals(NativeSkillExecutionDecision.STORE_UNAVAILABLE, failureStore.decision(binding, boundary))
     }
 
     @Test

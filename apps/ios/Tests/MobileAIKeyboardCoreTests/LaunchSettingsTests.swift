@@ -93,7 +93,7 @@ final class LaunchSettingsTests: XCTestCase {
 
     func testLaunchReadinessIsHonestAndNoCollection() {
         let readiness = LaunchReadinessFixture()
-        XCTAssertFalse(readiness.fullAccessEnabled)
+        XCTAssertTrue(readiness.fullAccessEnabled)
         XCTAssertFalse(readiness.networkConnected)
         XCTAssertTrue(readiness.collectedDataTypes.isEmpty)
         XCTAssertTrue(readiness.privacyManifestSourceDeclared)

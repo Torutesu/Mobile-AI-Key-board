@@ -1,0 +1,25 @@
+{
+  "schema_version": "mobile-ai-keyboard.android-aab.v1",
+  "status": "not_proven",
+  "evidence_class": "protected_external",
+  "candidate": {
+    "source_commit": null,
+    "artifact_digest": null
+  },
+  "package_id": "com.torutesu.mobileaikeyboard",
+  "artifact": {
+    "signed": null,
+    "digest": null,
+    "signing_certificate_sha256": null
+  },
+  "merged_manifest": {
+    "internet_permission": null,
+    "ime_service_permission": null,
+    "ime_service_exported": null,
+    "allow_backup": null,
+    "data_extraction_rules_present": null,
+    "full_backup_rules_present": null
+  },
+  "evidence": null,
+  "notes": "Populate only from a protected release runner inspecting the exact signed release AAB. Debug APK, unsigned bundle, local build, emulator, and self-attestation do not qualify."
+}

@@ -510,7 +510,7 @@ public struct ShortcutAccountBoundaryV1: Codable, Equatable, Sendable {
         "shortcut-account-boundary-v1\u{0}\(ownerSubjectHash ?? "")\u{0}\(sessionEpoch)\u{0}\(active ? 1 : 0)\u{0}\(Int64((expiresAt.timeIntervalSince1970 * 1_000).rounded()))"
     }
 
-    fileprivate var isValid: Bool {
+    var isValid: Bool {
         schemaVersion == 1 && (1...ShortcutSnapshotValidator.maxMonotonicValue).contains(sessionEpoch) && (!active || !(ownerSubjectHash ?? "").isEmpty) && contentDigest == ShortcutDigest.sha256(unsignedValue)
     }
 }
