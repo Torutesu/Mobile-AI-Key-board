@@ -1,5 +1,6 @@
 package com.torutesu.mobileaikeyboard.ime
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
@@ -13,6 +14,7 @@ import com.torutesu.mobileaikeyboard.core.KeyboardMode
 import com.torutesu.mobileaikeyboard.core.KeyboardState
 
 /** Small dependency-free keyboard surface; all touch targets are at least 48dp. */
+@SuppressLint("ViewConstructor") // Instantiated only by KeyboardImeService with mandatory callbacks; never inflated from XML.
 class KeyboardSurface(context: Context, private val callbacks: Callbacks) : ScrollView(context) {
     class Callbacks(
         val onCommand: () -> Unit,
@@ -20,9 +22,13 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
         val onDelete: () -> Unit,
         val onEnter: () -> Unit,
         val onSwitchKeyboard: () -> Unit,
-        val onRewrite: (String, Boolean) -> Unit,
-        val onApply: () -> Unit,
+        val onCapture: (String, Boolean, Boolean) -> Unit,
+        val onAcknowledge: () -> Unit,
+        val onEditResult: (String) -> Unit,
+        val onRegenerate: () -> Unit,
+        val onApply: (String) -> Unit,
         val onCopy: (String) -> Unit,
+        val onUndo: () -> Unit,
         val onCancel: () -> Unit,
     )
 
@@ -45,6 +51,7 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
         when (state.mode) {
             KeyboardMode.COMMAND, KeyboardMode.CAPTURE_REVIEW, KeyboardMode.RESULT_REVIEW, KeyboardMode.ERROR -> renderCommand(state)
             KeyboardMode.LOCKED -> renderLocked(state)
+            KeyboardMode.RECEIPT -> renderReceipt(state)
             else -> renderTyping(state)
         }
     }
@@ -93,11 +100,42 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
         )
         heading.setTypeface(Typeface.DEFAULT, Typeface.BOLD)
         root.addView(heading)
+        if (state.mode == KeyboardMode.CAPTURE_REVIEW) {
+            val preview = state.capturePreview
+            root.addView(label("送信先: ${preview?.destination ?: "端末内のみ"}", 14f))
+            root.addView(label("外部送信: なし", 14f))
+            root.addView(label("文字数: ${preview?.characterCount ?: 0}", 14f))
+            root.addView(label("確認前の入力（正確な表示）", 13f).apply { setTypeface(Typeface.DEFAULT, Typeface.BOLD) })
+            root.addView(label(preview?.exactText.orEmpty(), 15f).apply { contentDescription = "Exact capture preview" })
+            root.addView(label("機密候補を伏せた表示", 13f).apply { setTypeface(Typeface.DEFAULT, Typeface.BOLD) })
+            root.addView(label(preview?.redactedText.orEmpty(), 15f).apply { contentDescription = "Redacted capture preview" })
+            preview?.notice?.let { root.addView(label(it, 13f)) }
+            preview?.blockedReason?.let { root.addView(label(it, 13f).apply { setTextColor(Color.rgb(150, 30, 30)) }) }
+            if (preview?.acknowledgementRequired == true) {
+                root.addView(actionButton("確認して端末内で実行", "Capture Reviewを確認し、端末内の変換を実行") { callbacks.onAcknowledge() })
+            }
+            root.addView(actionButton("キャンセル", "Capture Reviewをキャンセル") { callbacks.onCancel() })
+            return
+        }
         if (state.mode == KeyboardMode.RESULT_REVIEW) {
             val result = state.resultText.orEmpty()
-            root.addView(label(result, 16f).apply { contentDescription = "生成結果: $result" })
-            root.addView(actionButton("適用", "結果を入力欄へ適用") { callbacks.onApply() })
-            root.addView(actionButton("コピー", "結果をクリップボードへコピー") { callbacks.onCopy(result) })
+            val edited = EditText(context).apply {
+                setText(result)
+                setSelection(text.length)
+                minHeight = dp(72)
+                setSingleLine(false)
+                showSoftInputOnFocus = false
+                contentDescription = "Result Preview editor"
+                hint = "編集可能な結果"
+            }
+            root.addView(label("プレビュー（編集・再生成・適用を選べます）", 13f))
+            state.errorMessage?.let { root.addView(label(it, 13f).apply { setTextColor(Color.rgb(150, 30, 30)) }) }
+            root.addView(edited)
+            root.addView(inlineEditorKeyboard(edited))
+            root.addView(actionButton("編集", "結果を編集") { edited.requestFocus() })
+            root.addView(actionButton("再生成", "同じ入力から端末内で再生成") { callbacks.onRegenerate() })
+            root.addView(actionButton("適用", "編集後の結果を入力欄へ適用") { callbacks.onApply(edited.text.toString()) })
+            root.addView(actionButton("コピー", "編集後の結果をクリップボードへコピー") { callbacks.onCopy(edited.text.toString()) })
             root.addView(actionButton("キャンセル", "結果を破棄") { callbacks.onCancel() })
             return
         }
@@ -110,9 +148,12 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
             hint = "文章を入力、または選択して実行"
             minHeight = dp(52)
             setSingleLine(false)
+            showSoftInputOnFocus = false
             contentDescription = "Command input"
+            setSelection(text.length)
         }
         root.addView(command)
+        root.addView(inlineEditorKeyboard(command))
         val surrounding = android.widget.CheckBox(context).apply {
             text = "前後の文章を使う（この実行のみ）"
             isChecked = false
@@ -120,10 +161,25 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
             contentDescription = "Surrounding text source, off by default"
         }
         root.addView(surrounding)
-        root.addView(actionButton("丁寧にする（端末内）", "ローカルの固定変換を実行") {
-            callbacks.onRewrite(command.text.toString(), surrounding.isChecked)
+        val selection = android.widget.CheckBox(context).apply {
+            text = "選択範囲を使う（この実行のみ）"
+            minHeight = dp(48)
+            contentDescription = "Selection text source, off by default"
+        }
+        root.addView(selection, 1)
+        root.addView(actionButton("入力を確認", "入力ソースを確認してCapture Reviewを表示") {
+            callbacks.onCapture(command.text.toString(), selection.isChecked, surrounding.isChecked)
         })
         root.addView(actionButton("キャンセル", "Commandをキャンセル") { callbacks.onCancel() })
+    }
+
+    private fun renderReceipt(state: KeyboardState) {
+        root.addView(label("適用しました", 17f).apply { setTypeface(Typeface.DEFAULT, Typeface.BOLD) })
+        root.addView(label("入力欄の内容を更新しました。必要なら1回だけUndoできます。", 14f))
+        state.resultText?.let { root.addView(label(it, 15f).apply { contentDescription = "Applied result" }) }
+        if (state.undoAvailable) root.addView(actionButton("Undo", "直前の適用を元に戻す") { callbacks.onUndo() })
+        root.addView(actionButton("コピー", "適用した結果をコピー") { callbacks.onCopy(state.resultText.orEmpty()) })
+        root.addView(actionButton("閉じる", "レシートを閉じる") { callbacks.onCancel() })
     }
 
     private fun renderLocked(state: KeyboardState) {
@@ -131,6 +187,41 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
         root.addView(label(state.sensitiveReason ?: "この入力欄ではAI機能を利用できません", 14f))
         root.addView(label("通常入力は端末内で引き続き利用できます。", 13f))
         renderTyping(state, showCommandControls = false)
+    }
+
+    private fun inlineEditorKeyboard(editor: EditText): LinearLayout = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        listOf("qwertyuiop", "asdfghjkl", "zxcvbnm").forEach { letters ->
+            val editorRow = row()
+            letters.forEach { letter ->
+                editorRow.addView(key(letter.toString(), "${letter}を編集欄へ入力").apply {
+                    setOnClickListener { replaceEditorSelection(editor, letter.toString()) }
+                })
+            }
+            addView(editorRow)
+        }
+        val editorControls = row()
+        editorControls.addView(key("space", "編集欄へスペースを入力", weight = 3f).apply {
+            setOnClickListener { replaceEditorSelection(editor, " ") }
+        })
+        editorControls.addView(key("⌫", "編集欄の文字を削除", weight = 1f).apply {
+            setOnClickListener { deleteEditorSelection(editor) }
+        })
+        addView(editorControls)
+    }
+
+    private fun replaceEditorSelection(editor: EditText, replacement: String) {
+        val start = editor.selectionStart.coerceAtLeast(0)
+        val end = editor.selectionEnd.coerceAtLeast(start)
+        editor.text.replace(start, end, replacement)
+        editor.setSelection(start + replacement.length)
+    }
+
+    private fun deleteEditorSelection(editor: EditText) {
+        var start = editor.selectionStart.coerceAtLeast(0)
+        val end = editor.selectionEnd.coerceAtLeast(start)
+        if (start == end && start > 0) start = editor.text.toString().offsetByCodePoints(start, -1)
+        if (start < end) editor.text.delete(start, end)
     }
 
     private fun row() = LinearLayout(context).apply {

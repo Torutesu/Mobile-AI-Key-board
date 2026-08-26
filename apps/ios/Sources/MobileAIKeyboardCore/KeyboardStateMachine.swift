@@ -17,9 +17,32 @@ public struct KeyboardStateMachine: Sendable {
         case (.captureReview(let draft), .beginPlanning) where draft.acknowledged: screen = .planning
         case (.captureReview, .beginPlanning): screen = .error(.missingDisclosure)
         case (.planning, .showRewrite(let result)): screen = .resultReview(result)
+        case (.resultReview, .updateRewrite(let result)): screen = .resultReview(result)
         case (.planning, .showActionReview): screen = .actionReview
         case (.resultReview(let result), .applyResult(let currentFingerprint)):
-            screen = currentFingerprint == result.fieldFingerprint ? .typing : .error(.staleField)
+            if currentFingerprint == result.fieldFingerprint {
+                let locking = EntityLocking()
+                screen = .applied(UndoToken(original: result.original, rewritten: result.rewritten, originalFingerprint: result.fieldFingerprint, appliedFingerprint: locking.fingerprint(result.rewritten), documentIdentifier: result.documentIdentifier))
+            } else {
+                screen = .error(.staleField)
+            }
+        case (.resultReview(let result), .applyResultWithSnapshot(let snapshot)):
+            let identityMatches = result.documentIdentifier == nil || result.documentIdentifier == snapshot.documentIdentifier
+            if snapshot.fieldFingerprint == result.fieldFingerprint && identityMatches {
+                let locking = EntityLocking()
+                let appliedFingerprint = snapshot.expectedAppliedFingerprint ?? locking.fingerprint(result.rewritten)
+                screen = .applied(UndoToken(original: result.original, rewritten: result.rewritten, originalFingerprint: result.fieldFingerprint, appliedFingerprint: appliedFingerprint, documentIdentifier: snapshot.documentIdentifier))
+            } else {
+                screen = .error(.staleField)
+            }
+        case (.applied(let token), .undo(let currentFingerprint)):
+            screen = currentFingerprint == token.appliedFingerprint ? .typing : .error(.staleField)
+        case (.applied(let token), .undoWithSnapshot(let snapshot)):
+            let identityMatches = token.documentIdentifier == nil || token.documentIdentifier == snapshot.documentIdentifier
+            screen = snapshot.fieldFingerprint == token.appliedFingerprint && identityMatches ? .typing : .error(.staleField)
+        case (.resultReview, .editResult): break
+        case (.resultReview, .regenerateResult): break
+        case (.resultReview, .copyResult): break
         case (.resultReview, .showActionReview): screen = .actionReview
         case (.actionReview, .confirmExecution): screen = .executing
         case (.executing, .settle(let receipt)): screen = .receipt(receipt)

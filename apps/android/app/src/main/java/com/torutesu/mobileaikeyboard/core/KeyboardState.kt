@@ -25,6 +25,8 @@ data class KeyboardState(
     val resultText: String? = null,
     val errorMessage: String? = null,
     val sensitiveReason: String? = null,
+    val capturePreview: CapturePreview? = null,
+    val undoAvailable: Boolean = false,
 )
 
 sealed interface KeyboardAction {

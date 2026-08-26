@@ -88,8 +88,117 @@ export const TelemetryEvent = z.discriminatedUnion("name", [
   z.object({ name: z.literal("command_started"), skill_id: z.string(), skill_version: z.number().int().positive(), input_source_types: z.array(InputSource), risk_class: RiskClass }).strict(),
   z.object({ name: z.literal("plan_reviewed"), plan_type: z.enum(["text", "external_read", "external_write"]), outcome: z.enum(["accepted", "edited", "cancelled"]), latency_bucket: z.enum(["0_100ms", "100_500ms", "500_2000ms", "over_2000ms"]) }).strict(),
   z.object({ name: z.literal("execution_finished"), operations: z.array(z.string()), outcome: z.enum(["success", "partial", "failed", "unknown"]), latency_bucket: z.enum(["0_100ms", "100_500ms", "500_2000ms", "over_2000ms"]), retry_count: z.number().int().nonnegative() }).strict(),
-  z.object({ name: z.literal("result_applied"), method: z.enum(["insertion", "replacement", "copy"]), character_count_bucket: z.enum(["0", "1_32", "33_256", "257_2000", "over_2000"]) }).strict()
+  z.object({ name: z.literal("result_applied"), method: z.enum(["insertion", "replacement", "copy"]), character_count_bucket: z.enum(["0", "1_32", "33_256", "257_2000", "over_2000"]) }).strict(),
+  z.object({ name: z.literal("local_text_action_started"), action_id: z.string().regex(/^act_[A-Za-z0-9_-]{16,128}$/), operation: z.enum(["rewrite", "translate", "shorten", "custom"]), preview_mode: z.enum(["exact", "locally_redacted"]), source_types: z.array(z.enum(["command", "selection", "surrounding_text", "clipboard"])), result_revision: z.number().int().positive() }).strict()
 ]);
 export type TelemetryEvent = z.infer<typeof TelemetryEvent>;
+
+export const LocalCaptureSource = z.enum(["command", "selection", "surrounding_text", "clipboard"]);
+export type LocalCaptureSource = z.infer<typeof LocalCaptureSource>;
+export const LocalPreviewMode = z.enum(["exact", "locally_redacted"]);
+export type LocalPreviewMode = z.infer<typeof LocalPreviewMode>;
+export const LocalApplyMethod = z.enum(["insert_text", "replace_selection", "copy"]);
+export type LocalApplyMethod = z.infer<typeof LocalApplyMethod>;
+export const UndoState = z.enum(["unavailable", "available", "used", "expired"]);
+export type UndoState = z.infer<typeof UndoState>;
+
+export const LocalCaptureLimits = z.object({
+  command_max_characters: z.number().int().nonnegative().max(500),
+  selection_max_characters: z.number().int().nonnegative().max(4_000),
+  surrounding_before_max_characters: z.number().int().nonnegative().max(1_000),
+  surrounding_after_max_characters: z.number().int().nonnegative().max(500),
+  clipboard_max_characters: z.number().int().nonnegative().max(4_000)
+}).strict();
+export type LocalCaptureLimits = z.infer<typeof LocalCaptureLimits>;
+
+export const LocalCaptureSourceSelection = z.object({
+  source: LocalCaptureSource,
+  enabled: z.boolean(),
+  explicit_opt_in: z.boolean()
+}).strict();
+export type LocalCaptureSourceSelection = z.infer<typeof LocalCaptureSourceSelection>;
+
+export const LocalDisclosure = z.object({
+  sources: z.array(LocalCaptureSourceSelection).min(1).max(4),
+  limits: LocalCaptureLimits,
+  destination: z.literal("local_device"),
+  network_required: z.literal(false),
+  retention: z.literal("none"),
+  issued_at: z.string().datetime({ offset: true })
+}).strict();
+export type LocalDisclosure = z.infer<typeof LocalDisclosure>;
+
+const UnicodeText = (maximum: number) => z.string().refine((value) => Array.from(value).length <= maximum, { message: `Text exceeds ${maximum} Unicode code points` });
+export const LocalTextCaptureItem = z.object({ source: LocalCaptureSource, text: UnicodeText(4_000) }).strict();
+export type LocalTextCaptureItem = z.infer<typeof LocalTextCaptureItem>;
+export const LocalTextCapture = z.object({
+  items: z.array(LocalTextCaptureItem).min(1).max(4),
+  field_fingerprint: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  disclosure_acknowledgement: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  capture_fingerprint: z.string().regex(/^sha256:[a-f0-9]{64}$/)
+}).strict();
+export type LocalTextCapture = z.infer<typeof LocalTextCapture>;
+
+export const LocalPreviewMetadata = z.object({
+  mode: LocalPreviewMode,
+  character_count: z.number().int().nonnegative(),
+  content_digest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  redacted_character_count: z.number().int().nonnegative(),
+  redaction_types: z.array(z.enum(["name", "number", "date", "url", "email", "handle", "product"])).max(20)
+}).strict();
+export type LocalPreviewMetadata = z.infer<typeof LocalPreviewMetadata>;
+export const LocalTextPreview = z.object({ metadata: LocalPreviewMetadata, content: UnicodeText(10_000) }).strict();
+export type LocalTextPreview = z.infer<typeof LocalTextPreview>;
+
+export const LocalTextPlan = z.object({
+  plan_id: z.string().min(1), plan_version: z.number().int().positive(), run_id: z.string().min(1),
+  operation: z.enum(["rewrite", "translate", "shorten", "custom"]), risk_class: z.literal("R1"),
+  summary: z.string().min(1).max(1_000), capture_fingerprint: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  result_revision: z.number().int().positive(), destination: z.literal("local_device"), network_required: z.literal(false),
+  tools: z.array(z.never()).max(0), apply_method: LocalApplyMethod,
+  canonical_digest: z.string().regex(/^sha256:[a-f0-9]{64}$/)
+}).strict();
+export type LocalTextPlan = z.infer<typeof LocalTextPlan>;
+
+export const LocalUndo = z.object({ token: z.string().regex(/^undo_[A-Za-z0-9_-]{16,128}$/).optional(), state: UndoState, expires_at: z.string().datetime({ offset: true }).optional() }).strict().superRefine((value, context) => {
+  const hasToken = value.token !== undefined; const hasExpiry = value.expires_at !== undefined;
+  if (value.state === "available" && (!hasToken || !hasExpiry)) context.addIssue({ code: z.ZodIssueCode.custom, message: "available undo requires token and expiry" });
+  if (value.state !== "available" && (hasToken || hasExpiry)) context.addIssue({ code: z.ZodIssueCode.custom, message: "inactive undo cannot carry token or expiry" });
+});
+export type LocalUndo = z.infer<typeof LocalUndo>;
+export const LocalTextResult = z.object({
+  result_revision: z.number().int().positive(), text: UnicodeText(10_000), apply_method: LocalApplyMethod,
+  undo: LocalUndo
+}).strict();
+export type LocalTextResult = z.infer<typeof LocalTextResult>;
+
+export const DEFAULT_LOCAL_CAPTURE_LIMITS: LocalCaptureLimits = {
+  command_max_characters: 500,
+  selection_max_characters: 4_000,
+  surrounding_before_max_characters: 1_000,
+  surrounding_after_max_characters: 500,
+  clipboard_max_characters: 4_000
+};
+
+export function defaultLocalCaptureSources(): LocalCaptureSourceSelection[] {
+  return [
+    { source: "command", enabled: true, explicit_opt_in: false },
+    { source: "selection", enabled: true, explicit_opt_in: false },
+    { source: "surrounding_text", enabled: false, explicit_opt_in: false },
+    { source: "clipboard", enabled: false, explicit_opt_in: false }
+  ];
+}
+
+export function localDisclosureDigest(disclosure: LocalDisclosure): string {
+  return `sha256:${createHash("sha256").update(canonicalJson(disclosure), "utf8").digest("hex")}`;
+}
+
+export function localCaptureFingerprint(capture: Omit<LocalTextCapture, "capture_fingerprint">): string {
+  return `sha256:${createHash("sha256").update(canonicalJson(capture), "utf8").digest("hex")}`;
+}
+
+export function localTextPlanDigest(plan: Omit<LocalTextPlan, "canonical_digest">): string {
+  return `sha256:${createHash("sha256").update(canonicalJson(plan), "utf8").digest("hex")}`;
+}
 
 export function parseContract<T extends z.ZodTypeAny>(schema: T, value: unknown): z.infer<T> { return schema.parse(value); }

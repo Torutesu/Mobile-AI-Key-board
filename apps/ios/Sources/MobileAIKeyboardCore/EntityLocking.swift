@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 public struct EntityLocking: Sendable {
     public init() {}
@@ -10,6 +11,8 @@ public struct EntityLocking: Sendable {
             #"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}"#,
             #"\d{4}[-/]\d{1,2}[-/]\d{1,2}"#,
             #"\b\d+(?:\.\d+)?\b"#,
+            #"@[A-Za-z0-9_]+"#,
+            #"[一-龯々〆ヵヶ]{1,12}(?:さん|様|氏)"#,
             #"\b[A-Z]{2,}\b"#
         ]
         var found: [String] = []
@@ -28,10 +31,24 @@ public struct EntityLocking: Sendable {
         return outermost.sorted { text.distance(from: text.startIndex, to: text.range(of: $0)!.lowerBound) < text.distance(from: text.startIndex, to: text.range(of: $1)!.lowerBound) }
     }
 
+    /// Masks detected entities before a deterministic transform and restores the exact bytes.
+    /// This prevents rewrite substitutions from changing URL paths, email local-parts, dates,
+    /// numbers, handles, honorific names, or uppercase identifiers.
+    public func maskAndRestore(_ text: String, transform: (String) -> String) -> String {
+        let values = entities(in: text)
+        var masked = text
+        var replacements: [(String, String)] = []
+        for (index, value) in values.enumerated() {
+            let marker = "\u{E000}\(index)\u{E001}"
+            masked = masked.replacingOccurrences(of: value, with: marker)
+            replacements.append((marker, value))
+        }
+        var transformed = transform(masked)
+        for (marker, value) in replacements { transformed = transformed.replacingOccurrences(of: marker, with: value) }
+        return transformed
+    }
+
     public func fingerprint(_ text: String) -> String {
-        // Stable, content-derived field snapshot without introducing a crypto dependency in the extension.
-        var hash: UInt64 = 14695981039346656037
-        for byte in text.utf8 { hash = (hash ^ UInt64(byte)) &* 1099511628211 }
-        return String(format: "%016llx", hash)
+        SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 }

@@ -23,14 +23,17 @@ Working title only. Product naming and visual identity are intentionally deferre
 - [Security and privacy specification](docs/05-security-privacy.md)
 - [Quality, acceptance, and release plan](docs/06-quality-release.md)
 - [Delivery roadmap](docs/07-delivery-roadmap.md)
+- [Implementation status](docs/08-implementation-status.md)
+- [W2 local text slice](docs/09-w2-local-text-slice.md)
 
 ## Current status
 
-The first engineering milestone is implemented as a local-first foundation:
+The W0/W1 foundation and W2 local text-action vertical slice are implemented:
 
-- iOS host app, keyboard extension, state machine, sensitive-field lockout, local rewrite fixture, and Swift tests;
-- Android host app, IME, equivalent local safety/core behavior, and JVM tests;
-- shared TypeScript contracts, policy engine, run state machine, API skeleton, worker execution ledger, and tests;
+- iOS host app and keyboard extension with Command, explicit source selection, Capture Review, local rewrite, editable Result Preview, stale-safe Apply, and Undo;
+- Android host app and IME with the equivalent local workflow, bounded `InputConnection` capture, implicit-replacement rejection, stale-safe Apply, and Undo;
+- shared TypeScript contracts and policy for local-only R1 plans, disclosure acknowledgement, bounded capture, revision binding, telemetry minimization, and undo lifecycle;
+- API skeleton, worker execution ledger, and tests;
 - content-free telemetry contracts and three-platform CI.
 
 This is not a production release. Real-device keyboard lifecycle, Japanese conversion, third-party app compatibility, signed distribution, durable infrastructure, and production identity verification remain explicit qualification gates. See [implementation status](docs/08-implementation-status.md).
@@ -51,13 +54,18 @@ cd apps/ios
 swift test
 xcodegen generate --spec project.yml
 xcodebuild -project MobileAIKeyboard.xcodeproj -scheme MobileAIKeyboard \
-  -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-  CODE_SIGNING_ALLOWED=NO build
+  -configuration Debug \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -derivedDataPath /tmp/mobile-ai-keyboard-derived build
 ```
+
+Use an installed simulator destination for extension lifecycle checks. A generic
+unsigned build proves compilation only and cannot qualify keyboard discovery or
+switching.
 
 Android core and debug build:
 
 ```sh
 cd apps/android
-./gradlew --no-daemon testDebugUnitTest assembleDebug
+./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
 ```

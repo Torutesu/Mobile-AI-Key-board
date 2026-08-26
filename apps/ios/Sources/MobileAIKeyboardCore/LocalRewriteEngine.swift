@@ -10,7 +10,6 @@ public struct LocalRewriteEngine: Sendable {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         let entities = locking.entities(in: trimmed)
-        var output = trimmed
         let substitutions: [(String, String)] = [
             ("よろしく", "よろしくお願いいたします"),
             ("お願いします", "お願いいたします"),
@@ -19,7 +18,11 @@ public struct LocalRewriteEngine: Sendable {
             ("できますか?", "可能でしょうか。"),
             ("ありがとう", "ありがとうございます")
         ]
-        for (from, to) in substitutions { output = output.replacingOccurrences(of: from, with: to) }
+        var output = locking.maskAndRestore(trimmed) { value in
+            var transformed = value
+            for (from, to) in substitutions { transformed = transformed.replacingOccurrences(of: from, with: to) }
+            return transformed
+        }
         if !output.hasSuffix("。") && !output.hasSuffix("！") && !output.hasSuffix("！") && !output.hasSuffix("?") && !output.hasSuffix("？") { output += "。" }
         return RewriteResult(original: trimmed, rewritten: output, preservedEntities: entities, fieldFingerprint: locking.fingerprint(trimmed))
     }

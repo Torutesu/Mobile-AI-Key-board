@@ -36,7 +36,7 @@ struct SandboxView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("書き換え結果。\(result.rewritten)。適用前に内容を確認してください。")
+                .accessibilityLabel("書き換え結果。\(result.rewritten) 適用前に内容を確認してください。")
             }
         }
         .padding()

@@ -1,4 +1,5 @@
-import type { ActionPlan, RiskClass } from "@mobile-ai-keyboard/contracts";
+import { LocalDisclosure, LocalTextCapture, LocalTextPlan, localCaptureFingerprint, localDisclosureDigest, localTextPlanDigest } from "@mobile-ai-keyboard/contracts";
+import type { ActionPlan, LocalCaptureLimits, LocalDisclosure as LocalDisclosureData, LocalTextCapture as LocalTextCaptureData, LocalTextPlan as LocalTextPlanData, RiskClass } from "@mobile-ai-keyboard/contracts";
 
 export class PolicyViolation extends Error {
   readonly code = "POLICY_VIOLATION" as const;
@@ -42,4 +43,65 @@ export function assertPlanPolicy(plan: ActionPlan, riskCeiling: RiskClass = "R3"
   const decision = evaluatePlan(plan, riskCeiling);
   if (!decision.allowed) throw new PolicyViolation("Plan contains a prohibited operation", decision);
   if (decision.confirmation_required !== plan.confirmation.required) throw new PolicyViolation("Confirmation requirement does not match policy", { expected: decision.confirmation_required, actual: plan.confirmation.required });
+}
+
+export type LocalTextPolicyDecision =
+  | { allowed: true; risk_class: "R1"; destination: "local_device"; network_required: false }
+  | { allowed: false; reason: "invalid_contract" | "external_tool" | "network_required" | "wrong_destination" | "digest_mismatch" | "capture_source_not_opted_in" | "capture_limit_exceeded" | "capture_acknowledgement_mismatch" | "capture_fingerprint_mismatch" };
+
+const localLimitFor = (source: "command" | "selection" | "surrounding_text" | "clipboard", limits: LocalCaptureLimits): number => {
+  if (source === "command") return limits.command_max_characters;
+  if (source === "selection") return limits.selection_max_characters;
+  if (source === "clipboard") return limits.clipboard_max_characters;
+  return limits.surrounding_before_max_characters + limits.surrounding_after_max_characters;
+};
+
+export function validateLocalDisclosure(value: unknown): LocalDisclosureData {
+  const parsed = LocalDisclosure.safeParse(value);
+  if (!parsed.success) throw new PolicyViolation("Local disclosure contract is invalid", { code: "invalid_contract" });
+  const seen = new Set<string>();
+  for (const source of parsed.data.sources) {
+    if (seen.has(source.source)) throw new PolicyViolation("Local disclosure contains duplicate capture sources", { code: "invalid_contract" });
+    seen.add(source.source);
+    if ((source.source === "clipboard" || source.source === "surrounding_text") && source.enabled && !source.explicit_opt_in) {
+      throw new PolicyViolation("Clipboard and surrounding text require explicit opt-in", { code: "capture_source_not_opted_in", source: source.source });
+    }
+  }
+  return parsed.data;
+}
+
+export function validateLocalCapture(disclosure: LocalDisclosureData, value: unknown): LocalTextCaptureData {
+  validateLocalDisclosure(disclosure);
+  const parsed = LocalTextCapture.safeParse(value);
+  if (!parsed.success) throw new PolicyViolation("Local capture contract is invalid", { code: "invalid_contract" });
+  if (parsed.data.disclosure_acknowledgement !== localDisclosureDigest(disclosure)) throw new PolicyViolation("Local disclosure acknowledgement digest does not match", { code: "capture_acknowledgement_mismatch" });
+  if (localCaptureFingerprint({ items: parsed.data.items, field_fingerprint: parsed.data.field_fingerprint, disclosure_acknowledgement: parsed.data.disclosure_acknowledgement }) !== parsed.data.capture_fingerprint) throw new PolicyViolation("Local capture fingerprint does not match immutable capture", { code: "capture_fingerprint_mismatch" });
+  const capturedSources = new Set<string>();
+  for (const item of parsed.data.items) {
+    if (capturedSources.has(item.source)) throw new PolicyViolation("Local capture contains duplicate sources", { code: "invalid_contract", source: item.source });
+    capturedSources.add(item.source);
+    const source = disclosure.sources.find((entry) => entry.source === item.source);
+    if (!source?.enabled) throw new PolicyViolation("Capture source was not disclosed and enabled", { code: "capture_source_not_opted_in", source: item.source });
+    if (Array.from(item.text).length > localLimitFor(item.source, disclosure.limits)) throw new PolicyViolation("Capture source exceeds its hard character limit", { code: "capture_limit_exceeded", source: item.source });
+  }
+  return parsed.data;
+}
+
+export function evaluateLocalTextPlan(value: unknown): LocalTextPolicyDecision {
+  const parsed = LocalTextPlan.safeParse(value);
+  if (!parsed.success) {
+    const input = value as { tools?: unknown; network_required?: unknown; destination?: unknown } | null;
+    if (Array.isArray(input?.tools) && input.tools.length > 0) return { allowed: false, reason: "external_tool" };
+    if (input?.network_required === true) return { allowed: false, reason: "network_required" };
+    if (input?.destination !== undefined && input.destination !== "local_device") return { allowed: false, reason: "wrong_destination" };
+    return { allowed: false, reason: "invalid_contract" };
+  }
+  const plan = parsed.data;
+  if (localTextPlanDigest({ ...plan, canonical_digest: undefined } as Omit<LocalTextPlanData, "canonical_digest">) !== plan.canonical_digest) return { allowed: false, reason: "digest_mismatch" };
+  return { allowed: true, risk_class: "R1", destination: "local_device", network_required: false };
+}
+
+export function assertLocalTextPlan(plan: LocalTextPlanData): void {
+  const decision = evaluateLocalTextPlan(plan);
+  if (!decision.allowed) throw new PolicyViolation("Local text plan is not allowed", decision);
 }

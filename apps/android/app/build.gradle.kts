@@ -36,6 +36,11 @@ android {
     buildFeatures { compose = true }
     composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+    lint {
+        // This Kotlin 1.9 / Compose compiler set is pinned as one tested unit. Dependency
+        // upgrades are handled as an explicit compatibility change, not an automatic lint fix.
+        disable += setOf("AndroidGradlePluginVersion", "GradleDependency")
+    }
 }
 
 dependencies {

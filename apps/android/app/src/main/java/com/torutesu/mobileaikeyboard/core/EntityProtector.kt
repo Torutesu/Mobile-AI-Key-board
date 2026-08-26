@@ -20,6 +20,11 @@ object EntityProtector {
         "url" to Regex("https?://[^\\s]+", RegexOption.IGNORE_CASE),
         "email" to Regex("[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}", RegexOption.IGNORE_CASE),
         "handle" to Regex("(?<![A-Za-z0-9_])[#@][\\p{L}0-9_]+"),
+        // A suffix makes this a high-confidence person-name span without
+        // attempting broad, locale-dependent named-entity recognition.
+        "name" to Regex("[\\p{L}一-龯々〆ヵヶ]{1,12}(?:さん|様|氏)"),
+        // Lock product/tenant identifiers that contain an ASCII capital run.
+        "id" to Regex("\\b[A-Z][A-Z0-9_-]{2,}\\b"),
         "date" to Regex("\\d{1,4}(?:年\\d{1,2}月\\d{1,2}日?|[/-]\\d{1,2}[/-]\\d{1,4})"),
         "number" to Regex("(?<![\\p{L}\\d])[+-]?\\d+(?:[.,]\\d+)?(?:%|円|ドル|人|件)?"),
     )
