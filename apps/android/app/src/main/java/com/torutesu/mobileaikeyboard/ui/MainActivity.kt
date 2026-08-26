@@ -37,6 +37,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.torutesu.mobileaikeyboard.core.LocalPoliteRewriteService
+import com.torutesu.mobileaikeyboard.core.AccountBoundaryStore
 import com.torutesu.mobileaikeyboard.core.HostEvent
 import com.torutesu.mobileaikeyboard.core.HostFixtureClient
 import com.torutesu.mobileaikeyboard.core.ImeOnboardingStatus
@@ -73,7 +74,10 @@ private fun MobileAiKeyboardApp(imeEnabled: Boolean) {
     val context = LocalContext.current
     val installedSkillStore = remember(context) { InstalledSkillStore(context.applicationContext) }
     val shortcutStore = remember(context) { ShortcutSnapshotStore(context.applicationContext) }
+    val accountBoundaryStore = remember(context) { AccountBoundaryStore(context.applicationContext) }
     val settingsStore = remember(context) { KeyboardSettingsStore(context.applicationContext) }
+    // A persisted marker is never authentication. Every new process starts
+    // anonymous/CLOSED until the host establishes a fresh session explicitly.
     var hostState by remember { mutableStateOf(fixtureClient.initialState().copy(keyboardSettings = settingsStore.readState())) }
     var shortcutSnapshot by remember { mutableStateOf(shortcutStore.read()) }
     var installedSkills by remember(context) { mutableStateOf(LocalSkillRegistry.all()) }
@@ -91,11 +95,33 @@ private fun MobileAiKeyboardApp(imeEnabled: Boolean) {
                     dispatch = { event ->
                         val previous = hostState
                         hostState = fixtureClient.dispatch(previous, event)
+                        if (event is HostEvent.EnterFixtureSignedIn) {
+                            val owner = hostState.account.ownerSubject.orEmpty()
+                            val boundary = accountBoundaryStore.activateNewSession(owner)
+                            if (boundary != null) {
+                                hostState = hostState.copy(account = hostState.account.copy(sessionEpoch = boundary.sessionEpoch))
+                                installedSkills = installedSkillStore.read()
+                                shortcutSnapshot = shortcutStore.read()
+                            } else {
+                                // Never leave the UI claiming a signed-in session
+                                // when durable boundary activation failed.
+                                accountBoundaryStore.deactivate()
+                                hostState = fixtureClient.initialState().copy(keyboardSettings = hostState.keyboardSettings)
+                                LocalSkillRegistry.clearInstalled()
+                                installedSkills = LocalSkillRegistry.all()
+                                shortcutSnapshot = com.torutesu.mobileaikeyboard.core.ShortcutSnapshot.empty()
+                            }
+                        }
                         if (event is HostEvent.KeyboardSettingsAction) settingsStore.write(hostState.keyboardSettings)
                         val currentDeviceRevoked = event is HostEvent.ConfirmDeviceRevoke && previous.devices.firstOrNull { it.id == previous.pendingRevokeDeviceId }?.isCurrent == true
                         val accountBoundary = event is HostEvent.SignOut || event is HostEvent.SimulateSessionExpiry || event is HostEvent.SimulateSessionRevocation || currentDeviceRevoked
+                        val deletionStarted = event is HostEvent.RequestDeletion && previous.deletion.status == com.torutesu.mobileaikeyboard.core.DeletionStatus.NOT_REQUESTED
                         val deletionCompleted = event is HostEvent.AdvanceDeletion && previous.deletion.status == com.torutesu.mobileaikeyboard.core.DeletionStatus.IN_PROGRESS
-                        if (accountBoundary || deletionCompleted) {
+                        if (accountBoundary || deletionStarted || deletionCompleted) {
+                            // Authority is revoked first. Even if payload deletion
+                            // fails, all subsequent host/IME reads return empty.
+                            accountBoundaryStore.deactivate()
+                            LocalSkillRegistry.clearInstalled()
                             installedSkillStore.clear()
                             shortcutStore.clear()
                             installedSkills = LocalSkillRegistry.all()

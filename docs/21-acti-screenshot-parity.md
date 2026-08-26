@@ -61,9 +61,9 @@ Rules:
 1. User opens a private or eligible public Skill detail.
 2. `Add To My Keyboard` validates immutable Skill version/digest, device, compatibility, required connection, and quota.
 3. Trigger sheet displays `A-Z` for `latin_qwerty_v1`.
-4. Occupied keys are disabled and expose `Assigned to <Skill>`; reserved/unsupported keys explain why.
-5. Selecting an available key updates the highlight and enables Add.
-6. Add publishes one atomic snapshot generation. A partial assignment is impossible.
+4. Occupied keys expose `Assigned to <Skill>` and remain selectable only to reach an explicit `Swap` or `Replace` decision; reserved/unsupported keys explain why and stay disabled.
+5. Selecting an available key updates the highlight and enables Add. Selecting an occupied key never silently overwrites it and requires the conflict decision.
+6. Add, Swap, or Replace publishes one atomic snapshot generation. A partial assignment is impossible.
 7. Success returns to Keyboard/My Skills and shows both `H` and the full Skill name.
 8. The live keyboard refreshes within 2 seconds or on its next open after process death.
 

@@ -155,9 +155,9 @@ private object StrictSkillSchema {
 object SkillBuilderReducer {
     private const val NOW = "2026-08-26T09:00:00Z"
     fun reduce(state: SkillBuilderState, event: SkillBuilderEvent, account: AccountState, deletion: DeletionState): SkillBuilderState {
-        val allowed = account.authStatus == AuthStatus.SIGNED_IN && account.sessionStatus == SessionStatus.ACTIVE && deletion.status != DeletionStatus.COMPLETED
+        val allowed = account.authStatus == AuthStatus.SIGNED_IN && account.sessionStatus == SessionStatus.ACTIVE && deletion.status == DeletionStatus.NOT_REQUESTED
         return when (event) {
-            SkillBuilderEvent.Open -> if (allowed) state.copy(phase = SkillBuilderPhase.OUTCOME, ownerSubject = account.displayName ?: "fixture-owner", sessionEpoch = 1, error = null) else state.copy(phase = SkillBuilderPhase.FAILED, error = "アクティブなsessionが必要です。削除完了後は作成できません")
+            SkillBuilderEvent.Open -> if (allowed && account.ownerSubject != null && account.sessionEpoch > 0) state.copy(phase = SkillBuilderPhase.OUTCOME, ownerSubject = account.ownerSubject, sessionEpoch = account.sessionEpoch, error = null) else state.copy(phase = SkillBuilderPhase.FAILED, error = "アクティブなsessionが必要です。削除依頼後は作成できません")
             is SkillBuilderEvent.UpdateDraft -> if (state.phase in setOf(SkillBuilderPhase.OUTCOME, SkillBuilderPhase.MISSING_INFO, SkillBuilderPhase.DRAFT, SkillBuilderPhase.READY_TO_TEST, SkillBuilderPhase.TEST_RESULT, SkillBuilderPhase.DEPLOY_REVIEW)) state.copy(phase = SkillBuilderPhase.DRAFT, draft = event.draft, version = null, confirmedDigest = null, dryRun = null, quotaReserved = 0, error = null) else state
             SkillBuilderEvent.ContinueToDraft -> state.copy(phase = if (SkillBuilderValidator.missing(state.draft).isEmpty()) SkillBuilderPhase.DRAFT else SkillBuilderPhase.MISSING_INFO, error = null)
             SkillBuilderEvent.Validate -> {
@@ -177,7 +177,7 @@ object SkillBuilderReducer {
             } else state.copy(error = "successful dry-runが必要です")
             is SkillBuilderEvent.ConfirmDeploy -> {
                 val version = state.version ?: return state.copy(error = "immutable versionがありません。deployを停止しました")
-                val valid = state.phase == SkillBuilderPhase.DEPLOY_REVIEW && event.digest == version.digest && SkillBuilderValidator.digest(state.draft, version.version, state.ownerSubject, state.sessionEpoch) == version.digest && version.ownerSubject == (account.displayName ?: "fixture-owner") && version.sessionEpoch == 1 && state.dryRun?.passed == true && allowed
+                val valid = state.phase == SkillBuilderPhase.DEPLOY_REVIEW && event.digest == version.digest && SkillBuilderValidator.digest(state.draft, version.version, state.ownerSubject, state.sessionEpoch) == version.digest && version.ownerSubject == account.ownerSubject && version.sessionEpoch == account.sessionEpoch && state.dryRun?.passed == true && allowed
                 if (!valid) state.copy(error = "immutable versionまたはsessionが変わりました。deployを停止しました")
                 else state.copy(phase = SkillBuilderPhase.DEPLOYED, confirmedDigest = event.digest, published = state.published + version, quotaReserved = 0, error = null)
             }

@@ -59,9 +59,13 @@ object LocalSkillRegistry {
 
     @Synchronized
     fun installAll(descriptors: Iterable<LocalSkillDescriptor>): Boolean {
-        val previous = installed.toMap()
         installed.keys.filterNot { it in builtinKeys }.toList().forEach { installed.remove(it) }
-        descriptors.forEach { if (!install(it)) { installed.clear(); installed.putAll(previous); return false } }
+        descriptors.forEach {
+            if (!install(it)) {
+                clearInstalled()
+                return false
+            }
+        }
         return true
     }
 
@@ -114,36 +118,54 @@ object LocalSkillRegistry {
 /** Device-local catalog for explicit "Add To My Keyboard" installs. */
 class InstalledSkillStore(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+    private val boundaryStore = AccountBoundaryStore(context.applicationContext)
 
-    fun read(): List<LocalSkillDescriptor> {
+    fun read(): List<LocalSkillDescriptor> = withAccountBoundaryLock {
+        val boundary = boundaryStore.read()
+        val storedOwner = preferences.getString(OWNER, null)
+        val storedEpoch = preferences.getInt(EPOCH, 0)
+        if (boundary == null || storedOwner != boundary.ownerSubject || storedEpoch != boundary.sessionEpoch) {
+            LocalSkillRegistry.installAll(emptyList())
+            return@withAccountBoundaryLock emptyList()
+        }
         val entries = LocalSkillCatalogCodec.decode(preferences.getString(ACTIVE, null).orEmpty())
         // Reading is also the restart boundary: an empty/corrupt catalog must
         // remove private executors left in this process by an older session.
-        LocalSkillRegistry.installAll(entries)
-        return entries
+        if (!LocalSkillRegistry.installAll(entries)) return@withAccountBoundaryLock emptyList()
+        entries
     }
 
-    fun install(version: PrivateSkillVersion): Boolean {
-        val descriptor = LocalSkillRegistry.fromPrivateVersion(version) ?: return false
+    fun install(version: PrivateSkillVersion): Boolean = withAccountBoundaryLock {
+        val boundary = boundaryStore.read() ?: return@withAccountBoundaryLock false
+        if (version.ownerSubject != boundary.ownerSubject || version.sessionEpoch != boundary.sessionEpoch) return@withAccountBoundaryLock false
+        val descriptor = LocalSkillRegistry.fromPrivateVersion(version) ?: return@withAccountBoundaryLock false
         val current = read()
         val sameIdentity = current.filter { it.skillId == descriptor.skillId && it.skillVersion == descriptor.skillVersion }
-        if (sameIdentity.any { it != descriptor }) return false
+        if (sameIdentity.any { it != descriptor }) return@withAccountBoundaryLock false
         val next = if (descriptor in current) current else current + descriptor
         val encoded = LocalSkillCatalogCodec.encode(next)
-        if (encoded.length > MAX_SERIALIZED_BYTES) return false
-        if (!preferences.edit().putString(ACTIVE, encoded).commit()) return false
-        return LocalSkillRegistry.install(descriptor)
+        if (encoded.length > MAX_SERIALIZED_BYTES) return@withAccountBoundaryLock false
+        if (!preferences.edit()
+                .putString(ACTIVE, encoded)
+                .putString(OWNER, boundary.ownerSubject)
+                .putInt(EPOCH, boundary.sessionEpoch)
+                .commit()
+        ) return@withAccountBoundaryLock false
+        LocalSkillRegistry.install(descriptor)
     }
 
-    fun clear(): Boolean {
-        val cleared = preferences.edit().remove(ACTIVE).commit()
-        if (cleared) LocalSkillRegistry.clearInstalled()
-        return cleared
+    fun clear(): Boolean = withAccountBoundaryLock {
+        // Process-local execution authority is removed even when persistent
+        // deletion reports failure.
+        LocalSkillRegistry.clearInstalled()
+        preferences.edit().remove(ACTIVE).remove(OWNER).remove(EPOCH).commit()
     }
 
     companion object {
         private const val PREFERENCES = "mobile_ai_keyboard_installed_skills_v1"
         private const val ACTIVE = "active"
+        private const val OWNER = "owner_subject"
+        private const val EPOCH = "session_epoch"
         private const val MAX_SERIALIZED_BYTES = 32 * 1024
     }
 }

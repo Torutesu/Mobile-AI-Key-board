@@ -21,6 +21,7 @@ import androidx.test.espresso.action.ViewActions.longClick
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.torutesu.mobileaikeyboard.core.ExecutableLocalSkills
+import com.torutesu.mobileaikeyboard.core.AccountBoundaryStore
 import com.torutesu.mobileaikeyboard.core.HostAppState
 import com.torutesu.mobileaikeyboard.core.HostEvent
 import com.torutesu.mobileaikeyboard.core.HostFixtureClient
@@ -190,10 +191,13 @@ class VerticalSliceUiTest {
     fun accountBoundaryClearRemovesPersistedCatalogAndShortcuts() {
         val version = deployedVersion("private.ui.boundary")
         val appContext = composeRule.activity.applicationContext
+        val boundaryStore = AccountBoundaryStore(appContext)
         val installedStore = InstalledSkillStore(appContext)
         val shortcutStore = ShortcutSnapshotStore(appContext)
+        boundaryStore.deactivate()
         installedStore.clear()
         shortcutStore.clear()
+        assertTrue(boundaryStore.activateForTesting(version.ownerSubject, version.sessionEpoch))
         assertTrue(installedStore.install(version))
         val descriptor = LocalSkillRegistry.fromPrivateVersion(version)!!
         val binding = TriggerKeyBinding("binding-boundary", descriptor.skillId, descriptor.skillVersion, descriptor.skillDigest, keyCode = "KeyA", skillName = descriptor.skillName)
@@ -201,6 +205,31 @@ class VerticalSliceUiTest {
         assertTrue(shortcutStore.publish(snapshot.snapshot))
         assertTrue(ExecutableLocalSkills.isExecutable(binding))
 
+        // Simulate a cold process: persisted A bytes remain, but process-local
+        // authentication authority starts CLOSED and must not hydrate them.
+        boundaryStore.closeProcessAuthorityForTesting()
+        assertFalse(ExecutableLocalSkills.isExecutable(binding))
+        assertTrue(InstalledSkillStore(appContext).read().isEmpty())
+        assertTrue(ShortcutSnapshotStore(appContext).read().bindings.isEmpty())
+        assertFalse(ExecutableLocalSkills.isExecutable(binding))
+
+        // Explicit re-authentication of the same stable owner resumes the
+        // durable boundary and restores its private catalog and assignment.
+        val resumed = boundaryStore.activateNewSession(version.ownerSubject)
+        assertEquals(version.sessionEpoch, resumed?.sessionEpoch)
+        assertTrue(InstalledSkillStore(appContext).read().any { it.skillId == version.skillId })
+        assertTrue(ShortcutSnapshotStore(appContext).read().bindings.any { it.bindingId == binding.bindingId })
+        assertTrue(ExecutableLocalSkills.isExecutable(binding))
+
+        // A process recreation under another account must not hydrate A's
+        // catalog or shortcut bytes, even before best-effort deletion runs.
+        boundaryStore.closeProcessAuthorityForTesting()
+        assertTrue(boundaryStore.activateForTesting("Account B", version.sessionEpoch + 1))
+        assertTrue(InstalledSkillStore(appContext).read().isEmpty())
+        assertTrue(ShortcutSnapshotStore(appContext).read().bindings.isEmpty())
+        assertFalse(ExecutableLocalSkills.isExecutable(binding))
+
+        assertTrue(boundaryStore.deactivate())
         assertTrue(installedStore.clear())
         assertTrue(shortcutStore.clear())
         assertTrue(shortcutStore.read().bindings.isEmpty())

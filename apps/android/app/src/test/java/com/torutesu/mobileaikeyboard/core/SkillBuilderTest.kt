@@ -88,10 +88,32 @@ class SkillBuilderTest {
         state = HostFixtureClient.dispatch(state, HostEvent.SimulateSessionExpiry)
         assertEquals(SkillBuilderState(), state.skillBuilder)
         state = HostFixtureClient.dispatch(active(), HostEvent.RequestDeletion)
+        state = HostFixtureClient.dispatch(state, HostEvent.SkillBuilderAction(SkillBuilderEvent.Open))
+        assertEquals(SkillBuilderPhase.FAILED, state.skillBuilder.phase)
         state = HostFixtureClient.dispatch(state, HostEvent.AdvanceDeletion)
         state = HostFixtureClient.dispatch(state, HostEvent.AdvanceDeletion)
         state = HostFixtureClient.dispatch(state, HostEvent.SkillBuilderAction(SkillBuilderEvent.Open))
         assertEquals(SkillBuilderPhase.FAILED, state.skillBuilder.phase)
+    }
+
+    @Test
+    fun signOutAndDeletionRequestClearAccountBoundHostDataImmediately() {
+        val signedOut = HostFixtureClient.dispatch(active(), HostEvent.SignOut)
+        assertEquals(AuthStatus.ANONYMOUS, signedOut.account.authStatus)
+        assertTrue(signedOut.devices.isEmpty())
+        assertTrue(signedOut.runs.isEmpty())
+        assertTrue(signedOut.connections.isEmpty())
+        assertTrue(signedOut.readOnlyQueries.isEmpty())
+
+        val requested = HostFixtureClient.dispatch(active(), HostEvent.RequestDeletion)
+        assertEquals(AuthStatus.ANONYMOUS, requested.account.authStatus)
+        assertEquals(DeletionStatus.REQUESTED, requested.deletion.status)
+        assertTrue(requested.devices.isEmpty())
+        assertTrue(requested.runs.isEmpty())
+        assertTrue(requested.connections.isEmpty())
+        assertTrue(requested.readOnlyQueries.isEmpty())
+        val attemptedReconnect = HostFixtureClient.dispatch(requested, HostEvent.ReviewConnection(Provider.CALENDAR))
+        assertEquals(requested, attemptedReconnect)
     }
 
     @Test

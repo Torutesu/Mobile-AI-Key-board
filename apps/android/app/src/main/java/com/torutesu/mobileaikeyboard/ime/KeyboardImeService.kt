@@ -4,6 +4,8 @@ import android.inputmethodservice.InputMethodService
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import com.torutesu.mobileaikeyboard.core.BoundedCapture
+import com.torutesu.mobileaikeyboard.core.AccountBoundaryStore
+import com.torutesu.mobileaikeyboard.core.ActiveAccountBoundary
 import com.torutesu.mobileaikeyboard.core.CommandSession
 import com.torutesu.mobileaikeyboard.core.CommandSessionReducer
 import com.torutesu.mobileaikeyboard.core.ContentFreeTelemetry
@@ -23,6 +25,7 @@ import com.torutesu.mobileaikeyboard.core.ReturnKeyModel
 import com.torutesu.mobileaikeyboard.core.TelemetryEvent
 import com.torutesu.mobileaikeyboard.core.UndoTicket
 import com.torutesu.mobileaikeyboard.core.asKeyboardState
+import com.torutesu.mobileaikeyboard.core.withAccountBoundaryLock
 
 class KeyboardImeService : InputMethodService() {
     private var session = CommandSession()
@@ -34,6 +37,7 @@ class KeyboardImeService : InputMethodService() {
     private val rewriteService = LocalPoliteRewriteService()
     private lateinit var shortcutStore: ShortcutSnapshotStore
     private lateinit var settingsStore: KeyboardSettingsStore
+    private lateinit var accountBoundaryStore: AccountBoundaryStore
     private var currentEditorInfo: EditorInfo? = null
     private var shortcutSnapshot: ShortcutSnapshot = ShortcutSnapshot.empty()
     private var activeShortcut: ShortcutActivation? = null
@@ -42,6 +46,7 @@ class KeyboardImeService : InputMethodService() {
         super.onCreate()
         shortcutStore = ShortcutSnapshotStore(this)
         settingsStore = KeyboardSettingsStore(this)
+        accountBoundaryStore = AccountBoundaryStore(this)
         shortcutSnapshot = shortcutStore.read()
     }
 
@@ -121,7 +126,8 @@ class KeyboardImeService : InputMethodService() {
     /** A physical key is an explicit action surface; it never runs on key-down. */
     private fun invokeShortcut(binding: TriggerKeyBinding) {
         if (lockReason != null || !binding.enabled || !ExecutableLocalSkills.isExecutable(binding)) return
-        val current = shortcutStore.read()
+        val boundary = accountBoundaryStore.read() ?: return
+        val current = shortcutStore.readForBoundary(boundary) ?: return
         val exact = current.bindings.firstOrNull {
             it.bindingId == binding.bindingId && it.keyCode == binding.keyCode && it.skillDigest == binding.skillDigest && it.enabled
         } ?: return
@@ -132,6 +138,8 @@ class KeyboardImeService : InputMethodService() {
             skillDigest = exact.skillDigest,
             snapshotGeneration = current.generation,
             layoutId = current.layoutId,
+            ownerSubject = boundary.ownerSubject,
+            sessionEpoch = boundary.sessionEpoch,
         )
         session = CommandSessionReducer.reduce(session, SessionEvent.BeginCommand)
         // The skill label is metadata only. Actual editor text is captured below
@@ -213,7 +221,11 @@ class KeyboardImeService : InputMethodService() {
         syncSurface()
     }
 
-    private fun applyResult(editedResult: String) {
+    private fun applyResult(editedResult: String) = withAccountBoundaryLock {
+        applyResultUnderStableBoundary(editedResult)
+    }
+
+    private fun applyResultUnderStableBoundary(editedResult: String) {
         if (activeShortcut != null && !shortcutStillCurrent()) {
             session = CommandSessionReducer.reduce(session, SessionEvent.ApplyRejected("Skill Keyの設定が変わったため適用を停止しました"))
             activeShortcut = null
@@ -290,6 +302,15 @@ class KeyboardImeService : InputMethodService() {
     }
 
     private fun syncSurface() {
+        if (::accountBoundaryStore.isInitialized) {
+            val activation = activeShortcut
+            val boundary = accountBoundaryStore.read()
+            if (activation != null && (boundary == null || boundary.ownerSubject != activation.ownerSubject || boundary.sessionEpoch != activation.sessionEpoch)) {
+                activeShortcut = null
+                appliedEdit = null
+                session = CommandSession()
+            }
+        }
         shortcutSnapshot = if (::shortcutStore.isInitialized) shortcutStore.read() else shortcutSnapshot
         if (::settingsStore.isInitialized) {
             surface?.render(
@@ -305,7 +326,8 @@ class KeyboardImeService : InputMethodService() {
 
     private fun shortcutStillCurrent(): Boolean {
         val activation = activeShortcut ?: return true
-        val current = shortcutStore.read()
+        val boundary = ActiveAccountBoundary(activation.ownerSubject, activation.sessionEpoch)
+        val current = shortcutStore.readForBoundary(boundary) ?: return false
         return current.generation == activation.snapshotGeneration &&
             current.layoutId == activation.layoutId &&
             current.bindings.any {
@@ -316,7 +338,8 @@ class KeyboardImeService : InputMethodService() {
 
     private fun rewriteForActiveSkill(target: String): com.torutesu.mobileaikeyboard.core.RewriteResult? {
         val activation = activeShortcut ?: return rewriteService.rewrite(target)
-        val binding = shortcutStore.read().bindings.firstOrNull {
+        val boundary = ActiveAccountBoundary(activation.ownerSubject, activation.sessionEpoch)
+        val binding = shortcutStore.readForBoundary(boundary)?.bindings?.firstOrNull {
             it.bindingId == activation.bindingId && it.skillId == activation.skillId &&
                 it.skillVersion == activation.skillVersion && it.skillDigest == activation.skillDigest && it.enabled
         } ?: return null
@@ -326,10 +349,12 @@ class KeyboardImeService : InputMethodService() {
         return com.torutesu.mobileaikeyboard.core.ExecutableLocalSkills.executeResult(binding, target)
     }
 
-    private fun safelyRewriteForActiveSkill(target: String): com.torutesu.mobileaikeyboard.core.RewriteResult? = try {
-        rewriteForActiveSkill(target)
-    } catch (_: RuntimeException) {
-        null
+    private fun safelyRewriteForActiveSkill(target: String): com.torutesu.mobileaikeyboard.core.RewriteResult? = withAccountBoundaryLock {
+        try {
+            rewriteForActiveSkill(target)
+        } catch (_: RuntimeException) {
+            null
+        }
     }
 
     private fun currentAdapter(): InputConnectionAdapter? {

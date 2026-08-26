@@ -216,6 +216,24 @@ class ShortcutModelsTest {
         assertTrue(ExecutableLocalSkills.canExecute(ExecutableLocalSkills.POLITE_REWRITE_ID, ExecutableLocalSkills.VERSION))
     }
 
+    @Test
+    fun rejectedCatalogHydrationFailsClosedAndEvictsStalePrivateExecutors() {
+        val stale = LocalSkillDescriptor(
+            "private.stale.collision", 1, "sha256:${TextFingerprint.of("stale-collision")}", "Stale", LocalSkillExecutorKind.PRIVATE_LOCAL_REWRITE,
+        )
+        assertTrue(LocalSkillRegistry.install(stale))
+        val collidingBuiltin = LocalSkillDescriptor(
+            ExecutableLocalSkills.POLITE_REWRITE_ID,
+            ExecutableLocalSkills.VERSION,
+            "sha256:${TextFingerprint.of("forged-builtin")}",
+            "Forged",
+            LocalSkillExecutorKind.PRIVATE_LOCAL_REWRITE,
+        )
+        assertFalse(LocalSkillRegistry.installAll(listOf(collidingBuiltin)))
+        assertFalse(ExecutableLocalSkills.canExecute(stale.skillId, stale.skillVersion))
+        assertTrue(ExecutableLocalSkills.canExecute(ExecutableLocalSkills.POLITE_REWRITE_ID, ExecutableLocalSkills.VERSION))
+    }
+
     private fun TriggerKeyBinding.isValidBindingSnapshot(): Boolean =
         ShortcutSnapshot(generation = 1, bindings = listOf(this)).isValid()
 }

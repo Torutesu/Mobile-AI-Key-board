@@ -86,6 +86,8 @@ data class ShortcutActivation(
     val skillDigest: String,
     val snapshotGeneration: Long,
     val layoutId: String,
+    val ownerSubject: String,
+    val sessionEpoch: Int,
 )
 
 object ShortcutSnapshotCanonical {
@@ -270,38 +272,66 @@ class ShortcutGestureStateMachine(
  */
 class ShortcutSnapshotStore(context: android.content.Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES, android.content.Context.MODE_PRIVATE)
+    private val boundaryStore = AccountBoundaryStore(context.applicationContext)
+    private val installedSkillStore = InstalledSkillStore(context.applicationContext)
 
     init {
         // The IME and host may be recreated independently. Hydrate the closed
         // executor registry before validating any persisted shortcut snapshot.
-        LocalSkillRegistry.installAll(InstalledSkillStore(context.applicationContext).read())
+        installedSkillStore.read()
     }
 
     @Synchronized fun read(): ShortcutSnapshot {
-        val active = preferences.getString(ACTIVE, null)?.let(ShortcutSnapshotCodec::decode)
-        val previous = preferences.getString(LAST_GOOD, null)?.let(ShortcutSnapshotCodec::decode)
-        return ShortcutSnapshotRecovery.select(active, previous)
+        val boundary = boundaryStore.read() ?: return ShortcutSnapshot.empty()
+        return readForBoundary(boundary) ?: ShortcutSnapshot.empty()
     }
 
-    @Synchronized fun publish(candidate: ShortcutSnapshot): Boolean {
-        if (!candidate.isValid() || candidate.bindings.size > SHORTCUT_MAX_BINDINGS) return false
+    /** Reads one owner-bound snapshot while account activation is excluded. */
+    @Synchronized fun readForBoundary(expected: ActiveAccountBoundary): ShortcutSnapshot? = withAccountBoundaryLock {
+        if (boundaryStore.read() != expected) return@withAccountBoundaryLock null
+        // Re-hydrate at every read so an account switch or revocation cannot
+        // leave a process-local private executor callable.
+        installedSkillStore.read()
+        if (boundaryStore.read() != expected) return@withAccountBoundaryLock null
+        if (preferences.getString(OWNER, null) != expected.ownerSubject ||
+            preferences.getInt(EPOCH, 0) != expected.sessionEpoch
+        ) return@withAccountBoundaryLock null
+        val active = preferences.getString(ACTIVE, null)?.let(ShortcutSnapshotCodec::decode)
+        val previous = preferences.getString(LAST_GOOD, null)?.let(ShortcutSnapshotCodec::decode)
+        val selected = ShortcutSnapshotRecovery.select(active, previous)
+        selected.takeIf { boundaryStore.read() == expected }
+    }
+
+    @Synchronized fun publish(candidate: ShortcutSnapshot): Boolean = withAccountBoundaryLock {
+        val boundary = boundaryStore.read() ?: return@withAccountBoundaryLock false
+        // Re-hydration under the same boundary lock removes any direct/stale
+        // process-local private executor before candidate validation.
+        installedSkillStore.read()
+        if (boundaryStore.read() != boundary) return@withAccountBoundaryLock false
+        if (!candidate.isValid() || candidate.bindings.size > SHORTCUT_MAX_BINDINGS) return@withAccountBoundaryLock false
         val current = read()
-        if (candidate.generation <= current.generation) return false
+        if (boundaryStore.read() != boundary) return@withAccountBoundaryLock false
+        if (candidate.generation <= current.generation) return@withAccountBoundaryLock false
         val encoded = ShortcutSnapshotCodec.encode(candidate)
-        if (encoded.length > MAX_SERIALIZED_BYTES) return false
+        if (encoded.length > MAX_SERIALIZED_BYTES) return@withAccountBoundaryLock false
         val editor = preferences.edit()
-        if (current.isValid()) editor.putString(LAST_GOOD, ShortcutSnapshotCodec.encode(current))
+        if (current.bindings.isNotEmpty() && current.isValid()) editor.putString(LAST_GOOD, ShortcutSnapshotCodec.encode(current))
+        else editor.remove(LAST_GOOD)
         editor.putString(ACTIVE, encoded)
-        return editor.commit()
+            .putString(OWNER, boundary.ownerSubject)
+            .putInt(EPOCH, boundary.sessionEpoch)
+        editor.commit()
     }
 
     /** Clears host/IME bindings during account deletion or session revocation. */
-    @Synchronized fun clear(): Boolean = preferences.edit().remove(ACTIVE).remove(LAST_GOOD).commit()
+    @Synchronized fun clear(): Boolean = preferences.edit().remove(ACTIVE).remove(LAST_GOOD).remove(OWNER).remove(EPOCH).commit()
 
     companion object {
         private const val PREFERENCES = "mobile_ai_keyboard_shortcuts_v1"
         private const val ACTIVE = "active"
         private const val LAST_GOOD = "last_good"
+        private const val OWNER = "owner_subject"
+        private const val EPOCH = "session_epoch"
         private const val MAX_SERIALIZED_BYTES = 32 * 1024
     }
 }
