@@ -37,6 +37,7 @@ final class KeyboardViewController: UIInputViewController {
     private var isFullAccessEnabled = false
     private var pendingShortcutSkill: ShortcutSkillProjectionV1?
     private var pendingShortcutActivation: ShortcutActivationV1?
+    private var boundaryRefreshTimer: Timer?
     private var documentIdentifier: String { textDocumentProxy.documentIdentifier.uuidString }
 
     override func viewDidLoad() {
@@ -58,6 +59,26 @@ final class KeyboardViewController: UIInputViewController {
         consumedLongPressKey = nil
         longPressBeganKey = nil
         refreshShortcutSnapshot()
+        boundaryRefreshTimer?.invalidate()
+        boundaryRefreshTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            self?.refreshVisibleShortcutAuthority()
+        }
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        boundaryRefreshTimer?.invalidate()
+        boundaryRefreshTimer = nil
+    }
+
+    private func refreshVisibleShortcutAuthority() {
+        guard let snapshot = shortcutSnapshot else { return }
+        guard let boundary = shortcutStore.loadActiveBoundary(),
+              boundary.ownerSubjectHash == snapshot.userSubjectHash,
+              boundary.sessionEpoch == snapshot.policyEpoch else {
+            applyShortcutSnapshot(nil)
+            return
+        }
     }
 
     private func updateFullAccessState() {
@@ -75,21 +96,33 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func refreshShortcutSnapshot() {
+        let requestedBoundary = shortcutStore.loadActiveBoundary()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let snapshot = self?.shortcutStore.loadLastKnownGood()
             DispatchQueue.main.async {
                 guard let self else { return }
-                self.applyShortcutSnapshot(snapshot)
+                let currentBoundary = self.shortcutStore.loadActiveBoundary()
+                self.applyShortcutSnapshot(currentBoundary == requestedBoundary ? snapshot : nil)
             }
         }
     }
 
     private func applyShortcutSnapshot(_ snapshot: ShortcutSnapshotV1?) {
         guard let snapshot,
-              (try? ShortcutSnapshotValidator.validate(snapshot, expectedDeviceID: snapshot.deviceID)) != nil else {
+              let boundary = shortcutStore.loadActiveBoundary(),
+              (try? ShortcutSnapshotValidator.validate(snapshot, expectedDeviceID: ShortcutDeviceIdentity.localFixtureID, expectedOwnerSubjectHash: boundary.ownerSubjectHash, expectedPolicyEpoch: boundary.sessionEpoch)) != nil else {
             shortcutSnapshot = nil
             shortcutBindings = [:]
             shortcutSkills = [:]
+            pendingShortcutSkill = nil
+            pendingShortcutActivation = nil
+            captureDraft = nil
+            captureAcknowledged = false
+            hasSelectionCapture = false
+            if typingStack != nil {
+                machine = KeyboardStateMachine()
+                showTyping()
+            }
             updateBoundKeyPresentation()
             return
         }
@@ -394,6 +427,7 @@ final class KeyboardViewController: UIInputViewController {
               snapshot.skills.contains(where: {
                   $0.id == skill.id && $0.versionID == skill.versionID && $0.skillDigest == skill.skillDigest
               }) else {
+            applyShortcutSnapshot(nil)
             statusLabel.text = "Skill Keyの設定が変わりました。もう一度長押ししてください。"
             return
         }
@@ -412,7 +446,7 @@ final class KeyboardViewController: UIInputViewController {
             pendingShortcutSkill = skill
             pendingShortcutActivation = ShortcutActivationV1(binding: exactBinding, snapshot: snapshot, editorSessionID: documentIdentifier)
             selectedSource = source
-            captureDraft = CaptureDraft(text: text, source: source, fieldFingerprint: locking.fingerprint(text), redactedText: redaction.redacted, externalTransmissionAllowed: false, fallbackMessage: "\(skill.name) v\(skill.skillVersion)。選択範囲を確認してから端末内で実行します。", documentIdentifier: documentIdentifier)
+            captureDraft = CaptureDraft(text: text, source: source, fieldFingerprint: locking.selectionFingerprint(selectedText: text, before: textDocumentProxy.documentContextBeforeInput ?? "", after: textDocumentProxy.documentContextAfterInput ?? ""), redactedText: redaction.redacted, externalTransmissionAllowed: false, fallbackMessage: "\(skill.name) v\(skill.skillVersion)。選択範囲を確認してから端末内で実行します。", documentIdentifier: documentIdentifier)
             captureAcknowledged = false
             transition(.beginCapture(captureDraft!))
             showCaptureReview(captureDraft!, redactionBlocked: redaction.blocked)
@@ -540,8 +574,10 @@ final class KeyboardViewController: UIInputViewController {
             return
         }
         let redaction = redactor.redact(text)
-        let target = source == .selection ? (selected ?? "") : (before + after)
-        let draft = CaptureDraft(text: text, source: source, fieldFingerprint: locking.fingerprint(target), redactedText: redaction.redacted, externalTransmissionAllowed: false, fallbackMessage: fallbackMessage, documentIdentifier: documentIdentifier)
+        let targetFingerprint = source == .selection
+            ? locking.selectionFingerprint(selectedText: selected ?? "", before: before, after: after)
+            : locking.fingerprint(before + after)
+        let draft = CaptureDraft(text: text, source: source, fieldFingerprint: targetFingerprint, redactedText: redaction.redacted, externalTransmissionAllowed: false, fallbackMessage: fallbackMessage, documentIdentifier: documentIdentifier)
         captureDraft = draft
         captureAcknowledged = false
         transition(.beginCapture(draft))
@@ -550,7 +586,7 @@ final class KeyboardViewController: UIInputViewController {
 
     private func showCaptureReview(_ draft: CaptureDraft, redactionBlocked: Bool) {
         let title = UILabel(); title.text = pendingShortcutSkill.map { "\($0.name) — 入力内容の確認" } ?? "送信内容の確認"; title.font = .preferredFont(forTextStyle: .headline)
-        let exact = makePreviewLabel("入力内容（\(draft.characterCount)文字）", value: draft.text)
+        let exact = makeExactContentView("入力内容（\(draft.characterCount)文字）", value: draft.text)
         let redacted = makePreviewLabel("ローカル検出後の表示", value: draft.redactedText)
         let destination = makePreviewLabel("実行先", value: pendingShortcutSkill?.executionRoute == .keyboardLocal ? "端末内のみ / 外部送信なし" : "host確認が必要")
         let source = makePreviewLabel("入力ソース", value: draft.source == .command ? "コマンド" : draft.source.rawValue)
@@ -567,7 +603,7 @@ final class KeyboardViewController: UIInputViewController {
         cancel.addTarget(self, action: #selector(cancelAction), for: .touchUpInside)
         let buttons = UIStackView(arrangedSubviews: [cancel, acknowledge, proceed]); buttons.axis = .vertical; buttons.spacing = 6
         let stack = UIStackView(arrangedSubviews: [title, exact, redacted, source, destination, warning, buttons]); stack.axis = .vertical; stack.spacing = 7; stack.isLayoutMarginsRelativeArrangement = true; stack.layoutMargins = UIEdgeInsets(top: 7, left: 10, bottom: 7, right: 10)
-        install(stack, height: 280)
+        install(stack, height: 368)
     }
 
     @objc private func acknowledgeCapture() {
@@ -590,6 +626,7 @@ final class KeyboardViewController: UIInputViewController {
             local = LocalRewriteEngine().politeRewrite(draft.text)
         }
         guard let local else { transition(.fail(.emptyInput)); return }
+        guard shortcutActivationStillCurrent() else { presentRecoverableError(.staleField); return }
         let result = RewriteResult(original: local.original, rewritten: local.rewritten, preservedEntities: local.preservedEntities, fieldFingerprint: draft.fieldFingerprint, documentIdentifier: draft.documentIdentifier)
         transition(.showRewrite(result))
         showResultReview(result)
@@ -623,6 +660,7 @@ final class KeyboardViewController: UIInputViewController {
             regenerated = LocalRewriteEngine().politeRewrite(draft.text)
         }
         guard let regenerated else { return }
+        guard shortcutActivationStillCurrent() else { presentRecoverableError(.staleField); return }
         let result = RewriteResult(original: regenerated.original, rewritten: regenerated.rewritten, preservedEntities: regenerated.preservedEntities, fieldFingerprint: draft.fieldFingerprint, documentIdentifier: draft.documentIdentifier)
         resultTextView.text = result.rewritten
         resultTextView.selectedRange = NSRange(location: (result.rewritten as NSString).length, length: 0)
@@ -660,6 +698,7 @@ final class KeyboardViewController: UIInputViewController {
         let snapshot = EditorSnapshot(documentIdentifier: documentIdentifier, fieldFingerprint: currentTargetFingerprint(for: draft.source), expectedAppliedFingerprint: locking.fingerprint(expectedAppliedField))
         transition(.applyResultWithSnapshot(snapshot))
         guard case .applied(let token) = machine.screen else { return }
+        guard shortcutActivationStillCurrent() else { presentRecoverableError(.staleField); return }
         textDocumentProxy.insertText(proposed)
         showUndoView(token)
     }
@@ -691,8 +730,38 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func currentTargetFingerprint(for source: CaptureSource) -> String {
-        if source == .selection, let selected = textDocumentProxy.selectedText { return locking.fingerprint(selected) }
+        if source == .selection, let selected = textDocumentProxy.selectedText {
+            return locking.selectionFingerprint(selectedText: selected, before: textDocumentProxy.documentContextBeforeInput ?? "", after: textDocumentProxy.documentContextAfterInput ?? "")
+        }
         return locking.fingerprint((textDocumentProxy.documentContextBeforeInput ?? "") + (textDocumentProxy.documentContextAfterInput ?? ""))
+    }
+
+    private func makeExactContentView(_ title: String, value: String) -> UIStackView {
+        let heading = UILabel()
+        heading.text = title
+        heading.font = .preferredFont(forTextStyle: .footnote)
+        heading.adjustsFontForContentSizeCategory = true
+
+        let textView = UITextView()
+        textView.text = value
+        textView.font = .preferredFont(forTextStyle: .body)
+        textView.adjustsFontForContentSizeCategory = true
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isScrollEnabled = true
+        textView.backgroundColor = .secondarySystemBackground
+        textView.layer.cornerRadius = 8
+        textView.layer.borderWidth = 0.5
+        textView.layer.borderColor = UIColor.separator.cgColor
+        textView.accessibilityLabel = title
+        textView.accessibilityValue = value
+        textView.accessibilityHint = "全文をスクロールして確認できます"
+        textView.heightAnchor.constraint(greaterThanOrEqualToConstant: 104).isActive = true
+
+        let stack = UIStackView(arrangedSubviews: [heading, textView])
+        stack.axis = .vertical
+        stack.spacing = 4
+        return stack
     }
 
     private func makePreviewLabel(_ title: String, value: String) -> UILabel {
@@ -809,11 +878,16 @@ final class KeyboardViewController: UIInputViewController {
         guard let activation = pendingShortcutActivation else { return true }
         guard activation.editorSessionID == documentIdentifier, activation.expiresAt >= now,
               let current = shortcutStore.loadLastKnownGood(), current.generation == activation.snapshotGeneration,
-              current.deviceID == activation.deviceID else { return false }
-        return current.bindings.contains {
+              current.deviceID == activation.deviceID else {
+            applyShortcutSnapshot(nil)
+            return false
+        }
+        let isCurrent = current.bindings.contains {
             $0.id == activation.bindingID && $0.skillID == activation.skillID && $0.versionID == activation.versionID &&
             $0.skillDigest == activation.skillDigest && $0.enabled
         }
+        if !isCurrent { applyShortcutSnapshot(nil) }
+        return isCurrent
     }
 
     private func transition(_ action: KeyboardAction) {

@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
 const COMMIT_SHA = /^[a-f0-9]{40}$/i;
+const VALID_STATUSES = new Set(['not_proven', 'in_progress', 'passed', 'failed']);
 const DEFAULTS = {
   manifest: 'docs/release-evidence-manifest.json',
   matrix: 'docs/release-e2e-matrix.json',
@@ -32,6 +33,14 @@ const requiredScenarios = [
   'app_and_keyboard_switch', 'rotation_and_background_resume',
   'secure_field_suppression', 'unsupported_custom_keyboard',
   'accessibility_screen_reader', 'accessibility_font_scale',
+];
+const requiredFieldClasses = [
+  'ordinary_text', 'long_text', 'emoji', 'newline', 'japanese', 'url', 'rtl',
+  'secure_password', 'one_time_code', 'phone_number',
+];
+const requiredLifecycleEvents = [
+  'input_field_switch', 'app_switch', 'keyboard_switch', 'rotation',
+  'background_resume', 'process_restart',
 ];
 const requiredMetrics = [
   'key_to_commit_p50_ms', 'key_to_commit_p95_ms', 'keyboard_cold_open_p95_ms',
@@ -201,7 +210,10 @@ function validateMatrix(matrix, expectedSha = null) {
   const errors = [];
   if (matrix.schema_version !== 'mobile-ai-keyboard.real-device-e2e.v1') errors.push('wrong schema_version');
   if (matrix.evidence_class !== 'protected_external') errors.push('evidence_class must be protected_external');
+  if (!VALID_STATUSES.has(matrix.status)) errors.push(`invalid matrix status ${matrix.status ?? 'missing'}`);
   for (const scenario of requiredScenarios) if (!matrix.required_scenarios?.includes(scenario)) errors.push(`missing scenario ${scenario}`);
+  for (const fieldClass of requiredFieldClasses) if (!matrix.required_field_classes?.includes(fieldClass)) errors.push(`missing field class ${fieldClass}`);
+  for (const lifecycleEvent of requiredLifecycleEvents) if (!matrix.required_lifecycle_events?.includes(lifecycleEvent)) errors.push(`missing lifecycle event ${lifecycleEvent}`);
   const platforms = new Set((matrix.targets ?? []).map((target) => target.platform));
   for (const platform of ['ios', 'android']) if (!platforms.has(platform)) errors.push(`missing ${platform} target`);
   for (const target of matrix.targets ?? []) {
@@ -218,10 +230,16 @@ function validateMatrix(matrix, expectedSha = null) {
         if (!DIGEST.test(run.artifact_digest ?? '')) errors.push(`${target.platform} passed run artifact_digest is invalid`);
         if (!Array.isArray(run.scenarios) || run.scenarios.length === 0) errors.push(`${target.platform} passed run is missing scenario coverage`);
         if (!Array.isArray(run.accessibility_tools) || run.accessibility_tools.length === 0) errors.push(`${target.platform} passed run is missing accessibility tool evidence`);
+        if (!Array.isArray(run.field_classes) || run.field_classes.length === 0) errors.push(`${target.platform} passed run is missing field-class coverage`);
+        if (!Array.isArray(run.lifecycle_events) || run.lifecycle_events.length === 0) errors.push(`${target.platform} passed run is missing lifecycle-event coverage`);
         if (/(fixture|simulator|emulator|jvm|ui[-_ ]?test|local|self[-_ ]?attest)/i.test(JSON.stringify(run))) errors.push(`${target.platform} passed run contains a fixture/simulator/emulator/UI-test/local marker`);
       }
       const coveredScenarios = new Set((target.runs ?? []).flatMap((run) => Array.isArray(run.scenarios) ? run.scenarios : []));
       for (const scenario of requiredScenarios) if (!coveredScenarios.has(scenario)) errors.push(`${target.platform} passed evidence does not cover scenario ${scenario}`);
+      const coveredFieldClasses = new Set((target.runs ?? []).flatMap((run) => Array.isArray(run.field_classes) ? run.field_classes : []));
+      for (const fieldClass of requiredFieldClasses) if (!coveredFieldClasses.has(fieldClass)) errors.push(`${target.platform} passed evidence does not cover field class ${fieldClass}`);
+      const coveredLifecycleEvents = new Set((target.runs ?? []).flatMap((run) => Array.isArray(run.lifecycle_events) ? run.lifecycle_events : []));
+      for (const lifecycleEvent of requiredLifecycleEvents) if (!coveredLifecycleEvents.has(lifecycleEvent)) errors.push(`${target.platform} passed evidence does not cover lifecycle event ${lifecycleEvent}`);
       const requiredAccessibilityTool = target.platform === 'ios' ? 'voiceover' : 'talkback';
       if (!(target.runs ?? []).some((run) => run.accessibility_tools?.includes(requiredAccessibilityTool))) errors.push(`${target.platform} passed evidence does not include ${requiredAccessibilityTool} coverage`);
     }
@@ -240,15 +258,19 @@ function validatePerformance(performance, expectedSha = null) {
   const errors = [];
   if (performance.schema_version !== 'mobile-ai-keyboard.performance-evidence.v1') errors.push('wrong schema_version');
   if (performance.evidence_class !== 'protected_external') errors.push('evidence_class must be protected_external');
+  if (!VALID_STATUSES.has(performance.status)) errors.push(`invalid performance status ${performance.status ?? 'missing'}`);
   for (const metric of requiredMetrics) if (!performance.required_metrics?.includes(metric)) errors.push(`missing metric ${metric}`);
   const seen = new Set();
   for (const measurement of performance.measurements ?? []) {
     if (!requiredMetrics.includes(measurement.metric_id)) errors.push(`unknown performance metric ${measurement.metric_id ?? 'missing'}`);
     if (!['ios', 'android'].includes(measurement.platform)) errors.push(`unknown performance platform ${measurement.platform ?? 'missing'}`);
-    if (!['not_proven', 'in_progress', 'passed', 'failed'].includes(measurement.status)) errors.push(`${measurement.metric_id ?? 'missing'} has an invalid status`);
-    if (seen.has(measurement.metric_id)) errors.push(`duplicate metric ${measurement.metric_id}`);
-    seen.add(measurement.metric_id);
+    if (!VALID_STATUSES.has(measurement.status)) errors.push(`${measurement.metric_id ?? 'missing'} has an invalid status`);
+    const pair = `${measurement.platform}:${measurement.metric_id}`;
+    if (seen.has(pair)) errors.push(`duplicate metric/platform pair ${pair}`);
+    seen.add(pair);
     if (measurement.status === 'passed') {
+      if (typeof measurement.value !== 'number' || !Number.isFinite(measurement.value)) errors.push(`${measurement.metric_id} passed measurement has no finite value`);
+      if (!Number.isInteger(measurement.sample_count) || measurement.sample_count <= 0) errors.push(`${measurement.metric_id} passed measurement has an invalid sample_count`);
       const evidence = measurement.evidence ?? {};
       if (evidence.class !== 'protected_external' || !evidence.run_id || !evidence.runner_id || evidence.attested !== true || !evidence.artifact_digest) errors.push(`${measurement.metric_id} passed without protected evidence binding`);
       if (evidence.environment !== 'protected_device') errors.push(`${measurement.metric_id} passed measurement is not explicitly classified as protected_device`);
@@ -260,7 +282,11 @@ function validatePerformance(performance, expectedSha = null) {
     }
   }
   if (performance.status === 'passed') {
-    for (const metric of requiredMetrics) if (!performance.measurements?.some((m) => m.metric_id === metric && m.status === 'passed')) errors.push(`performance status passed but ${metric} is not passed`);
+    for (const platform of ['ios', 'android']) {
+      for (const metric of requiredMetrics) {
+        if (!performance.measurements?.some((m) => m.metric_id === metric && m.platform === platform && m.status === 'passed')) errors.push(`performance status passed but ${platform}:${metric} is not passed`);
+      }
+    }
   }
   const candidateError = validateCandidate(performance.candidate, performance.status, 'Performance evidence', expectedSha);
   if (candidateError) errors.push(candidateError);
@@ -271,6 +297,7 @@ function validateIosArchive(archive, expectedSha = null) {
   const errors = [];
   if (archive.schema_version !== 'mobile-ai-keyboard.ios-archive.v1') errors.push('wrong schema_version');
   if (archive.evidence_class !== 'protected_external') errors.push('evidence_class must be protected_external');
+  if (!VALID_STATUSES.has(archive.status)) errors.push(`invalid iOS archive status ${archive.status ?? 'missing'}`);
   if (archive.status === 'passed') {
     const evidence = archive.evidence ?? {};
     if (evidence.class !== 'protected_external' || !evidence.run_id || !evidence.runner_id || evidence.attested !== true || !evidence.artifact_digest) errors.push('archive passed without protected evidence binding');
@@ -281,7 +308,10 @@ function validateIosArchive(archive, expectedSha = null) {
     if (/(fixture|simulator|emulator|jvm|ui[-_ ]?test|local|self[-_ ]?attest)/i.test(JSON.stringify(archive))) errors.push('archive passed evidence contains a fixture/simulator/emulator/UI-test/local marker');
     if (!archive.entitlements?.host?.app_group || archive.entitlements.host.app_group !== archive.entitlements?.extension?.app_group) errors.push('archived host and extension must contain the same App Group entitlement');
     if (archive.extension_info?.requests_open_access !== true) errors.push('archived extension Info.plist must request the declared Full Access value');
-    if (!archive.privacy_manifests?.host || !archive.privacy_manifests?.extension) errors.push('archive must contain host and extension privacy manifest inspection');
+    for (const component of ['host', 'extension']) {
+      const manifest = archive.privacy_manifests?.[component];
+      if (manifest?.embedded !== true || manifest?.declares_no_collected_data !== true) errors.push(`archived ${component} privacy manifest must explicitly confirm embedded and no collected data`);
+    }
   }
   const candidateError = validateCandidate(archive.candidate, archive.status, 'iOS archive evidence', expectedSha);
   if (candidateError) errors.push(candidateError);

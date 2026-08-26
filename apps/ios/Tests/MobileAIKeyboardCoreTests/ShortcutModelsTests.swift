@@ -37,6 +37,7 @@ final class ShortcutModelsTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("shortcut-store-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         let store = AppGroupShortcutSnapshotStore(appGroupIdentifier: "group.invalid.test", fallbackDirectoryURL: root)
+        _ = try store.activateBoundary(ownerSubjectHash: "sha256:test-owner")
         let first = makeSnapshot().withComputedDigest()
         try store.publish(first)
         let raw = try XCTUnwrap(try? Data(contentsOf: root.appendingPathComponent("ShortcutSnapshots/shortcut-snapshot.current.json")))
@@ -47,7 +48,7 @@ final class ShortcutModelsTests: XCTestCase {
         XCTAssertEqual(loaded.contentDigest, first.contentDigest)
         XCTAssertFalse(store.isUsingSharedAppGroup)
 
-        let newer = ShortcutSnapshotV1(id: "ss_new", generation: 2, deviceID: "device", layout: ShortcutLayoutV1(id: first.layout.id, userID: "user", deviceID: "device", revision: 2, keyBindingIDs: first.layout.keyBindingIDs), bindings: first.bindings, skills: first.skills).withComputedDigest()
+        let newer = ShortcutSnapshotV1(id: "ss_new", generation: 2, userSubjectHash: first.userSubjectHash, deviceID: "device", layout: ShortcutLayoutV1(id: first.layout.id, userID: "user", deviceID: "device", revision: 2, keyBindingIDs: first.layout.keyBindingIDs), bindings: first.bindings, skills: first.skills, policyEpoch: first.policyEpoch).withComputedDigest()
         try store.publish(newer)
         XCTAssertEqual(store.loadLastKnownGood()?.generation, 2)
         XCTAssertThrowsError(try store.publish(newer))
@@ -57,6 +58,7 @@ final class ShortcutModelsTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("shortcut-private-restart-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         let store = AppGroupShortcutSnapshotStore(appGroupIdentifier: "group.invalid.private", fallbackDirectoryURL: root)
+        let boundary = try store.activateBoundary(ownerSubjectHash: "sha256:private-owner")
         let digest = ShortcutDigest.sha256("private-demo:v1")
         let skill = ShortcutSkillProjectionV1(
             id: "skill_private_demo",
@@ -82,7 +84,7 @@ final class ShortcutModelsTests: XCTestCase {
             executionRoute: .keyboardLocal
         )
         let layout = ShortcutLayoutV1(id: "layout_private_demo", userID: "user", deviceID: "device", revision: 1, keyBindingIDs: [binding.id], paletteBindingIDs: [binding.id])
-        let snapshot = ShortcutSnapshotV1(id: "ss_private_demo", generation: 1, deviceID: "device", layout: layout, bindings: [binding], skills: [skill]).withComputedDigest()
+        let snapshot = ShortcutSnapshotV1(id: "ss_private_demo", generation: 1, userSubjectHash: boundary.ownerSubjectHash, deviceID: "device", layout: layout, bindings: [binding], skills: [skill], policyEpoch: boundary.sessionEpoch).withComputedDigest()
 
         try store.publish(snapshot)
         let restarted = try XCTUnwrap(store.loadLastKnownGood())
@@ -91,6 +93,122 @@ final class ShortcutModelsTests: XCTestCase {
         XCTAssertEqual(restarted.skills.first?.skillDigest, digest)
         XCTAssertEqual(restarted.skills.first?.inputSources, [.selection])
         XCTAssertEqual(restarted.skills.first?.toolSummaries.first?.operation, "local.text.normalize")
+    }
+
+    func testTombstoneRevocationFloorPreventsPreviousExecutableResurrection() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("shortcut-revocation-floor-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = AppGroupShortcutSnapshotStore(appGroupIdentifier: "group.invalid.revocation", fallbackDirectoryURL: root)
+        _ = try store.activateBoundary(ownerSubjectHash: "sha256:test-owner")
+        try store.publish(makeSnapshot().withComputedDigest())
+        try store.publishTombstone(reason: .signedOut, deviceID: "device", userID: "user")
+
+        let directory = root.appendingPathComponent("ShortcutSnapshots")
+        try Data("corrupt-current".utf8).write(to: directory.appendingPathComponent("shortcut-snapshot.current.json"), options: .atomic)
+        XCTAssertNil(store.loadLastKnownGood(), "the generation-1 executable previous slot must stay revoked")
+    }
+
+    func testCorruptRevocationFloorFailsClosed() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("shortcut-corrupt-floor-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = AppGroupShortcutSnapshotStore(appGroupIdentifier: "group.invalid.floor", fallbackDirectoryURL: root)
+        _ = try store.activateBoundary(ownerSubjectHash: "sha256:test-owner")
+        try store.publish(makeSnapshot().withComputedDigest())
+        let floor = root.appendingPathComponent("ShortcutSnapshots/shortcut-snapshot.revocation-floor.json")
+        try FileManager.default.createDirectory(at: floor.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: floor, options: .atomic)
+        XCTAssertNil(store.loadLastKnownGood())
+    }
+
+    func testValidatorBindsLayoutAndBindingsToDeclaredOwner() throws {
+        let base = makeSnapshot()
+        let mismatched = ShortcutSnapshotV1(id: base.id, generation: 1, userSubjectHash: "owner-a", deviceID: base.deviceID, layout: base.layout, bindings: base.bindings, skills: base.skills).withComputedDigest()
+        XCTAssertThrowsError(try ShortcutSnapshotValidator.validate(mismatched, expectedOwnerSubjectHash: "owner-b")) { error in
+            XCTAssertEqual(error as? ShortcutValidationError, .ownerOrDevice)
+        }
+    }
+
+    func testAccountBoundaryRejectsOwnerAndSessionEpochReplay() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("shortcut-owner-boundary-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = AppGroupShortcutSnapshotStore(appGroupIdentifier: "group.invalid.owner", fallbackDirectoryURL: root)
+        let ownerA = try store.activateBoundary(ownerSubjectHash: "sha256:owner-a")
+        let base = makeSnapshot(ownerSubjectHash: ownerA.ownerSubjectHash, policyEpoch: ownerA.sessionEpoch).withComputedDigest()
+        try store.publish(base)
+        XCTAssertEqual(store.loadLastKnownGood()?.userSubjectHash, "sha256:owner-a")
+
+        let ownerB = try store.activateBoundary(ownerSubjectHash: "sha256:owner-b")
+        XCTAssertGreaterThan(ownerB.sessionEpoch, ownerA.sessionEpoch)
+        XCTAssertNil(store.loadLastKnownGood(), "owner A data must close immediately when B becomes authoritative")
+
+        _ = try store.deactivateBoundary()
+        XCTAssertNil(store.loadLastKnownGood())
+
+        let resumedB = try store.activateBoundary(ownerSubjectHash: "sha256:owner-b")
+        XCTAssertGreaterThan(resumedB.sessionEpoch, ownerB.sessionEpoch)
+        let staleEpoch = makeSnapshot(ownerSubjectHash: resumedB.ownerSubjectHash, policyEpoch: ownerB.sessionEpoch).withComputedDigest()
+        XCTAssertThrowsError(try ShortcutSnapshotValidator.validate(staleEpoch, expectedOwnerSubjectHash: resumedB.ownerSubjectHash, expectedPolicyEpoch: resumedB.sessionEpoch)) { error in
+            XCTAssertEqual(error as? ShortcutValidationError, .ownerOrDevice)
+        }
+    }
+
+    func testCorruptBoundaryCannotResetEpochAndReplaySameOwnerSnapshot() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("shortcut-corrupt-boundary-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = AppGroupShortcutSnapshotStore(appGroupIdentifier: "group.invalid.corrupt-owner", fallbackDirectoryURL: root)
+        let original = try store.activateBoundary(ownerSubjectHash: "sha256:owner-a")
+        try store.publish(makeSnapshot(ownerSubjectHash: original.ownerSubjectHash, policyEpoch: original.sessionEpoch).withComputedDigest())
+
+        let boundaryURL = root.appendingPathComponent("ShortcutSnapshots/shortcut-account-boundary.current.json")
+        try Data("{}".utf8).write(to: boundaryURL, options: .atomic)
+        XCTAssertNil(store.loadLastKnownGood())
+
+        let recovered = try store.activateBoundary(ownerSubjectHash: "sha256:owner-a")
+        XCTAssertGreaterThan(recovered.sessionEpoch, original.sessionEpoch)
+        XCTAssertNil(store.loadLastKnownGood(), "the old same-owner epoch must not reopen after authority corruption")
+    }
+
+    func testExpiredAccountBoundaryFailsClosedWithoutDeletingSnapshot() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("shortcut-expired-boundary-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = AppGroupShortcutSnapshotStore(appGroupIdentifier: "group.invalid.expired-owner", fallbackDirectoryURL: root)
+        let active = try store.activateBoundary(ownerSubjectHash: "sha256:owner-a")
+        try store.publish(makeSnapshot(ownerSubjectHash: active.ownerSubjectHash, policyEpoch: active.sessionEpoch).withComputedDigest())
+
+        let expired = ShortcutAccountBoundaryV1(ownerSubjectHash: active.ownerSubjectHash, sessionEpoch: active.sessionEpoch, active: true, expiresAt: Date(timeIntervalSince1970: 100)).withComputedDigest()
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .custom { date, encoder in
+            var container = encoder.singleValueContainer()
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            try container.encode(formatter.string(from: date))
+        }
+        let boundaryURL = root.appendingPathComponent("ShortcutSnapshots/shortcut-account-boundary.current.json")
+        try encoder.encode(expired).write(to: boundaryURL, options: .atomic)
+
+        XCTAssertNil(store.loadActiveBoundary())
+        XCTAssertNil(store.loadLastKnownGood(), "an expired host lease must close extension execution")
+    }
+
+    func testMaximumRevocationFloorFailsClosedWithoutIntegerOverflow() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("shortcut-max-floor-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = AppGroupShortcutSnapshotStore(appGroupIdentifier: "group.invalid.max-floor", fallbackDirectoryURL: root)
+        _ = try store.activateBoundary(ownerSubjectHash: "sha256:owner-a")
+        let generation = ShortcutSnapshotValidator.maxMonotonicValue
+        let floor: [String: Any] = [
+            "schema_version": 1,
+            "generation": generation,
+            "content_digest": ShortcutDigest.sha256("revocation-floor-v1:\(generation)")
+        ]
+        let floorURL = root.appendingPathComponent("ShortcutSnapshots/shortcut-snapshot.revocation-floor.json")
+        try FileManager.default.createDirectory(at: floorURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: floor, options: [.sortedKeys]).write(to: floorURL, options: .atomic)
+
+        XCTAssertNil(store.loadLastKnownGood())
+        XCTAssertThrowsError(try store.publishTombstone(reason: .signedOut, deviceID: "device", userID: "user")) { error in
+            XCTAssertEqual(error as? ShortcutStoreError, .generationConflict)
+        }
     }
 
     func testValidatorRejectsDuplicateSkillProjectionAndExpiredSnapshot() throws {
@@ -124,11 +242,11 @@ final class ShortcutModelsTests: XCTestCase {
         XCTAssertNil(ShortcutCapturePolicy.localSelection(skill: unsafeContextOnly, selectedText: "選択した文章"))
     }
 
-    private func makeSnapshot() -> ShortcutSnapshotV1 {
+    private func makeSnapshot(ownerSubjectHash: String? = "sha256:test-owner", policyEpoch: Int = 1) -> ShortcutSnapshotV1 {
         let skillDigest = ShortcutDigest.sha256("test-skill:v1")
         let skill = ShortcutSkillProjectionV1(id: "skill_test", versionID: "sv_test", skillVersion: 1, skillDigest: skillDigest, name: "Test", description: "local only")
         let binding = ShortcutBindingV1(id: "bind_test", userID: "user", deviceID: "device", skillID: skill.id, versionID: skill.versionID, skillVersion: 1, skillDigest: skillDigest, keyCode: .keyH, presentation: ShortcutPresentation(iconValue: "wand.and.stars", shortLabel: "Test", accessibilityLabel: "H Test", accessibilityHint: "長押しで実行"))
         let layout = ShortcutLayoutV1(id: "layout_test", userID: "user", deviceID: "device", revision: 1, keyBindingIDs: [binding.id], paletteBindingIDs: [binding.id])
-        return ShortcutSnapshotV1(id: "ss_test", generation: 1, deviceID: "device", layout: layout, bindings: [binding], skills: [skill])
+        return ShortcutSnapshotV1(id: "ss_test", generation: 1, userSubjectHash: ownerSubjectHash, deviceID: "device", layout: layout, bindings: [binding], skills: [skill], policyEpoch: policyEpoch)
     }
 }

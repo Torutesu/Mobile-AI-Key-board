@@ -24,6 +24,7 @@ struct ShortcutSkillOption: Identifiable, Equatable {
 }
 
 enum ShortcutRegistryError: Error, LocalizedError, Equatable {
+    case accountBoundaryUnavailable
     case skillUnavailable
     case keyOccupied(String)
     case invalidSnapshot(String)
@@ -31,6 +32,7 @@ enum ShortcutRegistryError: Error, LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
+        case .accountBoundaryUnavailable: return "Skill Keyのアカウント境界が有効ではありません。"
         case .skillUnavailable: return "このSkillは現在利用できません。"
         case .keyOccupied(let name): return "このキーは「\(name)」に割り当て済みです。先に再割り当てを選んでください。"
         case .invalidSnapshot(let reason): return "設定を保存できませんでした: \(reason)"
@@ -50,13 +52,18 @@ final class ShortcutRegistryStore: ObservableObject {
     // Opaque IDs follow the shared contract shape; they contain no email or
     // account credential and remain device-local until authenticated sync is
     // implemented.
-    private let deviceID = "dev_local_device_0001"
+    private let deviceID = ShortcutDeviceIdentity.localFixtureID
     private let userID = "usr_local_device_0001"
+    private var ownerSubjectHash: String?
+    private var sessionEpoch: Int?
 
     init(storage: AppGroupShortcutSnapshotStore = AppGroupShortcutSnapshotStore()) {
         self.storage = storage
+        let boundary = storage.loadActiveBoundary()
         let loaded = storage.loadLastKnownGood()
-        snapshot = loaded ?? ShortcutSnapshotV1.empty(deviceID: "dev_local_device_0001", userID: "usr_local_device_0001")
+        ownerSubjectHash = boundary?.ownerSubjectHash
+        sessionEpoch = boundary?.sessionEpoch
+        snapshot = loaded ?? ShortcutSnapshotV1.empty(deviceID: ShortcutDeviceIdentity.localFixtureID, userID: "usr_local_device_0001")
         statusMessage = loaded == nil ? "この端末だけの安全な既定値" : (storage.isUsingSharedAppGroup ? "キーボードと共有済み" : "App Group未設定のためhost内fallback")
         // An Add-to-Keyboard candidate is process-local until the user assigns
         // it. Assigned candidates are embedded in the validated App Group
@@ -79,6 +86,7 @@ final class ShortcutRegistryStore: ObservableObject {
     }
 
     func assign(skillID: String, key: ShortcutKeyCode) throws {
+        try requireActiveBoundary()
         guard let skill = skills.first(where: { $0.id == skillID }) else { throw ShortcutRegistryError.skillUnavailable }
         guard skill.isAssignable else { throw ShortcutRegistryError.skillUnavailable }
         let now = Date()
@@ -90,6 +98,7 @@ final class ShortcutRegistryStore: ObservableObject {
     }
 
     func reassign(bindingID: String, to key: ShortcutKeyCode) throws {
+        try requireActiveBoundary()
         guard let old = snapshot.bindings.first(where: { $0.id == bindingID }), let oldSkill = skill(for: old), oldSkill.isAssignable else { throw ShortcutRegistryError.skillUnavailable }
         do {
             let nextBindings = try ShortcutRegistryMutation.move(bindings: snapshot.bindings, bindingID: bindingID, to: key)
@@ -99,6 +108,7 @@ final class ShortcutRegistryStore: ObservableObject {
 
     /// Explicitly replace the binding occupying `key` with a new Skill.
     func replace(skillID: String, key: ShortcutKeyCode) throws {
+        try requireActiveBoundary()
         guard let skill = skills.first(where: { $0.id == skillID }), skill.isAssignable else { throw ShortcutRegistryError.skillUnavailable }
         let now = Date()
         let binding = ShortcutBindingV1(id: "bind_\(UUID().uuidString)", userID: userID, deviceID: deviceID, skillID: skill.id, versionID: skill.versionID, skillVersion: skill.version, skillDigest: skill.digest, keyCode: key, presentation: ShortcutPresentation(iconValue: skill.icon, shortLabel: skill.name, accessibilityLabel: "\(key.displayLabel)、\(skill.name)", accessibilityHint: "長押しで\(skill.name)を実行", tintToken: .accent), executionRoute: skill.route, createdAt: now, updatedAt: now)
@@ -110,6 +120,7 @@ final class ShortcutRegistryStore: ObservableObject {
 
     /// Explicitly swap an existing Skill Key with the owner of `key`.
     func swap(bindingID: String, to key: ShortcutKeyCode) throws {
+        try requireActiveBoundary()
         guard let old = snapshot.bindings.first(where: { $0.id == bindingID }), let oldSkill = skill(for: old), oldSkill.isAssignable else { throw ShortcutRegistryError.skillUnavailable }
         do {
             let nextBindings = try ShortcutRegistryMutation.swap(bindings: snapshot.bindings, bindingID: bindingID, to: key)
@@ -119,6 +130,7 @@ final class ShortcutRegistryStore: ObservableObject {
 
     /// Explicitly remove the current owner of `key` and move the selected key.
     func replace(bindingID: String, to key: ShortcutKeyCode) throws {
+        try requireActiveBoundary()
         guard let old = snapshot.bindings.first(where: { $0.id == bindingID }), let oldSkill = skill(for: old), oldSkill.isAssignable else { throw ShortcutRegistryError.skillUnavailable }
         do {
             let nextBindings = try ShortcutRegistryMutation.replace(bindings: snapshot.bindings, bindingID: bindingID, to: key)
@@ -127,6 +139,7 @@ final class ShortcutRegistryStore: ObservableObject {
     }
 
     func setEnabled(bindingID: String, enabled: Bool) throws {
+        try requireActiveBoundary()
         guard let old = snapshot.bindings.first(where: { $0.id == bindingID }) else { throw ShortcutRegistryError.skillUnavailable }
         if enabled, let oldSkill = skill(for: old), !oldSkill.isAssignable { throw ShortcutRegistryError.skillUnavailable }
         let updated = ShortcutBindingV1(id: old.id, userID: old.userID, deviceID: old.deviceID, skillID: old.skillID, versionID: old.versionID, skillVersion: old.skillVersion, skillDigest: old.skillDigest, keyCode: old.keyCode, presentation: old.presentation, enabled: enabled, executionRoute: old.executionRoute, requiredConnectionIDs: old.requiredConnectionIDs, createdAt: old.createdAt, updatedAt: Date())
@@ -134,6 +147,7 @@ final class ShortcutRegistryStore: ObservableObject {
     }
 
     func remove(bindingID: String) throws {
+        try requireActiveBoundary()
         let bindings = snapshot.bindings.filter { $0.id != bindingID }
         guard bindings.count != snapshot.bindings.count else { throw ShortcutRegistryError.skillUnavailable }
         let referenced = Set(bindings.map { "\($0.skillID)|\($0.versionID)" })
@@ -142,7 +156,14 @@ final class ShortcutRegistryStore: ObservableObject {
     }
 
     func refresh() {
-        guard let loaded = storage.loadLastKnownGood() else { return }
+        guard let loaded = storage.loadLastKnownGood() else {
+            ownerSubjectHash = storage.loadActiveBoundary()?.ownerSubjectHash
+            sessionEpoch = storage.loadActiveBoundary()?.sessionEpoch
+            snapshot = ShortcutSnapshotV1.empty(deviceID: deviceID, userID: userID)
+            skills = Self.fixtureSkills
+            statusMessage = "有効なSkill Key境界がありません。登録状態を閉じました"
+            return
+        }
         // Keep candidates added during this process until the user assigns
         // them. They are intentionally not persisted before assignment, but
         // navigating between host screens must not discard the candidate.
@@ -158,6 +179,53 @@ final class ShortcutRegistryStore: ObservableObject {
             !restored.contains { $0.id == candidate.id && $0.versionID == candidate.versionID }
         }
         statusMessage = storage.isUsingSharedAppGroup ? "キーボードと共有済み" : "App Group未設定のためhost内fallback"
+    }
+
+    /// Changes the executable authority before any new owner state is exposed.
+    /// A valid previous snapshot therefore becomes unreadable to the extension
+    /// immediately, even if later cleanup is interrupted.
+    func activateOwner(subject: String) throws {
+        let ownerHash = ShortcutDigest.sha256("shortcut-owner-v1:\(subject)")
+        let wasSameOwner = ownerSubjectHash == ownerHash && sessionEpoch != nil
+        let boundary = try storage.activateBoundary(ownerSubjectHash: ownerHash)
+        ownerSubjectHash = ownerHash
+        sessionEpoch = boundary.sessionEpoch
+        if wasSameOwner, storage.loadLastKnownGood() != nil {
+            refresh()
+            return
+        }
+        // Seal the old executable generation. The boundary already points at
+        // the new owner, so a crash here is closed rather than cross-account.
+        try storage.publishTombstone(reason: .signedOut, deviceID: deviceID, userID: userID)
+        let generation = storage.latestKnownGeneration()
+        snapshot = ShortcutSnapshotV1(
+            id: "ss_\(UUID().uuidString)",
+            generation: generation,
+            userSubjectHash: ownerHash,
+            deviceID: deviceID,
+            layout: ShortcutLayoutV1(id: "layout_\(UUID().uuidString)", userID: userID, deviceID: deviceID, revision: 0, keyBindingIDs: []),
+            bindings: [],
+            skills: [],
+            policyEpoch: boundary.sessionEpoch
+        ).withComputedDigest()
+        skills = Self.fixtureSkills
+        statusMessage = "新しいアカウント境界でSkill Keysを開始しました"
+    }
+
+    func deactivateOwner(reason: ShortcutTombstoneReason = .signedOut) throws {
+        if ownerSubjectHash == nil, storage.loadActiveBoundary() == nil { return }
+        // Close through two independent persisted paths. A tombstone advances
+        // the revocation floor; an inactive boundary removes owner authority.
+        // Attempt both even if one App Group write fails.
+        var closureErrors: [Error] = []
+        do { try storage.publishTombstone(reason: reason, deviceID: deviceID, userID: userID) } catch { closureErrors.append(error) }
+        do { _ = try storage.deactivateBoundary() } catch { closureErrors.append(error) }
+        ownerSubjectHash = nil
+        sessionEpoch = nil
+        snapshot = ShortcutSnapshotV1.empty(deviceID: deviceID, userID: userID)
+        skills = Self.fixtureSkills
+        statusMessage = "Skill Keyの実行権限を解除しました"
+        if closureErrors.count == 2 { throw closureErrors[0] }
     }
 
     /// Deploy and keyboard assignment are separate actions. This only exposes
@@ -225,11 +293,18 @@ final class ShortcutRegistryStore: ObservableObject {
 #endif
 
     private func publish(bindings: [ShortcutBindingV1], skills: [ShortcutSkillProjectionV1], revision: Int) throws {
+        try requireActiveBoundary()
+        guard let ownerSubjectHash, let sessionEpoch else { throw ShortcutRegistryError.accountBoundaryUnavailable }
+        let highestGeneration = max(snapshot.generation, storage.latestKnownGeneration())
+        guard highestGeneration < ShortcutSnapshotValidator.maxMonotonicValue,
+              revision <= ShortcutSnapshotValidator.maxMonotonicValue else {
+            throw ShortcutRegistryError.invalidSnapshot(ShortcutValidationError.generation.localizedDescription)
+        }
         let activeIDs = bindings.filter(\.enabled).map(\.id)
         let layout = ShortcutLayoutV1(id: snapshot.layout.id, userID: userID, deviceID: deviceID, revision: revision, keyBindingIDs: activeIDs, paletteBindingIDs: activeIDs)
-        let next = ShortcutSnapshotV1(id: "ss_\(UUID().uuidString)", generation: snapshot.generation + 1, userSubjectHash: snapshot.userSubjectHash, deviceID: deviceID, layout: layout, bindings: bindings, skills: skills, connectionStates: snapshot.connectionStates, policyEpoch: snapshot.policyEpoch, createdAt: Date(), expiresAt: nil).withComputedDigest()
+        let next = ShortcutSnapshotV1(id: "ss_\(UUID().uuidString)", generation: highestGeneration + 1, userSubjectHash: ownerSubjectHash, deviceID: deviceID, layout: layout, bindings: bindings, skills: skills, connectionStates: snapshot.connectionStates, policyEpoch: sessionEpoch, createdAt: Date(), expiresAt: nil).withComputedDigest()
         do {
-            try ShortcutSnapshotValidator.validate(next, lastGeneration: snapshot.generation, expectedDeviceID: deviceID)
+            try ShortcutSnapshotValidator.validate(next, lastGeneration: storage.latestKnownGeneration(), expectedDeviceID: deviceID, expectedOwnerSubjectHash: ownerSubjectHash, expectedPolicyEpoch: sessionEpoch)
             try storage.publish(next)
         } catch let error as ShortcutStoreError {
             throw ShortcutRegistryError.invalidSnapshot(error.localizedDescription)
@@ -240,6 +315,13 @@ final class ShortcutRegistryStore: ObservableObject {
         }
         snapshot = next
         statusMessage = storage.isUsingSharedAppGroup ? "\(activeIDs.count)個のSkill Keyをキーボードと共有済み" : "\(activeIDs.count)個をhost内fallbackに保存。App Group同期は未証明"
+    }
+
+    private func requireActiveBoundary() throws {
+        guard let ownerSubjectHash, let sessionEpoch,
+              let active = storage.loadActiveBoundary(),
+              active.ownerSubjectHash == ownerSubjectHash,
+              active.sessionEpoch == sessionEpoch else { throw ShortcutRegistryError.accountBoundaryUnavailable }
     }
 
     private func skills(for bindings: [ShortcutBindingV1], adding skill: ShortcutSkillProjectionV1? = nil) -> [ShortcutSkillProjectionV1] {

@@ -15,6 +15,7 @@ final class AccountActivityStore: ObservableObject {
     @Published private(set) var trustCatalog: [CommunitySkillMetadata]
     @Published private(set) var teamPolicy: TeamPolicyState
     @Published private(set) var r4Gate: R4ConnectorGateState
+    @Published private(set) var shortcutBoundaryError: String?
     private var qualificationOwnerSubject: String?
     private var qualificationSessionExpiresAt: Date?
     private let reducer = AccountActivityReducer()
@@ -27,6 +28,7 @@ final class AccountActivityStore: ObservableObject {
     private let suggestionsReducer = ContextualSuggestionReducer()
     private let teamPolicyReducer = TeamPolicyReducer()
     private let r4GateReducer = R4ConnectorGateReducer()
+    private weak var shortcutRegistry: ShortcutRegistryStore?
 
     init() {
         state = fixture.initialState()
@@ -39,6 +41,7 @@ final class AccountActivityStore: ObservableObject {
         trustCatalog = [CommunitySkillCatalogFixture.metadata]
         teamPolicy = TeamPolicyState()
         r4Gate = R4ConnectorGateState()
+        shortcutBoundaryError = nil
         qualificationOwnerSubject = nil
         qualificationSessionExpiresAt = nil
     }
@@ -94,6 +97,42 @@ final class AccountActivityStore: ObservableObject {
             clearW8Boundary()
             qualificationOwnerSubject = nil
             qualificationSessionExpiresAt = nil
+        }
+        synchronizeShortcutBoundary()
+    }
+
+    func bindShortcutRegistry(_ registry: ShortcutRegistryStore) {
+        shortcutRegistry = registry
+        synchronizeShortcutBoundary()
+    }
+
+    func dismissShortcutBoundaryError() {
+        shortcutBoundaryError = nil
+    }
+
+    private func synchronizeShortcutBoundary() {
+        guard let shortcutRegistry else { return }
+        do {
+            if state.deletion != .idle {
+                try shortcutRegistry.deactivateOwner(reason: state.deletion == .completed ? .accountDeleted : .signedOut)
+            } else {
+                switch state.account {
+                case .signedIn(let label):
+                    try shortcutRegistry.activateOwner(subject: "fixture-user:\(label)")
+                case .anonymous, .signInRequired:
+                    try shortcutRegistry.deactivateOwner(reason: .signedOut)
+                case .sessionExpired, .revoked:
+                    try shortcutRegistry.deactivateOwner(reason: .signedOut)
+                }
+            }
+            shortcutBoundaryError = nil
+        } catch {
+            shortcutBoundaryError = error.localizedDescription
+            // Authentication must never remain visually signed in when its
+            // executable keyboard boundary could not be established. Collapse
+            // both authorities to the same fail-closed state.
+            state = reducer.reduce(state, .revokeSession)
+            try? shortcutRegistry.deactivateOwner(reason: .signedOut)
         }
     }
 

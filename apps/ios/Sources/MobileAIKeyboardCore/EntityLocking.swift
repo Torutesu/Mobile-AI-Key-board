@@ -51,4 +51,18 @@ public struct EntityLocking: Sendable {
     public func fingerprint(_ text: String) -> String {
         SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
     }
+
+    /// Binds an explicit selection to its bounded editor context. Hashing only
+    /// the selected bytes is insufficient when the same text appears twice in
+    /// one document and the caret moves between capture and Apply.
+    public func selectionFingerprint(selectedText: String, before: String, after: String, contextLimit: Int = 96) -> String {
+        let boundedLimit = max(0, min(contextLimit, 512))
+        let payload = [
+            "selection-v1",
+            String(before.suffix(boundedLimit)),
+            selectedText,
+            String(after.prefix(boundedLimit))
+        ].joined(separator: "\u{0}")
+        return fingerprint(payload)
+    }
 }

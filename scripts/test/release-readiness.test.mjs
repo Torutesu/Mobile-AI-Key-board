@@ -78,6 +78,8 @@ test('passed E2E evidence is bound to a real-device classification and one candi
       artifact_digest: artifactDigest,
       scenarios: matrix.required_scenarios,
       accessibility_tools: [target.platform === 'ios' ? 'voiceover' : 'talkback'],
+      field_classes: matrix.required_field_classes,
+      lifecycle_events: matrix.required_lifecycle_events,
     }],
   }));
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mobile-ai-keyboard-e2e-'));
@@ -86,6 +88,18 @@ test('passed E2E evidence is bound to a real-device classification and one candi
     fs.writeFileSync(file, `${JSON.stringify(matrix)}\n`);
     const valid = evaluate({ staticOnly: true, matrix: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.e2e.schema');
     assert.equal(valid.status, 'pass');
+
+    const missingCoverage = {
+      ...matrix,
+      targets: matrix.targets.map((target) => ({
+        ...target,
+        runs: target.runs.map(({ field_classes: _fieldClasses, lifecycle_events: _lifecycleEvents, ...run }) => run),
+      })),
+    };
+    fs.writeFileSync(file, `${JSON.stringify(missingCoverage)}\n`);
+    const rejectedCoverage = evaluate({ staticOnly: true, matrix: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.e2e.schema');
+    assert.equal(rejectedCoverage.status, 'fail');
+    assert.match(rejectedCoverage.detail, /field-class|lifecycle-event/);
 
     const tampered = { ...matrix, targets: matrix.targets.map((target) => ({ ...target, runs: target.runs.map((run) => ({ ...run, artifact_digest: `sha256:${'c'.repeat(64)}` })) })) };
     fs.writeFileSync(file, `${JSON.stringify(tampered)}\n`);
@@ -108,29 +122,45 @@ test('passed performance evidence binds every measurement to the candidate artif
   const artifactDigest = `sha256:${'e'.repeat(64)}`;
   performance.status = 'passed';
   performance.candidate = { source_commit: sourceCommit, artifact_digest: artifactDigest };
-  performance.measurements = performance.required_metrics.map((metric, index) => ({
+  performance.measurements = performance.required_metrics.flatMap((metric, metricIndex) => ['ios', 'android'].map((platform, platformIndex) => ({
     metric_id: metric,
-    platform: index % 2 === 0 ? 'ios' : 'android',
-    device: `device-${index}`,
+    platform,
+    device: `${platform}-device-${metricIndex}`,
     status: 'passed',
     value: 1,
     unit: 'ms',
+    sample_count: 100,
     evidence: {
       class: 'protected_external',
       environment: 'protected_device',
       source_commit: sourceCommit,
       artifact_digest: artifactDigest,
-      run_id: `performance-run-${index}`,
-      runner_id: 'protected-runner-1',
+      run_id: `performance-${platform}-${metricIndex}`,
+      runner_id: `protected-runner-${platformIndex + 1}`,
       attested: true,
     },
-  }));
+  })));
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mobile-ai-keyboard-performance-'));
   const file = path.join(tempDir, 'performance.json');
   try {
     fs.writeFileSync(file, `${JSON.stringify(performance)}\n`);
     const valid = evaluate({ staticOnly: true, performance: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.performance.schema');
     assert.equal(valid.status, 'pass');
+
+    const missingAndroid = { ...performance, measurements: performance.measurements.filter((measurement) => measurement.platform === 'ios') };
+    fs.writeFileSync(file, `${JSON.stringify(missingAndroid)}\n`);
+    const rejectedPlatform = evaluate({ staticOnly: true, performance: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.performance.schema');
+    assert.equal(rejectedPlatform.status, 'fail');
+    assert.match(rejectedPlatform.detail, /android:/);
+
+    const invalidMeasurement = {
+      ...performance,
+      measurements: performance.measurements.map((measurement, index) => index === 0 ? { ...measurement, value: null, sample_count: 0 } : measurement),
+    };
+    fs.writeFileSync(file, `${JSON.stringify(invalidMeasurement)}\n`);
+    const rejectedMeasurement = evaluate({ staticOnly: true, performance: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.performance.schema');
+    assert.equal(rejectedMeasurement.status, 'fail');
+    assert.match(rejectedMeasurement.detail, /finite value|sample_count/);
 
     const tampered = { ...performance, measurements: performance.measurements.map((measurement, index) => index === 0 ? { ...measurement, evidence: { ...measurement.evidence, artifact_digest: `sha256:${'f'.repeat(64)}` } } : measurement) };
     fs.writeFileSync(file, `${JSON.stringify(tampered)}\n`);
@@ -160,6 +190,60 @@ test('archive evidence distinguishes extension Info.plist from code-signing enti
     assert.match(result.detail, /Info\.plist/);
   } finally {
     fs.writeFileSync(file, original);
+  }
+});
+
+test('release evidence rejects invalid top-level statuses and incomplete archive privacy inspection', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mobile-ai-keyboard-status-'));
+  const write = (name, value) => {
+    const file = path.join(tempDir, name);
+    fs.writeFileSync(file, `${JSON.stringify(value)}\n`);
+    return file;
+  };
+  try {
+    const matrix = JSON.parse(fs.readFileSync(path.join(root, 'docs/release-e2e-matrix.json'), 'utf8'));
+    matrix.status = 'bogus';
+    const matrixResult = evaluate({ staticOnly: true, matrix: write('matrix.json', matrix) }).checks.find((check) => check.code === 'evidence.e2e.schema');
+    assert.equal(matrixResult.status, 'fail');
+    assert.match(matrixResult.detail, /invalid matrix status/);
+
+    const performance = JSON.parse(fs.readFileSync(path.join(root, 'docs/release-performance-evidence.json'), 'utf8'));
+    performance.status = 'bogus';
+    const performanceResult = evaluate({ staticOnly: true, performance: write('performance.json', performance) }).checks.find((check) => check.code === 'evidence.performance.schema');
+    assert.equal(performanceResult.status, 'fail');
+    assert.match(performanceResult.detail, /invalid performance status/);
+
+    const archive = JSON.parse(fs.readFileSync(path.join(root, 'docs/ios-archive-entitlement-privacy.json'), 'utf8'));
+    archive.status = 'bogus';
+    const archiveStatusResult = evaluate({ staticOnly: true, iosArchive: write('archive-status.json', archive) }).checks.find((check) => check.code === 'evidence.ios_archive.schema');
+    assert.equal(archiveStatusResult.status, 'fail');
+    assert.match(archiveStatusResult.detail, /invalid iOS archive status/);
+
+    const sourceCommit = 'f'.repeat(40);
+    const artifactDigest = `sha256:${'a'.repeat(64)}`;
+    archive.status = 'passed';
+    archive.candidate = { source_commit: sourceCommit, artifact_digest: artifactDigest };
+    archive.entitlements = { host: { app_group: 'group.example' }, extension: { app_group: 'group.example' } };
+    archive.extension_info = { requests_open_access: true };
+    archive.privacy_manifests = {
+      host: { embedded: true, declares_no_collected_data: false },
+      extension: { embedded: true, declares_no_collected_data: true },
+    };
+    archive.evidence = {
+      class: 'protected_external',
+      environment: 'protected_device',
+      source_commit: sourceCommit,
+      artifact_digest: artifactDigest,
+      run_id: 'archive-run-1',
+      runner_id: 'protected-runner-1',
+      attested: true,
+    };
+    archive.notes = 'protected archive inspection';
+    const archivePrivacyResult = evaluate({ staticOnly: true, iosArchive: write('archive-privacy.json', archive), candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.ios_archive.schema');
+    assert.equal(archivePrivacyResult.status, 'fail');
+    assert.match(archivePrivacyResult.detail, /privacy manifest.*embedded and no collected data/);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
 

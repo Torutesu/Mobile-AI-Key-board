@@ -44,4 +44,22 @@ final class EntityLockingTests: XCTestCase {
         XCTAssertTrue(values.contains("ID"))
         XCTAssertTrue(values.contains("123"))
     }
+
+    func testSelectionFingerprintBindsIdenticalTextToItsContext() {
+        let locking = EntityLocking()
+        let captured = locking.selectionFingerprint(selectedText: "foo", before: "first ", after: " end")
+        XCTAssertEqual(captured, locking.selectionFingerprint(selectedText: "foo", before: "first ", after: " end"))
+        XCTAssertNotEqual(captured, locking.selectionFingerprint(selectedText: "foo", before: "second ", after: " end"))
+        XCTAssertNotEqual(captured, locking.selectionFingerprint(selectedText: "foo", before: "first ", after: " changed"))
+    }
+
+    func testSelectionFingerprintBoundsRemoteContextButKeepsNearestCharacters() {
+        let locking = EntityLocking()
+        let remotePrefixA = String(repeating: "a", count: 40) + "nearest"
+        let remotePrefixB = String(repeating: "b", count: 40) + "nearest"
+        XCTAssertEqual(
+            locking.selectionFingerprint(selectedText: "x", before: remotePrefixA, after: "tail", contextLimit: 7),
+            locking.selectionFingerprint(selectedText: "x", before: remotePrefixB, after: "tail", contextLimit: 7)
+        )
+    }
 }

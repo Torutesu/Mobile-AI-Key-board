@@ -5,9 +5,8 @@ import MobileAIKeyboardCore
 struct OnboardingView: View {
     @State private var showKeyboardInstructions = false
     @State private var accessStatus: KeyboardAccessStatus?
-    @State private var accountBoundaryErrorMessage: String?
-    @StateObject private var accountStore = AccountActivityStore()
-    @StateObject private var shortcutRegistry = ShortcutRegistryStore()
+    @EnvironmentObject private var accountStore: AccountActivityStore
+    @EnvironmentObject private var shortcutRegistry: ShortcutRegistryStore
     private let accessStatusStore = AppGroupKeyboardAccessStatusStore()
 
     var body: some View {
@@ -77,33 +76,18 @@ struct OnboardingView: View {
             .sheet(isPresented: $showKeyboardInstructions) {
                 KeyboardInstructionsView()
             }
-            .onAppear { accessStatus = accessStatusStore.load() }
-            .onChange(of: accountStore.state.account) { account in
-                if !account.canUseAuthenticatedFeatures {
-                    clearPrivateSkillBoundary()
-                }
-            }
-            .onChange(of: accountStore.state.deletion) { deletion in
-                if deletion != .idle {
-                    clearPrivateSkillBoundary()
-                }
+            .onAppear {
+                accessStatus = accessStatusStore.load()
+                accountStore.bindShortcutRegistry(shortcutRegistry)
             }
             .alert("Private Skill Keysを削除できませんでした", isPresented: Binding(
-                get: { accountBoundaryErrorMessage != nil },
-                set: { if !$0 { accountBoundaryErrorMessage = nil } }
+                get: { accountStore.shortcutBoundaryError != nil },
+                set: { if !$0 { accountStore.dismissShortcutBoundaryError() } }
             )) {
                 Button("閉じる", role: .cancel) {}
             } message: {
-                Text("\(accountBoundaryErrorMessage ?? "不明なエラー")。キーボードのフルアクセスを無効にしてから再試行してください。")
+                Text("\(accountStore.shortcutBoundaryError ?? "不明なエラー")。キーボードのフルアクセスを無効にしてから再試行してください。")
             }
-        }
-    }
-
-    private func clearPrivateSkillBoundary() {
-        do {
-            try shortcutRegistry.clearPrivateSkillsForAccountBoundary()
-        } catch {
-            accountBoundaryErrorMessage = error.localizedDescription
         }
     }
 

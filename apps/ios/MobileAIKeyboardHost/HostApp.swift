@@ -13,6 +13,11 @@ struct MobileAIKeyboardHostApp: App {
                     .environmentObject(shortcutRegistry)
                     .environment(\.dynamicTypeSize, ProcessInfo.processInfo.arguments.contains("-accessibility-text-size-qa") ? .accessibility3 : .large)
                     .onAppear {
+                        do {
+                            try shortcutRegistry.activateOwner(subject: "ui-test-local-owner")
+                        } catch {
+                            fatalError("Skill Keys QA authority setup failed: \(error.localizedDescription)")
+                        }
                         if ProcessInfo.processInfo.arguments.contains("-ui-test-reset") {
                             shortcutRegistry.resetForUITest()
                         }
@@ -22,16 +27,21 @@ struct MobileAIKeyboardHostApp: App {
                     .environmentObject(accountStore)
                     .environmentObject(shortcutRegistry)
                     .onAppear {
+                        accountStore.bindShortcutRegistry(shortcutRegistry)
+                        accountStore.send(.signInFixture(label: "UI Test"))
                         if ProcessInfo.processInfo.arguments.contains("-ui-test-reset") {
                             shortcutRegistry.resetForUITest()
                         }
-                        accountStore.send(.signInFixture(label: "UI Test"))
                     }
             } else {
                 OnboardingView()
+                    .environmentObject(accountStore)
+                    .environmentObject(shortcutRegistry)
             }
 #else
             OnboardingView()
+                .environmentObject(accountStore)
+                .environmentObject(shortcutRegistry)
 #endif
         }
     }

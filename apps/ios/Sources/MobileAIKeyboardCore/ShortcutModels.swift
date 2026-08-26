@@ -23,6 +23,13 @@ public enum ShortcutActivationGesture: String, Codable, Equatable, Sendable {
     case longPress = "long_press"
 }
 
+/// Stable device identity for the current local-only beta projection. Both the
+/// host and extension must compare against the same trusted value; accepting a
+/// device ID declared by an untrusted snapshot would make validation tautological.
+public enum ShortcutDeviceIdentity {
+    public static let localFixtureID = "dev_local_device_0001"
+}
+
 public struct ShortcutTriggerKeyV1: Codable, Equatable, Sendable {
     public let layoutID: String
     public let keyCode: ShortcutKeyCode
@@ -401,8 +408,9 @@ public enum ShortcutValidationError: Error, Equatable, LocalizedError, Sendable 
 
 public enum ShortcutSnapshotValidator {
     public static let maxEncodedBytes = 256 * 1024
+    public static let maxMonotonicValue = 9_007_199_254_740_991
 
-    public static func validate(_ snapshot: ShortcutSnapshotV1, lastGeneration: Int? = nil, expectedDeviceID: String? = nil, now: Date = Date()) throws {
+    public static func validate(_ snapshot: ShortcutSnapshotV1, lastGeneration: Int? = nil, expectedDeviceID: String? = nil, expectedOwnerSubjectHash: String? = nil, expectedPolicyEpoch: Int? = nil, now: Date = Date()) throws {
         guard snapshot.schemaVersion == 1, snapshot.layout.schemaVersion == 1 else { throw ShortcutValidationError.schema }
         guard snapshot.bindings.count <= 32, snapshot.skills.count <= 32, snapshot.layout.keyBindingIDs.count <= 32 else { throw ShortcutValidationError.oversized }
         guard snapshot.unsignedData.count <= maxEncodedBytes else { throw ShortcutValidationError.oversized }
@@ -410,7 +418,13 @@ public enum ShortcutSnapshotValidator {
         if let lastGeneration, snapshot.generation <= lastGeneration { throw ShortcutValidationError.generation }
         if let expectedDeviceID, (snapshot.deviceID != expectedDeviceID || snapshot.layout.deviceID != expectedDeviceID) { throw ShortcutValidationError.ownerOrDevice }
         guard snapshot.layout.deviceID == snapshot.deviceID else { throw ShortcutValidationError.ownerOrDevice }
-        guard snapshot.generation >= 0, snapshot.layout.revision >= 0, snapshot.policyEpoch >= 0 else { throw ShortcutValidationError.generation }
+        guard snapshot.bindings.allSatisfy({ $0.userID == snapshot.layout.userID }) else { throw ShortcutValidationError.ownerOrDevice }
+        if let owner = snapshot.userSubjectHash { guard !owner.isEmpty else { throw ShortcutValidationError.ownerOrDevice } }
+        if let expectedOwnerSubjectHash, snapshot.userSubjectHash != expectedOwnerSubjectHash { throw ShortcutValidationError.ownerOrDevice }
+        if let expectedPolicyEpoch, snapshot.policyEpoch != expectedPolicyEpoch { throw ShortcutValidationError.ownerOrDevice }
+        guard (0...maxMonotonicValue).contains(snapshot.generation),
+              (0...maxMonotonicValue).contains(snapshot.layout.revision),
+              (0...maxMonotonicValue).contains(snapshot.policyEpoch) else { throw ShortcutValidationError.generation }
         guard snapshot.createdAt <= now.addingTimeInterval(60) else { throw ShortcutValidationError.chronology }
         if let expiresAt = snapshot.expiresAt {
             guard expiresAt >= snapshot.createdAt, expiresAt >= now else { throw ShortcutValidationError.chronology }
@@ -467,6 +481,40 @@ public enum ShortcutStoreError: Error, Equatable, LocalizedError, Sendable {
     }
 }
 
+public struct ShortcutAccountBoundaryV1: Codable, Equatable, Sendable {
+    public let schemaVersion: Int
+    public let ownerSubjectHash: String?
+    public let sessionEpoch: Int
+    public let active: Bool
+    public let expiresAt: Date
+    public let contentDigest: String
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version", ownerSubjectHash = "owner_subject_hash", sessionEpoch = "session_epoch", active, expiresAt = "expires_at", contentDigest = "content_digest"
+    }
+
+    public init(ownerSubjectHash: String?, sessionEpoch: Int, active: Bool, expiresAt: Date = Date().addingTimeInterval(3_600), contentDigest: String = "") {
+        schemaVersion = 1
+        self.ownerSubjectHash = ownerSubjectHash
+        self.sessionEpoch = sessionEpoch
+        self.active = active
+        self.expiresAt = expiresAt
+        self.contentDigest = contentDigest
+    }
+
+    public func withComputedDigest() -> ShortcutAccountBoundaryV1 {
+        ShortcutAccountBoundaryV1(ownerSubjectHash: ownerSubjectHash, sessionEpoch: sessionEpoch, active: active, expiresAt: expiresAt, contentDigest: ShortcutDigest.sha256(unsignedValue))
+    }
+
+    private var unsignedValue: String {
+        "shortcut-account-boundary-v1\u{0}\(ownerSubjectHash ?? "")\u{0}\(sessionEpoch)\u{0}\(active ? 1 : 0)\u{0}\(Int64((expiresAt.timeIntervalSince1970 * 1_000).rounded()))"
+    }
+
+    fileprivate var isValid: Bool {
+        schemaVersion == 1 && (1...ShortcutSnapshotValidator.maxMonotonicValue).contains(sessionEpoch) && (!active || !(ownerSubjectHash ?? "").isEmpty) && contentDigest == ShortcutDigest.sha256(unsignedValue)
+    }
+}
+
 /// A content-free, atomic App Group repository. When provisioning is absent,
 /// it falls back to an app-private directory; the fallback is intentionally
 /// not shared between the host and extension and therefore cannot leak data.
@@ -489,24 +537,79 @@ public final class AppGroupShortcutSnapshotStore: @unchecked Sendable {
 
     public func loadLastKnownGood() -> ShortcutSnapshotV1? {
         lock.lock(); defer { lock.unlock() }
+        return loadLastKnownGoodLocked()
+    }
+
+    private func loadLastKnownGoodLocked() -> ShortcutSnapshotV1? {
+        guard let floor = revocationFloorLocked(), let boundary = activeBoundaryLocked() else { return nil }
         for path in [currentURL, previousURL] {
             guard let data = try? Data(contentsOf: path), data.count <= ShortcutSnapshotValidator.maxEncodedBytes,
                   let snapshot = try? ShortcutJSON.decoder.decode(ShortcutSnapshotV1.self, from: data),
-                  (try? ShortcutSnapshotValidator.validate(snapshot)) != nil else { continue }
+                  snapshot.generation >= floor,
+                  (try? ShortcutSnapshotValidator.validate(snapshot, expectedOwnerSubjectHash: boundary.ownerSubjectHash, expectedPolicyEpoch: boundary.sessionEpoch)) != nil else { continue }
             return snapshot
         }
         return nil
     }
 
+    public func loadActiveBoundary() -> ShortcutAccountBoundaryV1? {
+        lock.lock(); defer { lock.unlock() }
+        return activeBoundaryLocked()
+    }
+
+    @discardableResult
+    public func activateBoundary(ownerSubjectHash: String, expiresAt: Date = Date().addingTimeInterval(3_600)) throws -> ShortcutAccountBoundaryV1 {
+        guard !ownerSubjectHash.isEmpty else { throw ShortcutStoreError.invalidSnapshot(.ownerOrDevice) }
+        guard expiresAt > Date(), expiresAt <= Date().addingTimeInterval(86_400) else { throw ShortcutStoreError.invalidSnapshot(.chronology) }
+        lock.lock(); defer { lock.unlock() }
+        let existing = boundaryLocked()
+        if let existing, existing.active, existing.ownerSubjectHash == ownerSubjectHash, existing.expiresAt > Date() {
+            let renewed = ShortcutAccountBoundaryV1(ownerSubjectHash: ownerSubjectHash, sessionEpoch: existing.sessionEpoch, active: true, expiresAt: max(existing.expiresAt, expiresAt)).withComputedDigest()
+            try writeBoundaryLocked(renewed)
+            return renewed
+        }
+        let highestEpoch = max(existing?.sessionEpoch ?? 0, highestStoredPolicyEpochLocked())
+        guard highestEpoch < ShortcutSnapshotValidator.maxMonotonicValue else { throw ShortcutStoreError.generationConflict }
+        let nextEpoch = highestEpoch + 1
+        let next = ShortcutAccountBoundaryV1(ownerSubjectHash: ownerSubjectHash, sessionEpoch: nextEpoch, active: true, expiresAt: expiresAt).withComputedDigest()
+        try writeBoundaryLocked(next)
+        return next
+    }
+
+    @discardableResult
+    public func deactivateBoundary() throws -> ShortcutAccountBoundaryV1 {
+        lock.lock(); defer { lock.unlock() }
+        let existing = boundaryLocked()
+        let highestEpoch = max(existing?.sessionEpoch ?? 0, highestStoredPolicyEpochLocked())
+        guard highestEpoch < ShortcutSnapshotValidator.maxMonotonicValue else { throw ShortcutStoreError.generationConflict }
+        let nextEpoch = highestEpoch + 1
+        let next = ShortcutAccountBoundaryV1(ownerSubjectHash: nil, sessionEpoch: nextEpoch, active: false, expiresAt: Date()).withComputedDigest()
+        try writeBoundaryLocked(next)
+        return next
+    }
+
     public func publish(_ snapshot: ShortcutSnapshotV1) throws {
         let candidate = snapshot.contentDigest.isEmpty ? snapshot.withComputedDigest() : snapshot
         guard candidate.contentDigest == ShortcutDigest.sha256(candidate.unsignedData) else { throw ShortcutStoreError.invalidSnapshot(.digestMismatch) }
-        if let current = loadLastKnownGood(), candidate.generation <= current.generation { throw ShortcutStoreError.generationConflict }
-        do { try ShortcutSnapshotValidator.validate(candidate, lastGeneration: loadLastKnownGood()?.generation) } catch let error as ShortcutValidationError { throw ShortcutStoreError.invalidSnapshot(error) }
         guard let data = try? ShortcutJSON.encoder.encode(candidate), data.count <= ShortcutSnapshotValidator.maxEncodedBytes else { throw ShortcutStoreError.invalidSnapshot(.oversized) }
         lock.lock(); defer { lock.unlock() }
+        guard let floor = revocationFloorLocked() else { throw ShortcutStoreError.unavailable }
+        let lastGeneration = max(floor, highestStoredGenerationLocked())
+        guard candidate.generation > lastGeneration else { throw ShortcutStoreError.generationConflict }
+        if candidate.tombstoneReason == nil {
+            guard let boundary = activeBoundaryLocked(),
+                  candidate.userSubjectHash == boundary.ownerSubjectHash,
+                  candidate.policyEpoch == boundary.sessionEpoch else { throw ShortcutStoreError.invalidSnapshot(.ownerOrDevice) }
+        }
+        do { try ShortcutSnapshotValidator.validate(candidate, lastGeneration: lastGeneration) } catch let error as ShortcutValidationError { throw ShortcutStoreError.invalidSnapshot(error) }
         let directory = directoryURL
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        // Persist the revocation floor first. If the process dies before the
+        // tombstone slot is installed, older executable snapshots already fail
+        // closed instead of becoming the last-known-good fallback.
+        if candidate.tombstoneReason != nil {
+            try writeRevocationFloorLocked(candidate.generation)
+        }
         let temporary = directory.appendingPathComponent("shortcut-snapshot.\(candidate.generation).tmp")
         try data.write(to: temporary, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         if fileManager.fileExists(atPath: currentURL.path) {
@@ -519,7 +622,9 @@ public final class AppGroupShortcutSnapshotStore: @unchecked Sendable {
 
     public func publishTombstone(reason: ShortcutTombstoneReason, deviceID: String, userID: String = "") throws {
         let old = loadLastKnownGood()
-        let nextGeneration = (old?.generation ?? 0) + 1
+        let highest = max(old?.generation ?? 0, highestKnownGeneration())
+        guard highest < ShortcutSnapshotValidator.maxMonotonicValue else { throw ShortcutStoreError.generationConflict }
+        let nextGeneration = highest + 1
         let tombstone = ShortcutSnapshotV1(id: "ss_\(UUID().uuidString)", generation: nextGeneration, userSubjectHash: nil, deviceID: deviceID, layout: ShortcutLayoutV1(id: old?.layout.id ?? "layout_\(UUID().uuidString)", userID: userID, deviceID: deviceID, revision: (old?.layout.revision ?? 0) + 1, keyBindingIDs: []), bindings: [], skills: [], policyEpoch: (old?.policyEpoch ?? 0) + 1, tombstoneReason: reason.rawValue).withComputedDigest()
         try publish(tombstone)
     }
@@ -534,6 +639,89 @@ public final class AppGroupShortcutSnapshotStore: @unchecked Sendable {
     }
     private var currentURL: URL { directoryURL.appendingPathComponent("shortcut-snapshot.current.json") }
     private var previousURL: URL { directoryURL.appendingPathComponent("shortcut-snapshot.previous.json") }
+    private var revocationFloorURL: URL { directoryURL.appendingPathComponent("shortcut-snapshot.revocation-floor.json") }
+    private var accountBoundaryURL: URL { directoryURL.appendingPathComponent("shortcut-account-boundary.current.json") }
+
+    private struct RevocationFloor: Codable {
+        let schemaVersion: Int
+        let generation: Int
+        let contentDigest: String
+
+        private enum CodingKeys: String, CodingKey {
+            case schemaVersion = "schema_version", generation, contentDigest = "content_digest"
+        }
+    }
+
+    /// Missing means a pre-seal installation and starts at zero. An existing
+    /// but malformed seal is an integrity failure and must not enable fallback.
+    private func revocationFloorLocked() -> Int? {
+        guard fileManager.fileExists(atPath: revocationFloorURL.path) else { return 0 }
+        guard let data = try? Data(contentsOf: revocationFloorURL), data.count <= 4_096,
+              let seal = try? ShortcutJSON.decoder.decode(RevocationFloor.self, from: data),
+              seal.schemaVersion == 1, (0...ShortcutSnapshotValidator.maxMonotonicValue).contains(seal.generation),
+              seal.contentDigest == ShortcutDigest.sha256("revocation-floor-v1:\(seal.generation)") else { return nil }
+        return seal.generation
+    }
+
+    private func highestKnownGeneration() -> Int {
+        lock.lock(); defer { lock.unlock() }
+        guard let floor = revocationFloorLocked() else { return Int.max - 1 }
+        return max(floor, highestStoredGenerationLocked())
+    }
+
+    public func latestKnownGeneration() -> Int {
+        highestKnownGeneration()
+    }
+
+    private func highestStoredGenerationLocked() -> Int {
+        [currentURL, previousURL].compactMap { path -> Int? in
+            guard let data = try? Data(contentsOf: path), data.count <= ShortcutSnapshotValidator.maxEncodedBytes,
+                  let snapshot = try? ShortcutJSON.decoder.decode(ShortcutSnapshotV1.self, from: data),
+                  (try? ShortcutSnapshotValidator.validate(snapshot)) != nil else { return nil }
+            return snapshot.generation
+        }.max() ?? 0
+    }
+
+    private func highestStoredPolicyEpochLocked() -> Int {
+        [currentURL, previousURL].compactMap { path -> Int? in
+            guard let data = try? Data(contentsOf: path), data.count <= ShortcutSnapshotValidator.maxEncodedBytes,
+                  let snapshot = try? ShortcutJSON.decoder.decode(ShortcutSnapshotV1.self, from: data),
+                  (try? ShortcutSnapshotValidator.validate(snapshot)) != nil else { return nil }
+            return snapshot.policyEpoch
+        }.max() ?? 0
+    }
+
+    private func boundaryLocked() -> ShortcutAccountBoundaryV1? {
+        guard fileManager.fileExists(atPath: accountBoundaryURL.path),
+              let data = try? Data(contentsOf: accountBoundaryURL), data.count <= 4_096,
+              let boundary = try? ShortcutJSON.decoder.decode(ShortcutAccountBoundaryV1.self, from: data),
+              boundary.isValid else { return nil }
+        return boundary
+    }
+
+    private func activeBoundaryLocked() -> ShortcutAccountBoundaryV1? {
+        guard let boundary = boundaryLocked(), boundary.active, boundary.ownerSubjectHash != nil, boundary.expiresAt > Date() else { return nil }
+        return boundary
+    }
+
+    private func writeBoundaryLocked(_ boundary: ShortcutAccountBoundaryV1) throws {
+        guard boundary.isValid, let data = try? ShortcutJSON.encoder.encode(boundary) else { throw ShortcutStoreError.unavailable }
+        try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        let temporary = directoryURL.appendingPathComponent("shortcut-account-boundary.\(boundary.sessionEpoch).tmp")
+        try data.write(to: temporary, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        try? fileManager.removeItem(at: accountBoundaryURL)
+        try fileManager.moveItem(at: temporary, to: accountBoundaryURL)
+    }
+
+    private func writeRevocationFloorLocked(_ generation: Int) throws {
+        guard (0...ShortcutSnapshotValidator.maxMonotonicValue).contains(generation) else { throw ShortcutStoreError.generationConflict }
+        let seal = RevocationFloor(schemaVersion: 1, generation: generation, contentDigest: ShortcutDigest.sha256("revocation-floor-v1:\(generation)"))
+        guard let data = try? ShortcutJSON.encoder.encode(seal) else { throw ShortcutStoreError.unavailable }
+        let temporary = directoryURL.appendingPathComponent("shortcut-snapshot.revocation-floor.\(generation).tmp")
+        try data.write(to: temporary, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        try? fileManager.removeItem(at: revocationFloorURL)
+        try fileManager.moveItem(at: temporary, to: revocationFloorURL)
+    }
 }
 
 public struct ShortcutActivationV1: Equatable, Sendable {
