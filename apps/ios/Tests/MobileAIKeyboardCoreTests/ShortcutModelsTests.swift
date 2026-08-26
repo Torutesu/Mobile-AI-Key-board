@@ -53,6 +53,46 @@ final class ShortcutModelsTests: XCTestCase {
         XCTAssertThrowsError(try store.publish(newer))
     }
 
+    func testAssignedPrivateProjectionRestoresFromSnapshotAfterRestart() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("shortcut-private-restart-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = AppGroupShortcutSnapshotStore(appGroupIdentifier: "group.invalid.private", fallbackDirectoryURL: root)
+        let digest = ShortcutDigest.sha256("private-demo:v1")
+        let skill = ShortcutSkillProjectionV1(
+            id: "skill_private_demo",
+            versionID: "sv_private_demo_1",
+            skillVersion: 1,
+            skillDigest: digest,
+            name: "Private Demo",
+            description: "metadata only",
+            inputSources: [.selection],
+            toolSummaries: [ShortcutToolSummary(operation: "local.text.normalize", sideEffect: "none")],
+            executionRoute: .keyboardLocal
+        )
+        let binding = ShortcutBindingV1(
+            id: "bind_private_demo",
+            userID: "user",
+            deviceID: "device",
+            skillID: skill.id,
+            versionID: skill.versionID,
+            skillVersion: skill.skillVersion,
+            skillDigest: skill.skillDigest,
+            keyCode: .keyH,
+            presentation: ShortcutPresentation(iconValue: "wand.and.stars", shortLabel: skill.name, accessibilityLabel: "H Private Demo", accessibilityHint: "長押しで実行"),
+            executionRoute: .keyboardLocal
+        )
+        let layout = ShortcutLayoutV1(id: "layout_private_demo", userID: "user", deviceID: "device", revision: 1, keyBindingIDs: [binding.id], paletteBindingIDs: [binding.id])
+        let snapshot = ShortcutSnapshotV1(id: "ss_private_demo", generation: 1, deviceID: "device", layout: layout, bindings: [binding], skills: [skill]).withComputedDigest()
+
+        try store.publish(snapshot)
+        let restarted = try XCTUnwrap(store.loadLastKnownGood())
+        XCTAssertEqual(restarted.bindings.first?.skillID, "skill_private_demo")
+        XCTAssertEqual(restarted.skills.first?.versionID, "sv_private_demo_1")
+        XCTAssertEqual(restarted.skills.first?.skillDigest, digest)
+        XCTAssertEqual(restarted.skills.first?.inputSources, [.selection])
+        XCTAssertEqual(restarted.skills.first?.toolSummaries.first?.operation, "local.text.normalize")
+    }
+
     func testValidatorRejectsDuplicateSkillProjectionAndExpiredSnapshot() throws {
         let base = makeSnapshot()
         let duplicate = ShortcutSnapshotV1(id: base.id, generation: 1, deviceID: "device", layout: base.layout, bindings: base.bindings, skills: [base.skills[0], base.skills[0]]).withComputedDigest()

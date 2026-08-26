@@ -9,9 +9,9 @@ final class SkillBuilderTests: XCTestCase {
         reducer.reduce(SkillBuilderFixtureClient().initialState(), .setAccountContext(ownerSubject: "fixture-user", accountEpoch: 7))
     }
 
-    private func draft(name: String = "Focus Helper", outcome: String = "予定を整理して次の一歩を表示") -> SkillBuilderDraft {
+    private func draft(name: String = "Focus Helper", outcome: String = "予定を整理して次の一歩を表示", bindingIdentifier: String = "fixture.focus.helper") -> SkillBuilderDraft {
         let manifest = SkillTypedManifest.defaultFixture
-        return SkillBuilderDraft(name: name, icon: "wand.and.stars", desiredOutcome: outcome, plainDescription: "入力した内容を端末内fixtureで整理します", advancedSchema: manifest.canonicalSchema, bindingIdentifier: "fixture.focus.helper", manifest: manifest)
+        return SkillBuilderDraft(name: name, icon: "wand.and.stars", desiredOutcome: outcome, plainDescription: "入力した内容を端末内fixtureで整理します", advancedSchema: manifest.canonicalSchema, bindingIdentifier: bindingIdentifier, manifest: manifest)
     }
 
     private func testedState(_ source: SkillBuilderState? = nil, name: String = "Focus Helper") -> SkillBuilderState {
@@ -154,6 +154,34 @@ final class SkillBuilderTests: XCTestCase {
         state = reducer.reduce(state, .installBinding(versionID: second.id, digest: second.digest, bindingIdentifier: second.draft.bindingIdentifier, now: now.addingTimeInterval(3)))
         XCTAssertEqual(state.installedBinding?.versionID, second.id)
         XCTAssertEqual(state.installedBinding?.digest, second.digest)
+    }
+
+    func testPrivateSkillKeepsStableIdentityAcrossImmutableVersions() {
+        var state = testedState()
+        state = reducer.reduce(state, .deployPrivateV1(now: now))
+        state = reducer.reduce(state, .confirmDeploy(digest: state.pendingDeploymentDigest!, now: now))
+        let first = state.versions[0]
+
+        state = reducer.reduce(state, .begin)
+        state = reducer.reduce(state, .editDraft(draft(name: first.draft.name, outcome: "別の結果")))
+        state = reducer.reduce(state, .validate)
+        state = reducer.reduce(state, .runDryRun(now: now.addingTimeInterval(1)))
+        state = reducer.reduce(state, .deployPrivateV1(now: now.addingTimeInterval(2)))
+        state = reducer.reduce(state, .confirmDeploy(digest: state.pendingDeploymentDigest!, now: now.addingTimeInterval(2)))
+        let second = state.versions[1]
+
+        XCTAssertEqual(first.skillID, second.skillID)
+        XCTAssertNotEqual(first.id, second.id)
+        XCTAssertNotEqual(first.digest, second.digest)
+    }
+
+    func testPrivateSkillIdentitySeparatesDifferentBindingSlugs() {
+        let first = PrivateSkillVersion(id: "sv_one", versionNumber: 1, digest: "sha256:" + String(repeating: "a", count: 64), createdAt: now, draft: draft(name: "One", bindingIdentifier: "fixture.one"))
+        let second = PrivateSkillVersion(id: "sv_two", versionNumber: 1, digest: "sha256:" + String(repeating: "b", count: 64), createdAt: now, draft: draft(name: "Two", bindingIdentifier: "fixture.two"))
+        let punctuationCollision = PrivateSkillVersion(id: "sv_three", versionNumber: 1, digest: "sha256:" + String(repeating: "c", count: 64), createdAt: now, draft: draft(name: "Three", bindingIdentifier: "fixture_one"))
+        XCTAssertNotEqual(first.skillID, second.skillID)
+        XCTAssertNotEqual(first.skillID, punctuationCollision.skillID)
+        XCTAssertNotEqual(first.id, second.id)
     }
 
     func testEditingDeployReviewInvalidatesOldDigestBeforeConfirm() {

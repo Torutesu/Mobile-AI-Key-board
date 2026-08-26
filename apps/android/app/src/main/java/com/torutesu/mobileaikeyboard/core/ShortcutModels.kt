@@ -40,7 +40,7 @@ data class TriggerKeyBinding(
     val order: Int = 0,
 )
 
-/** The only Skills the Android IME can execute without a host/provider handoff. */
+/** Compatibility facade for the closed local executor registry. */
 object ExecutableLocalSkills {
     const val POLITE_REWRITE_ID = "local.polite-rewrite"
     const val PUNCTUATION_POLISH_ID = "local.punctuation-polish"
@@ -49,10 +49,16 @@ object ExecutableLocalSkills {
     val ids: Set<String> = setOf(POLITE_REWRITE_ID, PUNCTUATION_POLISH_ID)
 
     fun canExecute(skillId: String, skillVersion: Int): Boolean =
-        skillId in ids && skillVersion == VERSION
+        LocalSkillRegistry.all().any { it.skillId == skillId && it.skillVersion == skillVersion }
 
     fun isExecutable(binding: TriggerKeyBinding): Boolean =
-        canExecute(binding.skillId, binding.skillVersion)
+        LocalSkillRegistry.resolve(binding) != null
+
+    fun execute(binding: TriggerKeyBinding, input: String): String? =
+        LocalSkillRegistry.execute(binding, input)
+
+    fun executeResult(binding: TriggerKeyBinding, input: String): RewriteResult? =
+        LocalSkillRegistry.executeResult(binding, input)
 }
 
 data class ShortcutSnapshot(
@@ -153,12 +159,9 @@ object ShortcutFixtureRunner {
     fun run(binding: TriggerKeyBinding): ShortcutFixtureTestResult {
         if (!ExecutableLocalSkills.isExecutable(binding)) return ShortcutFixtureTestResult(false, "このSkillはIMEで実行できません")
         val input = "fixture input"
-        val result = when (binding.skillId) {
-            ExecutableLocalSkills.POLITE_REWRITE_ID -> LocalPoliteRewriteService().rewrite(input)
-            ExecutableLocalSkills.PUNCTUATION_POLISH_ID -> LocalPoliteRewriteService().polishPunctuation(input)
-            else -> return ShortcutFixtureTestResult(false, "このSkillは端末内fixtureにありません")
-        }
-        return ShortcutFixtureTestResult(true, "端末内fixture testに成功（外部送信なし）", result.rewritten)
+        val output = ExecutableLocalSkills.execute(binding, input)
+            ?: return ShortcutFixtureTestResult(false, "このSkillは端末内fixtureにありません")
+        return ShortcutFixtureTestResult(true, "端末内fixture testに成功（外部送信なし）", output)
     }
 }
 
@@ -268,6 +271,12 @@ class ShortcutGestureStateMachine(
 class ShortcutSnapshotStore(context: android.content.Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES, android.content.Context.MODE_PRIVATE)
 
+    init {
+        // The IME and host may be recreated independently. Hydrate the closed
+        // executor registry before validating any persisted shortcut snapshot.
+        LocalSkillRegistry.installAll(InstalledSkillStore(context.applicationContext).read())
+    }
+
     @Synchronized fun read(): ShortcutSnapshot {
         val active = preferences.getString(ACTIVE, null)?.let(ShortcutSnapshotCodec::decode)
         val previous = preferences.getString(LAST_GOOD, null)?.let(ShortcutSnapshotCodec::decode)
@@ -285,6 +294,9 @@ class ShortcutSnapshotStore(context: android.content.Context) {
         editor.putString(ACTIVE, encoded)
         return editor.commit()
     }
+
+    /** Clears host/IME bindings during account deletion or session revocation. */
+    @Synchronized fun clear(): Boolean = preferences.edit().remove(ACTIVE).remove(LAST_GOOD).commit()
 
     companion object {
         private const val PREFERENCES = "mobile_ai_keyboard_shortcuts_v1"

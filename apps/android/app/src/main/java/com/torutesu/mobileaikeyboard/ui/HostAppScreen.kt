@@ -40,6 +40,9 @@ import com.torutesu.mobileaikeyboard.core.RetentionPolicy
 import com.torutesu.mobileaikeyboard.core.RunStatus
 import com.torutesu.mobileaikeyboard.core.SessionStatus
 import com.torutesu.mobileaikeyboard.core.ShortcutSnapshot
+import com.torutesu.mobileaikeyboard.core.LocalSkillDescriptor
+import com.torutesu.mobileaikeyboard.core.LocalSkillRegistry
+import com.torutesu.mobileaikeyboard.core.PrivateSkillVersion
 
 @Composable
 fun HostAppDashboard(
@@ -47,13 +50,15 @@ fun HostAppDashboard(
     dispatch: (HostEvent) -> Unit,
     shortcutSnapshot: ShortcutSnapshot = ShortcutSnapshot.empty(),
     onShortcutPublish: (ShortcutSnapshot) -> Boolean = { false },
+    installedSkills: List<LocalSkillDescriptor> = LocalSkillRegistry.all(),
+    onAddToMyKeyboard: (PrivateSkillVersion) -> Boolean = { false },
 ) {
     Text("アカウント・デバイス・Activity", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
     Text("接続先に依存しないローカル機能のみを表示しています。外部サービス連携はベータでは利用できません。")
     AccountCard(state.account, dispatch)
     DevicesCard(state, dispatch)
-    SkillBuilderDashboard(state, dispatch)
-    ShortcutKeysDashboard(shortcutSnapshot, onShortcutPublish)
+    SkillBuilderDashboard(state, dispatch, onAddToMyKeyboard)
+    ShortcutKeysDashboard(shortcutSnapshot, onShortcutPublish, installedSkills)
     KeyboardSettingsDashboard(state, dispatch)
     SuggestionTrustDashboard(state, dispatch)
     ActivityCard(state, dispatch)
@@ -84,6 +89,7 @@ private fun AccountCard(account: AccountState, dispatch: (HostEvent) -> Unit) {
                 } else {
                     TextButton(onClick = { dispatch(HostEvent.SimulateSessionExpiry) }) { Text("期限切れを表示") }
                     TextButton(onClick = { dispatch(HostEvent.SimulateSessionRevocation) }) { Text("revoke状態を表示") }
+                    TextButton(onClick = { dispatch(HostEvent.SignOut) }) { Text("サインアウト") }
                 }
             }
         }

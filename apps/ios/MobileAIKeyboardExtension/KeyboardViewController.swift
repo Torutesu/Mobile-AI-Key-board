@@ -7,7 +7,6 @@ import MobileAIKeyboardCore
 final class KeyboardViewController: UIInputViewController {
     private var machine = KeyboardStateMachine()
     private let policy = SensitiveFieldPolicy()
-    private let engine = LocalRewriteEngine()
     private let redactor = LocalRedactor()
     private let locking = EntityLocking()
     private let statusLabel = UILabel()
@@ -585,10 +584,10 @@ final class KeyboardViewController: UIInputViewController {
         guard shortcutActivationStillCurrent() else { presentRecoverableError(.staleField); return }
         transition(.beginPlanning)
         let local: RewriteResult?
-        switch pendingShortcutSkill?.id {
-        case "skill_punctuation_local_v1": local = engine.punctuationRewrite(draft.text)
-        case "skill_polite_local_v1", nil: local = engine.politeRewrite(draft.text)
-        default: local = nil
+        if let skill = pendingShortcutSkill {
+            local = LocalSkillExecutor.execute(skill, input: draft.text)
+        } else {
+            local = LocalRewriteEngine().politeRewrite(draft.text)
         }
         guard let local else { transition(.fail(.emptyInput)); return }
         let result = RewriteResult(original: local.original, rewritten: local.rewritten, preservedEntities: local.preservedEntities, fieldFingerprint: draft.fieldFingerprint, documentIdentifier: draft.documentIdentifier)
@@ -618,10 +617,10 @@ final class KeyboardViewController: UIInputViewController {
     @objc private func regenerateResult() {
         guard shortcutActivationStillCurrent(), let draft = captureDraft else { presentRecoverableError(.staleField); return }
         let regenerated: RewriteResult?
-        switch pendingShortcutSkill?.id {
-        case "skill_punctuation_local_v1": regenerated = engine.punctuationRewrite(draft.text)
-        case "skill_polite_local_v1", nil: regenerated = engine.politeRewrite(draft.text)
-        default: regenerated = nil
+        if let skill = pendingShortcutSkill {
+            regenerated = LocalSkillExecutor.execute(skill, input: draft.text)
+        } else {
+            regenerated = LocalRewriteEngine().politeRewrite(draft.text)
         }
         guard let regenerated else { return }
         let result = RewriteResult(original: regenerated.original, rewritten: regenerated.rewritten, preservedEntities: regenerated.preservedEntities, fieldFingerprint: draft.fieldFingerprint, documentIdentifier: draft.documentIdentifier)

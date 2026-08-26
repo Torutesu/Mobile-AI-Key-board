@@ -1,0 +1,68 @@
+{
+  "schema_version": "mobile-ai-keyboard.shortcut-vertical-slice-contract.v1",
+  "evidence_class": "static_source_contract",
+  "source_gate": "scripts/check-shortcut-vertical-slice.mjs",
+  "test_runner": "scripts/test/shortcut-vertical-slice.test.mjs",
+  "status": "source_contract_passed",
+  "qualification_status": "not_proven",
+  "journey": [
+    "builder_deploy",
+    "explicit_add_to_my_keyboard",
+    "local_skill_install",
+    "az_assign",
+    "native_snapshot_store",
+    "closed_ime_execution",
+    "restart_reload"
+  ],
+  "invariants": [
+    {
+      "id": "immutable_skill_identity",
+      "rule": "Every native handoff preserves Skill id, version/version id, and sha256 digest."
+    },
+    {
+      "id": "exact_deploy_confirmation",
+      "rule": "Deploy confirmation must match the pending immutable version digest."
+    },
+    {
+      "id": "explicit_add_is_separate",
+      "rule": "Deploy or binding pin does not install a keyboard candidate; Add To My Keyboard is explicit."
+    },
+    {
+      "id": "assignment_publishes_validated_snapshot",
+      "rule": "Only A-Z assignment mutations publish a validated, generation-bound local snapshot."
+    },
+    {
+      "id": "closed_executor",
+      "rule": "The IME resolves only an allowlisted local executor after exact binding identity checks."
+    },
+    {
+      "id": "restart_persistence",
+      "rule": "Host and IME/extension reload a validated last-known-good or local snapshot after restart."
+    }
+  ],
+  "platforms": {
+    "ios": {
+      "source_status": "passed",
+      "consumer_seams": [
+        "SkillBuilderView Add To My Keyboard -> ShortcutRegistryStore.addPrivateSkill",
+        "ShortcutRegistryStore -> SkillKeysView A-Z assign/reassign",
+        "AppGroupShortcutSnapshotStore -> KeyboardViewController closed local route"
+      ]
+    },
+    "android": {
+      "source_status": "passed",
+      "consumer_seams": [
+        "SkillBuilderScreen Add To My Keyboard -> MainActivity InstalledSkillStore",
+        "ShortcutKeysScreen A-Z add/reassign -> ShortcutSnapshotStore",
+        "InstalledSkillStore/LocalSkillRegistry -> KeyboardImeService closed local route"
+      ]
+    }
+  },
+  "claim_boundary": "This evidence proves source wiring only. It does not prove device keyboard registration, process death/restart, physical long-press timing, third-party editor interoperability, network behavior, or store/release qualification.",
+  "required_external_evidence": [
+    "Protected iOS physical-device install, keyboard switching, Add/assign/execute, and restart run",
+    "Protected Android physical-device install, IME enablement, Add/assign/execute, and restart run",
+    "Representative third-party editor matrix with accessibility and secure-field cases",
+    "Candidate-bound signed archive/APK and performance/lifecycle evidence"
+  ]
+}

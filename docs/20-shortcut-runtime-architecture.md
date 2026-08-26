@@ -250,6 +250,25 @@ consumer is absent and `"native_unit_consumers"` only when both are wired.
 runtime parity: simulator/JVM tests, physical-device behavior, and release
 qualification remain separate evidence gates.
 
+### 6.0.1 Builder-to-IME vertical-slice source gate
+
+The deterministic source contract in
+[`scripts/check-shortcut-vertical-slice.mjs`](../scripts/check-shortcut-vertical-slice.mjs)
+traces the complete authority handoff on both platforms:
+
+`Builder deploy → explicit Add To My Keyboard → local install/catalog → A-Z assignment → validated snapshot → closed IME executor → restart reload`.
+
+The contract requires immutable Skill id/version/digest binding, exact digest
+confirmation, separation of deploy from assignment, a closed executor, and a
+persisted last-known-good/local snapshot. It is wired into the existing
+`scripts/test/*.test.mjs` runner through
+[`scripts/test/shortcut-vertical-slice.test.mjs`](../scripts/test/shortcut-vertical-slice.test.mjs).
+The source report can pass when these seams are present, while its
+`qualification_status` remains `not_proven`: source inspection cannot prove
+keyboard registration, process death/restart, physical key timing, or
+third-party editor interoperability. `--strict` fails closed if any required
+source seam or disclosure is missing.
+
 ### 6.1 Host configuration
 
 `idle -> editing -> validating -> publishing -> published`

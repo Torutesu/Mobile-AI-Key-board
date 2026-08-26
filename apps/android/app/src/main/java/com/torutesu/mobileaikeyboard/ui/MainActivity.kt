@@ -41,6 +41,8 @@ import com.torutesu.mobileaikeyboard.core.HostEvent
 import com.torutesu.mobileaikeyboard.core.HostFixtureClient
 import com.torutesu.mobileaikeyboard.core.ImeOnboardingStatus
 import com.torutesu.mobileaikeyboard.core.KeyboardSettingsStore
+import com.torutesu.mobileaikeyboard.core.InstalledSkillStore
+import com.torutesu.mobileaikeyboard.core.LocalSkillRegistry
 import com.torutesu.mobileaikeyboard.core.ShortcutSnapshotStore
 
 class MainActivity : ComponentActivity() {
@@ -69,10 +71,12 @@ class MainActivity : ComponentActivity() {
 private fun MobileAiKeyboardApp(imeEnabled: Boolean) {
     val fixtureClient = remember { HostFixtureClient }
     val context = LocalContext.current
+    val installedSkillStore = remember(context) { InstalledSkillStore(context.applicationContext) }
     val shortcutStore = remember(context) { ShortcutSnapshotStore(context.applicationContext) }
     val settingsStore = remember(context) { KeyboardSettingsStore(context.applicationContext) }
     var hostState by remember { mutableStateOf(fixtureClient.initialState().copy(keyboardSettings = settingsStore.readState())) }
     var shortcutSnapshot by remember { mutableStateOf(shortcutStore.read()) }
+    var installedSkills by remember(context) { mutableStateOf(LocalSkillRegistry.all()) }
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
             Column(
@@ -85,14 +89,30 @@ private fun MobileAiKeyboardApp(imeEnabled: Boolean) {
                 HostAppDashboard(
                     state = hostState,
                     dispatch = { event ->
-                        hostState = fixtureClient.dispatch(hostState, event)
+                        val previous = hostState
+                        hostState = fixtureClient.dispatch(previous, event)
                         if (event is HostEvent.KeyboardSettingsAction) settingsStore.write(hostState.keyboardSettings)
+                        val currentDeviceRevoked = event is HostEvent.ConfirmDeviceRevoke && previous.devices.firstOrNull { it.id == previous.pendingRevokeDeviceId }?.isCurrent == true
+                        val accountBoundary = event is HostEvent.SignOut || event is HostEvent.SimulateSessionExpiry || event is HostEvent.SimulateSessionRevocation || currentDeviceRevoked
+                        val deletionCompleted = event is HostEvent.AdvanceDeletion && previous.deletion.status == com.torutesu.mobileaikeyboard.core.DeletionStatus.IN_PROGRESS
+                        if (accountBoundary || deletionCompleted) {
+                            installedSkillStore.clear()
+                            shortcutStore.clear()
+                            installedSkills = LocalSkillRegistry.all()
+                            shortcutSnapshot = shortcutStore.read()
+                        }
                     },
                     shortcutSnapshot = shortcutSnapshot,
+                    installedSkills = installedSkills,
                     onShortcutPublish = { candidate ->
                         val published = shortcutStore.publish(candidate)
                         if (published) shortcutSnapshot = shortcutStore.read()
                         published
+                    },
+                    onAddToMyKeyboard = { version ->
+                        val installed = installedSkillStore.install(version)
+                        if (installed) installedSkills = LocalSkillRegistry.all()
+                        installed
                     },
                 )
                 SandboxCard()

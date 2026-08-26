@@ -182,4 +182,38 @@ class SkillBuilderTest {
         val whitespace = HostFixtureClient.dispatch(state, HostEvent.SkillBuilderAction(SkillBuilderEvent.CreateShare(" recipient@example.invalid", "2026-08-27T09:00:00Z")))
         assertTrue(whitespace.skillBuilder.shares.isEmpty())
     }
+
+    @Test
+    fun deployDoesNotInstallUntilExplicitAddToMyKeyboardProjection() {
+        val verticalDraft = draft.copy(skillId = "private.vertical-slice.test", bindingId = "keyboard-private")
+        var state = active()
+        state = HostFixtureClient.dispatch(state, HostEvent.SkillBuilderAction(SkillBuilderEvent.Open))
+        state = HostFixtureClient.dispatch(state, HostEvent.SkillBuilderAction(SkillBuilderEvent.UpdateDraft(verticalDraft)))
+        state = HostFixtureClient.dispatch(state, HostEvent.SkillBuilderAction(SkillBuilderEvent.Validate))
+        state = HostFixtureClient.dispatch(state, HostEvent.SkillBuilderAction(SkillBuilderEvent.RunDryTest))
+        state = HostFixtureClient.dispatch(state, HostEvent.SkillBuilderAction(SkillBuilderEvent.OpenDeployReview))
+        val version = state.skillBuilder.version!!
+        state = HostFixtureClient.dispatch(state, HostEvent.SkillBuilderAction(SkillBuilderEvent.ConfirmDeploy(version.digest)))
+        assertEquals(SkillBuilderPhase.DEPLOYED, state.skillBuilder.phase)
+        assertTrue(LocalSkillRegistry.all().none { it.skillId == version.skillId && it.skillVersion == version.version })
+
+        val descriptor = LocalSkillRegistry.fromPrivateVersion(version)!!
+        assertTrue(LocalSkillRegistry.install(descriptor))
+        val binding = TriggerKeyBinding("binding-vertical", version.skillId, version.version, version.digest, keyCode = "KeyZ", skillName = version.skillName)
+        val assigned = ShortcutRegistry.add(ShortcutSnapshot.empty(), binding)
+        assertTrue(assigned is ShortcutEditResult.Success)
+        assertTrue(ExecutableLocalSkills.execute(binding, "fixture input").orEmpty().isNotBlank())
+    }
+
+    @Test
+    fun generatedPrivateSkillIdentitySupportsMultipleDistinctKeyboardSkills() {
+        val first = PrivateSkillIdentity.fromName("Reply Assistant")
+        val same = PrivateSkillIdentity.fromName(" reply assistant ")
+        val second = PrivateSkillIdentity.fromName("Meeting Notes")
+        assertEquals(first, same)
+        assertNotEquals(first.skillId, second.skillId)
+        assertNotEquals(first.bindingId, second.bindingId)
+        assertTrue(first.skillId.startsWith("private.keyboard."))
+        assertTrue(first.bindingId.startsWith("keyboard-private-"))
+    }
 }

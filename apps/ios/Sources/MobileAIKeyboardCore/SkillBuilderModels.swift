@@ -270,17 +270,30 @@ public struct PrivateSkillShare: Equatable, Sendable {
 
 public struct PrivateSkillVersion: Identifiable, Equatable, Sendable {
     public let id: String
+    /// Stable Skill identity shared by every immutable version of this private Skill.
+    public let skillID: String
     public let versionNumber: Int
     public let digest: String
     public let createdAt: Date
     public let draft: SkillBuilderDraft
 
-    public init(id: String, versionNumber: Int, digest: String, createdAt: Date, draft: SkillBuilderDraft) {
+    public init(id: String, skillID: String? = nil, versionNumber: Int, digest: String, createdAt: Date, draft: SkillBuilderDraft) {
         self.id = id
+        self.skillID = skillID ?? Self.skillID(for: draft.bindingIdentifier)
         self.versionNumber = versionNumber
         self.digest = digest
         self.createdAt = createdAt
         self.draft = draft
+    }
+
+    public static func skillID(for binding: String) -> String {
+        // Do not normalize punctuation into a lossy slug: distinct binding
+        // identifiers such as `private.a.b` and `private.a_b` must never become
+        // the same Skill identity. A truncated SHA-256 remains opaque, stable,
+        // content-free and comfortably inside snapshot ID limits.
+        let normalized = binding.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let digest = ShortcutDigest.sha256(normalized).dropFirst("sha256:".count)
+        return "skill_private_\(digest.prefix(32))"
     }
 }
 
@@ -436,7 +449,8 @@ public struct SkillBuilderReducer: Sendable {
             next.status = .deployReview
         case .confirmDeploy(let digest, let now):
             guard hasCapability(next), next.status == .deployReview, let draft = next.draft, let pendingDigest = next.pendingDeploymentDigest, pendingDigest == digest, let versionNumber = next.pendingDeploymentVersionNumber, let expiresAt = next.pendingDeploymentExpiresAt, now <= expiresAt else { return next }
-            let version = PrivateSkillVersion(id: "skill-\(digest.dropFirst(7).prefix(16))", versionNumber: versionNumber, digest: digest, createdAt: now, draft: draft)
+            let stableSkillID = next.versions.first(where: { $0.draft.bindingIdentifier == draft.bindingIdentifier })?.skillID ?? PrivateSkillVersion.skillID(for: draft.bindingIdentifier)
+            let version = PrivateSkillVersion(id: "sv_\(digest.dropFirst(7).prefix(24))", skillID: stableSkillID, versionNumber: versionNumber, digest: digest, createdAt: now, draft: draft)
             next.versions.append(version)
             next.pendingDeploymentDigest = nil
             next.pendingDeploymentVersionNumber = nil

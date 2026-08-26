@@ -69,4 +69,14 @@ class HostModelsTest {
         assertTrue(state.runs.isEmpty())
         assertTrue(state.deletion.resultMessage?.contains("未証明") == true)
     }
+
+    @Test
+    fun signOutClearsPrivateBuilderStateAtTheHostBoundary() {
+        var state = HostFixtureClient.dispatch(HostFixtureClient.initialState(), HostEvent.EnterFixtureSignedIn)
+        state = state.copy(skillBuilder = SkillBuilderState(phase = SkillBuilderPhase.DEPLOYED))
+        val signedOut = HostFixtureClient.dispatch(state, HostEvent.SignOut)
+        assertEquals(AuthStatus.ANONYMOUS, signedOut.account.authStatus)
+        assertEquals(SessionStatus.NOT_AUTHENTICATED, signedOut.account.sessionStatus)
+        assertEquals(SkillBuilderState(), signedOut.skillBuilder)
+    }
 }

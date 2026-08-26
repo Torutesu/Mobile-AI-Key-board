@@ -305,10 +305,16 @@ class KeyboardImeService : InputMethodService() {
             }
     }
 
-    private fun rewriteForActiveSkill(target: String) = when (activeShortcut?.skillId) {
-        null, "local.polite-rewrite" -> rewriteService.rewrite(target)
-        "local.punctuation-polish" -> rewriteService.polishPunctuation(target)
-        else -> null
+    private fun rewriteForActiveSkill(target: String): com.torutesu.mobileaikeyboard.core.RewriteResult? {
+        val activation = activeShortcut ?: return rewriteService.rewrite(target)
+        val binding = shortcutStore.read().bindings.firstOrNull {
+            it.bindingId == activation.bindingId && it.skillId == activation.skillId &&
+                it.skillVersion == activation.skillVersion && it.skillDigest == activation.skillDigest && it.enabled
+        } ?: return null
+        // Fail closed when the catalog or exact immutable identity is stale.
+        // Falling back to another transform would execute behavior the user did
+        // not assign to this physical key.
+        return com.torutesu.mobileaikeyboard.core.ExecutableLocalSkills.executeResult(binding, target)
     }
 
     private fun bucket(count: Int) = when {

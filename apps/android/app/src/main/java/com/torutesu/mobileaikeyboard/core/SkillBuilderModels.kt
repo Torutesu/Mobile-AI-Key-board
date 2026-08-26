@@ -20,6 +20,21 @@ data class PrivateSkillDraft(
     val fixtureExpected: String = "fixture output",
 )
 
+data class PrivateSkillIdentity(val skillId: String, val bindingId: String) {
+    companion object {
+        fun fromName(name: String): PrivateSkillIdentity {
+            val normalized = name.trim().lowercase()
+            val hash = MessageDigest.getInstance("SHA-256")
+                .digest(normalized.toByteArray(StandardCharsets.UTF_8))
+                .joinToString("") { "%02x".format(it) }
+            return PrivateSkillIdentity(
+                skillId = "private.keyboard.${hash.take(32)}",
+                bindingId = "keyboard-private-${hash.take(16)}",
+            )
+        }
+    }
+}
+
 data class PrivateSkillVersion(val version: Int, val digest: String, val createdAt: String, val skillName: String = "", val ownerSubject: String = "", val sessionEpoch: Int = 0, val skillId: String = "", val bindingId: String = "")
 data class InstalledSkillBinding(val bindingId: String, val skillName: String, val pinned: PrivateSkillVersion, val skillId: String = "")
 data class PrivateSkillShare(val digest: String, val recipient: String, val expiresAt: String, val ownerSubject: String, val sessionEpoch: Int, val revoked: Boolean = false)
@@ -75,7 +90,10 @@ object SkillBuilderValidator {
         val schemaError = StrictSkillSchema.validate(draft.advancedSchema, draft.fixtureInput, draft.fixtureExpected)
         if (schemaError != null) return schemaError
         if (!draft.policy.contains("private") || !draft.policy.contains("no network") || !draft.policy.contains("no LLM") || !draft.policy.contains("no provider")) return "private/local-only policyが必要です"
-        if (draft.bindingId != "keyboard-private" || draft.bindingId in setOf("ime-system", "accessibility-system")) return "許可されたprivate bindingではありません"
+        val derivedIdentity = PrivateSkillIdentity.fromName(draft.name)
+        val legacyFixtureIdentity = draft.skillId.startsWith("private.") && draft.bindingId == "keyboard-private"
+        val generatedIdentity = draft.skillId == derivedIdentity.skillId && draft.bindingId == derivedIdentity.bindingId
+        if ((!legacyFixtureIdentity && !generatedIdentity) || draft.bindingId in setOf("ime-system", "accessibility-system")) return "許可されたprivate bindingではありません"
         val sameName = installed.firstOrNull { it.skillName.equals(draft.name, ignoreCase = true) }
         if (sameName != null && sameName.bindingId != draft.bindingId) return "同名Skillのbindingが一致しません"
         if (installed.any { it.bindingId == draft.bindingId && it != sameName }) return "binding conflict: ${draft.bindingId}"

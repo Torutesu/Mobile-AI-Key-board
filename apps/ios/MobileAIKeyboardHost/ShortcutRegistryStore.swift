@@ -11,6 +11,7 @@ struct ShortcutSkillOption: Identifiable, Equatable {
     let description: String
     let icon: String
     let inputSources: [ShortcutSource]
+    let toolSummaries: [ShortcutToolSummary]
     let route: ShortcutExecutionRoute
 
     /// A host handoff is not executable from the keyboard extension yet. Keep it
@@ -18,7 +19,7 @@ struct ShortcutSkillOption: Identifiable, Equatable {
     var isAssignable: Bool { route == .keyboardLocal }
 
     var projection: ShortcutSkillProjectionV1 {
-        ShortcutSkillProjectionV1(id: id, versionID: versionID, skillVersion: version, skillDigest: digest, name: name, description: description, inputSources: inputSources, executionRoute: route)
+        ShortcutSkillProjectionV1(id: id, versionID: versionID, skillVersion: version, skillDigest: digest, name: name, description: description, inputSources: inputSources, toolSummaries: toolSummaries, executionRoute: route)
     }
 }
 
@@ -44,7 +45,7 @@ enum ShortcutRegistryError: Error, LocalizedError, Equatable {
 final class ShortcutRegistryStore: ObservableObject {
     @Published private(set) var snapshot: ShortcutSnapshotV1
     @Published private(set) var statusMessage: String
-    let skills: [ShortcutSkillOption]
+    @Published private(set) var skills: [ShortcutSkillOption]
     private let storage: AppGroupShortcutSnapshotStore
     // Opaque IDs follow the shared contract shape; they contain no email or
     // account credential and remain device-local until authenticated sync is
@@ -57,7 +58,11 @@ final class ShortcutRegistryStore: ObservableObject {
         let loaded = storage.loadLastKnownGood()
         snapshot = loaded ?? ShortcutSnapshotV1.empty(deviceID: "dev_local_device_0001", userID: "usr_local_device_0001")
         statusMessage = loaded == nil ? "この端末だけの安全な既定値" : (storage.isUsingSharedAppGroup ? "キーボードと共有済み" : "App Group未設定のためhost内fallback")
-        skills = Self.fixtureSkills
+        // An Add-to-Keyboard candidate is process-local until the user assigns
+        // it. Assigned candidates are embedded in the validated App Group
+        // snapshot and reconstructed here after a host/extension restart.
+        let persisted = loaded?.skills.compactMap(Self.skillOption(from:)) ?? []
+        skills = Self.fixtureSkills + persisted.filter { option in !Self.fixtureSkills.contains { $0.id == option.id && $0.versionID == option.versionID } }
     }
 
     var activeBindings: [ShortcutBindingV1] { snapshot.bindings.filter(\.enabled) }
@@ -139,7 +144,42 @@ final class ShortcutRegistryStore: ObservableObject {
     func refresh() {
         guard let loaded = storage.loadLastKnownGood() else { return }
         snapshot = loaded
+        let persisted = loaded.skills.compactMap(Self.skillOption(from:))
+        skills = Self.fixtureSkills + persisted.filter { option in !Self.fixtureSkills.contains { $0.id == option.id && $0.versionID == option.versionID } }
         statusMessage = storage.isUsingSharedAppGroup ? "キーボードと共有済み" : "App Group未設定のためhost内fallback"
+    }
+
+    /// Deploy and keyboard assignment are separate actions. This only exposes
+    /// an immutable, closed local executor candidate; the next step still asks
+    /// the user to select an A–Z trigger in Skill Keys.
+    func addPrivateSkill(_ version: PrivateSkillVersion) throws {
+        guard version.versionNumber > 0,
+              version.digest.hasPrefix("sha256:"),
+              version.digest.count == 71,
+              !version.draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ShortcutRegistryError.skillUnavailable
+        }
+        let option = ShortcutSkillOption(
+            id: version.skillID,
+            versionID: version.id,
+            version: version.versionNumber,
+            digest: version.digest,
+            name: version.draft.name,
+            description: version.draft.plainDescription,
+            icon: version.draft.icon,
+            // The closed private executor only supports explicit selection. Do
+            // not advertise surrounding context until range replacement is
+            // implemented and independently verified.
+            inputSources: [.selection],
+            toolSummaries: [ShortcutToolSummary(operation: "local.text.normalize", sideEffect: "none")],
+            route: .keyboardLocal
+        )
+        if let existing = skills.first(where: { $0.id == option.id }) {
+            guard existing.versionID == option.versionID, existing.digest == option.digest else { throw ShortcutRegistryError.skillUnavailable }
+            return
+        }
+        skills.append(option)
+        statusMessage = "「\(option.name)」をキーボード候補に追加しました。A–Zキーを割り当ててください"
     }
 
 #if DEBUG
@@ -194,8 +234,19 @@ final class ShortcutRegistryStore: ObservableObject {
     }
 
     static let fixtureSkills: [ShortcutSkillOption] = [
-        ShortcutSkillOption(id: "skill_polite_local_v1", versionID: "sv_polite_local_1", version: 1, digest: ShortcutDigest.sha256("skill_polite_local:v1"), name: "丁寧に整える", description: "選択した文章のトーンを丁寧に整えます。", icon: "text.badge.checkmark", inputSources: [.selection], route: .keyboardLocal),
-        ShortcutSkillOption(id: "skill_punctuation_local_v1", versionID: "sv_punctuation_local_1", version: 1, digest: ShortcutDigest.sha256("skill_punctuation_local:v1"), name: "句読点を整える", description: "選択した文章の空白と句読点を端末内で読みやすく整えます。", icon: "text.alignleft", inputSources: [.selection], route: .keyboardLocal),
-        ShortcutSkillOption(id: "skill_calendar_local_v1", versionID: "sv_calendar_local_1", version: 1, digest: ShortcutDigest.sha256("skill_calendar_local:v1"), name: "空き時間を探す", description: "接続済みカレンダーの読み取りレビューを開きます。", icon: "calendar", inputSources: [.command, .currentDateTime], route: .hostHandoff)
+        ShortcutSkillOption(id: "skill_polite_local_v1", versionID: "sv_polite_local_1", version: 1, digest: ShortcutDigest.sha256("skill_polite_local:v1"), name: "丁寧に整える", description: "選択した文章のトーンを丁寧に整えます。", icon: "text.badge.checkmark", inputSources: [.selection], toolSummaries: [ShortcutToolSummary(operation: "local.text.polite")], route: .keyboardLocal),
+        ShortcutSkillOption(id: "skill_punctuation_local_v1", versionID: "sv_punctuation_local_1", version: 1, digest: ShortcutDigest.sha256("skill_punctuation_local:v1"), name: "句読点を整える", description: "選択した文章の空白と句読点を端末内で読みやすく整えます。", icon: "text.alignleft", inputSources: [.selection], toolSummaries: [ShortcutToolSummary(operation: "local.text.punctuation")], route: .keyboardLocal),
+        ShortcutSkillOption(id: "skill_calendar_local_v1", versionID: "sv_calendar_local_1", version: 1, digest: ShortcutDigest.sha256("skill_calendar_local:v1"), name: "空き時間を探す", description: "接続済みカレンダーの読み取りレビューを開きます。", icon: "calendar", inputSources: [.command, .currentDateTime], toolSummaries: [], route: .hostHandoff)
     ]
+
+    private static func skillOption(from projection: ShortcutSkillProjectionV1) -> ShortcutSkillOption? {
+        guard projection.executionRoute == .keyboardLocal,
+              projection.skillVersion > 0,
+              projection.skillDigest.hasPrefix("sha256:"),
+              projection.skillDigest.count == 71,
+              projection.inputSources == [.selection],
+              projection.outputType == .replaceSelection,
+              projection.toolSummaries.contains(where: { LocalSkillExecutor.supportedOperations.contains($0.operation) }) else { return nil }
+        return ShortcutSkillOption(id: projection.id, versionID: projection.versionID, version: projection.skillVersion, digest: projection.skillDigest, name: projection.name, description: projection.description, icon: "wand.and.stars", inputSources: projection.inputSources, toolSummaries: projection.toolSummaries, route: projection.executionRoute)
+    }
 }

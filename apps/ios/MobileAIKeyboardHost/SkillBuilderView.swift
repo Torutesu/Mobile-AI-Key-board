@@ -5,6 +5,7 @@ import MobileAIKeyboardCore
 /// there is intentionally no public publish or provider/LLM client.
 struct SkillBuilderView: View {
     @EnvironmentObject private var store: AccountActivityStore
+    @EnvironmentObject private var shortcutRegistry: ShortcutRegistryStore
     @State private var desiredOutcome = ""
     @State private var name = ""
     @State private var icon = "wand.and.stars"
@@ -19,6 +20,8 @@ struct SkillBuilderView: View {
     @State private var exampleExpected = ""
     @State private var recipient = ""
     @State private var shareExpiry = Date().addingTimeInterval(86_400)
+    @State private var registryMessage: String?
+    @State private var registryError: String?
 
     private var manifest: SkillTypedManifest {
         SkillTypedManifest(trigger: trigger, input: input, output: output, allowedTools: [allowedTool], riskCeiling: .r1LocalTransform, confirmation: .always, retention: retention, testExamples: [SkillTestExample(input: exampleInput, expectedOutput: exampleExpected)])
@@ -65,6 +68,16 @@ struct SkillBuilderView: View {
         .navigationTitle("Private Skill Builder")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { loadDraftIfPresent() }
+        .alert("キーボード候補に追加しました", isPresented: Binding(get: { registryMessage != nil }, set: { if !$0 { registryMessage = nil } })) {
+            Button("閉じる", role: .cancel) { registryMessage = nil }
+        } message: {
+            Text(registryMessage ?? "")
+        }
+        .alert("キーボード候補へ追加できませんでした", isPresented: Binding(get: { registryError != nil }, set: { if !$0 { registryError = nil } })) {
+            Button("閉じる", role: .cancel) { registryError = nil }
+        } message: {
+            Text(registryError ?? "")
+        }
     }
 
     private var boundaryCard: some View {
@@ -253,6 +266,16 @@ struct SkillBuilderView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("v\(version.versionNumber): \(version.draft.name)").font(.subheadline.bold())
                     Text(version.digest).font(.caption.monospaced()).textSelection(.enabled)
+                    Button("Add To My Keyboard") {
+                        do {
+                            try shortcutRegistry.addPrivateSkill(version)
+                            registryMessage = "「\(version.draft.name)」を候補に追加しました。Skill KeysでA–Zキーを選び、fixture確認後に保存してください。"
+                        } catch {
+                            registryError = error.localizedDescription
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity, minHeight: 44)
                     Button(store.skillBuilder.installedBinding?.versionID == version.id ? "installed binding pin済み" : "このversionをbinding pin") {
                         store.send(.installBinding(versionID: version.id, digest: version.digest, bindingIdentifier: version.draft.bindingIdentifier, now: Date()))
                     }
@@ -265,6 +288,13 @@ struct SkillBuilderView: View {
                 Text("installed: v\(pin.versionNumber) / \(pin.bindingIdentifier) / \(pin.digest)")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            NavigationLink {
+                SkillKeysView().environmentObject(shortcutRegistry)
+            } label: {
+                Label("Skill KeysでA–Zキーを割り当てる", systemImage: "keyboard.badge.ellipsis")
+                    .frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(.bordered)
             Divider()
             Label("private sharing（fixture）", systemImage: "person.badge.plus").font(.subheadline.bold())
             Text("recipient・version・digest・expiryに束縛したprivate shareだけを作成できます。public publishは無効です。")

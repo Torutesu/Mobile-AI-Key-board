@@ -29,7 +29,6 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.torutesu.mobileaikeyboard.core.LATIN_QWERTY_V1
-import com.torutesu.mobileaikeyboard.core.ExecutableLocalSkills
 import com.torutesu.mobileaikeyboard.core.ShortcutEditResult
 import com.torutesu.mobileaikeyboard.core.ShortcutConflictResolution
 import com.torutesu.mobileaikeyboard.core.ShortcutFixtureRunner
@@ -37,20 +36,15 @@ import com.torutesu.mobileaikeyboard.core.ShortcutFixtureTestResult
 import com.torutesu.mobileaikeyboard.core.ShortcutRegistry
 import com.torutesu.mobileaikeyboard.core.ShortcutSnapshot
 import com.torutesu.mobileaikeyboard.core.ShortcutKeyCode
-import com.torutesu.mobileaikeyboard.core.TextFingerprint
 import com.torutesu.mobileaikeyboard.core.TriggerKeyBinding
-
-private data class SkillCandidate(val id: String, val name: String, val version: Int, val digest: String)
-
-private val localSkillCandidates = listOf(
-    SkillCandidate(ExecutableLocalSkills.POLITE_REWRITE_ID, "丁寧に書き換え", ExecutableLocalSkills.VERSION, "sha256:${TextFingerprint.of("local.polite-rewrite:v1")}"),
-    SkillCandidate(ExecutableLocalSkills.PUNCTUATION_POLISH_ID, "句読点を整える", ExecutableLocalSkills.VERSION, "sha256:${TextFingerprint.of("local.punctuation-polish:v1")}"),
-)
+import com.torutesu.mobileaikeyboard.core.LocalSkillDescriptor
+import com.torutesu.mobileaikeyboard.core.LocalSkillRegistry
 
 @Composable
 fun ShortcutKeysDashboard(
     snapshot: ShortcutSnapshot,
     onPublish: (ShortcutSnapshot) -> Boolean,
+    candidates: List<LocalSkillDescriptor> = LocalSkillRegistry.all(),
 ) {
     var dialogOpen by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<TriggerKeyBinding?>(null) }
@@ -91,6 +85,7 @@ fun ShortcutKeysDashboard(
             editing = editing,
             onDismiss = { dialogOpen = false },
             onPublish = onPublish,
+            candidates = candidates,
         )
     }
 }
@@ -124,8 +119,9 @@ private fun ShortcutPickerDialog(
     editing: TriggerKeyBinding?,
     onDismiss: () -> Unit,
     onPublish: (ShortcutSnapshot) -> Boolean,
+    candidates: List<LocalSkillDescriptor>,
 ) {
-    var selectedSkill by remember(editing) { mutableStateOf(localSkillCandidates.firstOrNull { it.id == editing?.skillId }) }
+    var selectedSkill by remember(editing, candidates) { mutableStateOf(candidates.firstOrNull { binding -> editing != null && binding.skillId == editing.skillId && binding.skillVersion == editing.skillVersion && binding.skillDigest == editing.skillDigest }) }
     var selectedKey by remember(editing) { mutableStateOf(editing?.let { ShortcutKeyCode.displayLabel(it.keyCode) }) }
     var fixtureResult by remember(editing) { mutableStateOf<ShortcutFixtureTestResult?>(null) }
     var error by remember(editing) { mutableStateOf<String?>(null) }
@@ -136,13 +132,13 @@ private fun ShortcutPickerDialog(
     val candidate = selectedKey?.let { key ->
         editing ?: selectedSkill?.let { skill ->
             TriggerKeyBinding(
-                bindingId = "binding-${skill.id}",
-                skillId = skill.id,
-                skillVersion = skill.version,
-                skillDigest = skill.digest,
+                bindingId = "binding-${skill.skillId}-${skill.skillVersion}",
+                skillId = skill.skillId,
+                skillVersion = skill.skillVersion,
+                skillDigest = skill.skillDigest,
                 keyCode = key,
-                skillName = skill.name,
-                accessibleLabel = "${skill.name}、長押しで実行",
+                skillName = skill.skillName,
+                accessibleLabel = "${skill.skillName}、長押しで実行",
             )
         }
     }?.let { it.copy(keyCode = ShortcutKeyCode.normalize(it.keyCode)) }
@@ -178,18 +174,18 @@ private fun ShortcutPickerDialog(
                         label = { Text("Skillを検索") },
                         singleLine = true,
                     )
-                    val candidates = localSkillCandidates.filter { skill ->
-                        query.isBlank() || skill.name.contains(query, ignoreCase = true) || skill.id.contains(query, ignoreCase = true)
+                    val filteredCandidates = candidates.filter { skill ->
+                        query.isBlank() || skill.skillName.contains(query, ignoreCase = true) || skill.skillId.contains(query, ignoreCase = true)
                     }
-                    candidates.forEach { skill ->
+                    filteredCandidates.forEach { skill ->
                         FilterChip(
                             selected = selectedSkill == skill,
                             onClick = { selectedSkill = skill; fixtureResult = null; error = null },
-                            modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "${skill.name}、端末内実行可能" },
-                            label = { Text("${skill.name}（端末内）") },
+                            modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "${skill.skillName}、端末内実行可能、v${skill.skillVersion}" },
+                            label = { Text("${skill.skillName}（端末内 v${skill.skillVersion}）") },
                         )
                     }
-                    if (candidates.isEmpty()) Text("一致する実行可能なSkillがありません。", color = MaterialTheme.colorScheme.error)
+                    if (filteredCandidates.isEmpty()) Text("一致する実行可能なSkillがありません。", color = MaterialTheme.colorScheme.error)
                 }
                 Text("QWERTY", fontWeight = FontWeight.SemiBold)
                 // Five columns keeps every choice comfortably tappable on narrow phones.

@@ -14,7 +14,7 @@ class ShortcutModelsTest {
         bindingId = id,
         skillId = "local.polite-rewrite",
         skillVersion = 1,
-        skillDigest = "sha256:${TextFingerprint.of("skill-v1")}",
+        skillDigest = "sha256:${TextFingerprint.of("local.polite-rewrite:v1")}",
         keyCode = key,
         skillName = "丁寧に書き換え",
         accessibleLabel = "丁寧に書き換え、長押しで実行",
@@ -22,6 +22,7 @@ class ShortcutModelsTest {
 
     private fun punctuationBinding(key: String = "KeyB") = binding("binding-b", key).copy(
         skillId = ExecutableLocalSkills.PUNCTUATION_POLISH_ID,
+        skillDigest = "sha256:${TextFingerprint.of("local.punctuation-polish:v1")}",
         skillName = "句読点を整える",
         accessibleLabel = "句読点を整える、長押しで実行",
     )
@@ -163,4 +164,58 @@ class ShortcutModelsTest {
         assertTrue(ShortcutFixtureRunner.run(binding()).passed)
         assertFalse(ShortcutFixtureRunner.run(binding().copy(skillId = "calendar.availability.read")).passed)
     }
+
+    @Test
+    fun installedPrivateSkillRequiresExactPinnedVersionAndDigestAndUsesClosedExecutor() {
+        val version = PrivateSkillVersion(
+            version = 1,
+            digest = "sha256:${TextFingerprint.of("private-skill-v1")}",
+            createdAt = "now",
+            skillName = "返信アシスト",
+            skillId = "private.reply-assistant.test",
+            bindingId = "keyboard-private",
+        )
+        val descriptor = LocalSkillRegistry.fromPrivateVersion(version)!!
+        assertTrue(LocalSkillRegistry.install(descriptor))
+        val pinned = binding("private-binding", "KeyC").copy(
+            skillId = version.skillId,
+            skillVersion = version.version,
+            skillDigest = version.digest,
+            skillName = version.skillName,
+        )
+        assertTrue(pinned.isValidBindingSnapshot())
+        assertTrue(ExecutableLocalSkills.isExecutable(pinned))
+        assertTrue(ExecutableLocalSkills.execute(pinned, "fixture input")!!.isNotBlank())
+        assertFalse(ExecutableLocalSkills.isExecutable(pinned.copy(skillDigest = "sha256:${TextFingerprint.of("tampered")}")))
+        assertFalse(ExecutableLocalSkills.isExecutable(pinned.copy(skillVersion = 2)))
+    }
+
+    @Test
+    fun installedCatalogCodecRoundTripsAndRejectsMalformedEntries() {
+        val entry = LocalSkillDescriptor(
+            "private.codec.test", 3, "sha256:${TextFingerprint.of("codec")}", "Codec Skill", LocalSkillExecutorKind.PRIVATE_LOCAL_REWRITE,
+        )
+        val encoded = LocalSkillCatalogCodec.encode(listOf(entry))
+        assertEquals(listOf(entry), LocalSkillCatalogCodec.decode(encoded))
+        assertTrue(LocalSkillCatalogCodec.decode(encoded + "\nmalformed").isEmpty())
+        fun encodedField(value: String) = java.util.Base64.getUrlEncoder().withoutPadding()
+            .encodeToString(value.toByteArray(java.nio.charset.StandardCharsets.UTF_8))
+        val unknownExecutor = encoded.replace(encodedField("PRIVATE_LOCAL_REWRITE"), encodedField("UNKNOWN"))
+        assertTrue(LocalSkillCatalogCodec.decode(unknownExecutor).isEmpty())
+    }
+
+    @Test
+    fun emptyCatalogHydrationRemovesStalePrivateExecutorsButKeepsBuiltIns() {
+        val descriptor = LocalSkillDescriptor(
+            "private.stale.test", 1, "sha256:${TextFingerprint.of("stale")}", "Stale", LocalSkillExecutorKind.PRIVATE_LOCAL_REWRITE,
+        )
+        assertTrue(LocalSkillRegistry.install(descriptor))
+        assertTrue(ExecutableLocalSkills.canExecute(descriptor.skillId, descriptor.skillVersion))
+        assertTrue(LocalSkillRegistry.installAll(emptyList()))
+        assertFalse(ExecutableLocalSkills.canExecute(descriptor.skillId, descriptor.skillVersion))
+        assertTrue(ExecutableLocalSkills.canExecute(ExecutableLocalSkills.POLITE_REWRITE_ID, ExecutableLocalSkills.VERSION))
+    }
+
+    private fun TriggerKeyBinding.isValidBindingSnapshot(): Boolean =
+        ShortcutSnapshot(generation = 1, bindings = listOf(this)).isValid()
 }

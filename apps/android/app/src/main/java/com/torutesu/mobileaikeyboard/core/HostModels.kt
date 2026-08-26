@@ -123,6 +123,7 @@ data class HostAppState(
 
 sealed interface HostEvent {
     data object EnterFixtureSignedIn : HostEvent
+    data object SignOut : HostEvent
     data object SimulateSessionExpiry : HostEvent
     data object SimulateSessionRevocation : HostEvent
     data class RequestDeviceRevoke(val deviceId: String) : HostEvent
@@ -225,6 +226,13 @@ object HostFixtureClient {
                 origin = DataOrigin.LOCAL_FIXTURE,
                 sessionExpiresAt = "2026-08-26T10:00:00Z",
             ),
+        )
+        HostEvent.SignOut -> state.copy(
+            account = AccountState(origin = DataOrigin.LOCAL_FIXTURE),
+            calendarWrite = CalendarWriteState(),
+            skillBuilder = SkillBuilderState(),
+            suggestions = ContextualSuggestionState(),
+            trustCatalog = TrustCatalogState(),
         )
         HostEvent.SimulateSessionExpiry -> state.copy(account = state.account.copy(sessionStatus = SessionStatus.EXPIRED), calendarWrite = CalendarWriteState(), skillBuilder = SkillBuilderState(), keyboardSettings = KeyboardSettingsReducer.reduce(state.keyboardSettings, KeyboardSettingsEvent.ClearQualification), suggestions = ContextualSuggestionState(), trustCatalog = TrustCatalogState())
         HostEvent.SimulateSessionRevocation -> state.copy(account = state.account.copy(sessionStatus = SessionStatus.REVOKED), calendarWrite = CalendarWriteState(), skillBuilder = SkillBuilderState(), keyboardSettings = KeyboardSettingsReducer.reduce(state.keyboardSettings, KeyboardSettingsEvent.ClearQualification), suggestions = ContextualSuggestionState(), trustCatalog = TrustCatalogState())

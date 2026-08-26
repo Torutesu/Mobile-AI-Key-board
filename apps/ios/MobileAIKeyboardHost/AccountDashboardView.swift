@@ -13,7 +13,7 @@ struct AccountDashboardView: View {
                 navigationCard(title: "デバイス", subtitle: "現在の端末、最終利用、失効", systemImage: "iphone.gen3") { DevicesView() }
                 navigationCard(title: "Connections", subtitle: "Calendar・Notion・Mapsのread-only接続", systemImage: "link") { ConnectionsView() }
                 navigationCard(title: "Calendar write", subtitle: "R3・招待なしprivate event（fixture）", systemImage: "calendar.badge.plus") { CalendarWriteView() }
-                navigationCard(title: "Private Skill Builder", subtitle: "コードなし・private v1・fixture deploy", systemImage: "wand.and.stars") { SkillBuilderView() }
+                navigationCard(title: "Private Skill Builder", subtitle: "コードなし・private v1・fixture deploy", systemImage: "wand.and.stars") { SkillBuilderView().environmentObject(shortcutRegistry) }
                 navigationCard(title: "キーボード設定", subtitle: "テーマ・キーサイズ・片手モード・workflow packs", systemImage: "keyboard") { KeyboardSettingsView() }
                 navigationCard(title: "Skill Keys", subtitle: "QWERTYキーへの割り当て・再割り当て・削除", systemImage: "keyboard.badge.ellipsis") { SkillKeysView().environmentObject(shortcutRegistry) }
                 navigationCard(title: "Contextual suggestions", subtitle: "端末内候補・raw textなし・自動適用なし", systemImage: "sparkles") { ContextualSuggestionsView() }

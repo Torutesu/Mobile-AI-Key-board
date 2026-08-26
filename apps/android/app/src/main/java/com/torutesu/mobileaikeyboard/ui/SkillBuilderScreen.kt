@@ -15,6 +15,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -23,12 +27,19 @@ import androidx.compose.ui.unit.dp
 import com.torutesu.mobileaikeyboard.core.HostAppState
 import com.torutesu.mobileaikeyboard.core.HostEvent
 import com.torutesu.mobileaikeyboard.core.PrivateSkillDraft
+import com.torutesu.mobileaikeyboard.core.PrivateSkillIdentity
 import com.torutesu.mobileaikeyboard.core.SkillBuilderEvent
 import com.torutesu.mobileaikeyboard.core.SkillBuilderPhase
+import com.torutesu.mobileaikeyboard.core.PrivateSkillVersion
 
 @Composable
-fun SkillBuilderDashboard(state: HostAppState, dispatch: (HostEvent) -> Unit) {
+fun SkillBuilderDashboard(
+    state: HostAppState,
+    dispatch: (HostEvent) -> Unit,
+    onAddToMyKeyboard: (PrivateSkillVersion) -> Boolean = { false },
+) {
     val builder = state.skillBuilder
+    var addStatus by remember(builder.version?.digest) { mutableStateOf<String?>(null) }
     val action: (SkillBuilderEvent) -> Unit = { dispatch(HostEvent.SkillBuilderAction(it)) }
     Card(modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Private Skill builder" }) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
@@ -47,7 +58,20 @@ fun SkillBuilderDashboard(state: HostAppState, dispatch: (HostEvent) -> Unit) {
                 SkillBuilderPhase.DEPLOYED -> {
                     Text("private Skillをpublishしました。既存bindingは明示Upgradeまで旧versionのままです。")
                     Text("digest: ${builder.confirmedDigest}")
-                    Button(onClick = { builder.version?.let { action(SkillBuilderEvent.UpgradeBinding(it.digest)) } }, modifier = Modifier.fillMaxWidth()) { Text("bindingをこのversionへUpgrade") }
+                    Text("Deploy済みでもキーボード割当は別操作です。明示的に追加するとSkill Keysの候補になります。", style = MaterialTheme.typography.bodySmall)
+                    addStatus?.let { Text(it, color = if (it.startsWith("追加しました")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error) }
+                    Button(
+                        onClick = {
+                            builder.version?.let { version ->
+                                addStatus = if (onAddToMyKeyboard(version)) "追加しました。Skill KeysでA〜Zのキーを割り当てられます。" else "追加に失敗しました。version/digestが不正か、保存領域を確認してください。"
+                            }
+                        },
+                        enabled = builder.version != null && addStatus == null,
+                        modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Add deployed private Skill to My Keyboard" },
+                    ) { Text("Add To My Keyboard") }
+                    // Keep the legacy builder binding upgrade available as a
+                    // separate, non-keyboard operation for migration fixtures.
+                    TextButton(onClick = { builder.version?.let { action(SkillBuilderEvent.UpgradeBinding(it.digest)) } }, modifier = Modifier.fillMaxWidth()) { Text("bindingをこのversionへUpgrade（別操作）") }
                     Button(onClick = { builder.version?.let { action(SkillBuilderEvent.CreateShare("fixture@example.invalid", "2026-08-27T09:00:00Z")) } }, modifier = Modifier.fillMaxWidth()) { Text("private share fixtureを作成") }
                     builder.shares.filter { !it.revoked }.forEach { share ->
                         Text("share: ${share.recipient} · expires ${share.expiresAt}")
@@ -64,7 +88,10 @@ private fun BuilderForm(draft: PrivateSkillDraft, phase: SkillBuilderPhase, acti
     val update: (PrivateSkillDraft) -> Unit = { action(SkillBuilderEvent.UpdateDraft(it)) }
     if (phase == SkillBuilderPhase.OUTCOME) Text("1 · desired outcome", fontWeight = FontWeight.Bold)
     OutlinedTextField(draft.desiredOutcome, { update(draft.copy(desiredOutcome = it)) }, Modifier.fillMaxWidth().semantics { contentDescription = "Desired outcome" }, label = { Text("したい結果") })
-    OutlinedTextField(draft.name, { update(draft.copy(name = it)) }, Modifier.fillMaxWidth().semantics { contentDescription = "Private Skill name" }, label = { Text("Skill名") }, singleLine = true)
+    OutlinedTextField(draft.name, { nextName ->
+        val identity = PrivateSkillIdentity.fromName(nextName)
+        update(draft.copy(name = nextName, skillId = identity.skillId, bindingId = identity.bindingId))
+    }, Modifier.fillMaxWidth().semantics { contentDescription = "Private Skill name" }, label = { Text("Skill名") }, singleLine = true)
     OutlinedTextField(draft.icon, { update(draft.copy(icon = it)) }, Modifier.fillMaxWidth().semantics { contentDescription = "Skill icon" }, label = { Text("アイコン") }, singleLine = true)
     OutlinedTextField(draft.plainInstruction, { update(draft.copy(plainInstruction = it)) }, Modifier.fillMaxWidth().semantics { contentDescription = "Plain language instruction" }, label = { Text("plain-language instruction") })
     OutlinedTextField(draft.advancedSchema, { update(draft.copy(advancedSchema = it)) }, Modifier.fillMaxWidth().semantics { contentDescription = "Advanced schema" }, label = { Text("advanced schema（任意）") })
