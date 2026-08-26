@@ -86,6 +86,41 @@ function projectionForBinding(snapshot: ShortcutSnapshotData, binding: TriggerKe
   return snapshot.skills.find((skill) => skill.skill_id === binding.skill_id && skill.version_id === binding.version_id);
 }
 
+/**
+ * Bindings and projections cross a process boundary before a key is rendered.
+ * Treat neither side as authoritative on its own: the declared eligibility,
+ * execution route, tools and confirmation posture must describe one coherent
+ * capability. This prevents a tampered snapshot from presenting a network or
+ * write Skill as a local, confirmation-free key action.
+ */
+export function validateShortcutProjectionAuthority(binding: TriggerKeyBindingData, projection: ShortcutSkillProjectionData): ShortcutSkillProjectionData {
+  const effects = projection.tool_summaries.map((tool) => tool.side_effect);
+  const hasSideEffect = effects.some((effect) => effect !== "none");
+  if (binding.local_eligibility === "local") {
+    if (projection.execution_route !== "keyboard_local" || projection.tool_summaries.length > 0 || binding.required_connection_ids.length > 0) {
+      reject("Local shortcut authority cannot use tools, connections, or a non-local execution route", "PROJECTION_AUTHORITY_MISMATCH", { binding_id: binding.binding_id });
+    }
+    if (projection.risk_ceiling !== "R0" && projection.risk_ceiling !== "R1") {
+      reject("Local shortcut risk ceiling exceeds local authority", "PROJECTION_AUTHORITY_MISMATCH", { binding_id: binding.binding_id });
+    }
+  } else if (binding.local_eligibility === "connected_read") {
+    if (projection.execution_route === "keyboard_local" || projection.tool_summaries.length === 0 || hasSideEffect || binding.required_connection_ids.length === 0) {
+      reject("Connected-read shortcut authority must use read-only tools through a non-local route", "PROJECTION_AUTHORITY_MISMATCH", { binding_id: binding.binding_id });
+    }
+    if (projection.risk_ceiling === "R3") {
+      reject("Connected-read shortcut cannot carry write risk", "PROJECTION_AUTHORITY_MISMATCH", { binding_id: binding.binding_id });
+    }
+  } else {
+    if (projection.execution_route === "keyboard_local" || !hasSideEffect || projection.confirmation !== "policy_required" || binding.required_connection_ids.length === 0) {
+      reject("Confirmed-write shortcut authority requires a non-local side effect and explicit policy confirmation", "PROJECTION_AUTHORITY_MISMATCH", { binding_id: binding.binding_id });
+    }
+    if (projection.risk_ceiling !== "R3") {
+      reject("Confirmed-write shortcut must declare the write risk ceiling", "PROJECTION_AUTHORITY_MISMATCH", { binding_id: binding.binding_id });
+    }
+  }
+  return projection;
+}
+
 export function validateShortcutSnapshot(value: unknown, lastGeneration: number, device: DeviceId | { user_id: UserId; device_id: DeviceId }): ShortcutSnapshotData {
   const parsed = ShortcutSnapshot.safeParse(value);
   if (!parsed.success) reject("Shortcut snapshot contract is invalid", "INVALID_SHORTCUT_SNAPSHOT", { issues: parsed.error.issues });
@@ -117,9 +152,14 @@ export function validateShortcutSnapshot(value: unknown, lastGeneration: number,
   for (const binding of bindings) {
     const projection = projectionForBinding(snapshot, binding);
     if (!projection || projection.skill_version !== binding.skill_version || projection.skill_digest !== binding.skill_digest) reject("Snapshot Skill projection does not match its binding", "PROJECTION_BINDING_MISMATCH", { binding_id: binding.binding_id });
+    validateShortcutProjectionAuthority(binding, projection);
   }
   const connectionIds = new Set(snapshot.connection_states.map((connection) => connection.connection_id));
   for (const binding of bindings) for (const connectionId of binding.required_connection_ids) if (!connectionIds.has(connectionId)) reject("Snapshot binding references a missing connection state", "MISSING_CONNECTION_STATE", { connection_id: connectionId });
+  const activeConnections = new Set(snapshot.connection_states.filter((connection) => connection.state === "active").map((connection) => connection.connection_id));
+  for (const binding of bindings.filter((candidate) => candidate.enabled)) {
+    for (const connectionId of binding.required_connection_ids) if (!activeConnections.has(connectionId)) reject("Enabled shortcut requires an active connection", "CONNECTION_NOT_ACTIVE", { binding_id: binding.binding_id, connection_id: connectionId });
+  }
   if (snapshot.tombstone_reason === null && snapshot.layout.user_id.length === 0) reject("Live snapshot requires an owner", "SHORTCUT_OWNER_MISMATCH");
   return snapshot;
 }

@@ -3,6 +3,7 @@ import MobileAIKeyboardCore
 
 struct KeyboardSettingsView: View {
     @EnvironmentObject private var store: AccountActivityStore
+    @EnvironmentObject private var shortcutRegistry: ShortcutRegistryStore
     @State private var previewText = "田中さんへ https://example.com/path よろしく。明日は123です。"
     @State private var selectedPack: JapaneseWorkflowPack = .polite
     @State private var preview: WorkflowPackResult?
@@ -13,6 +14,7 @@ struct KeyboardSettingsView: View {
                 boundaryCard
                 NavigationLink {
                     SkillKeysView()
+                        .environmentObject(shortcutRegistry)
                 } label: {
                     Label {
                         VStack(alignment: .leading, spacing: 3) {
@@ -51,7 +53,7 @@ struct KeyboardSettingsView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("拡張機能で消費可能な設定モデル")
                     .font(.headline)
-                Text("schema v\(store.settings.schemaVersion)。現在はmemory-onlyで、拡張機能とのruntime同期はnot_provenです。ネットワーク接続やFull Accessは使いません。通常入力用の設定は境界後も保持します。")
+                Text("schema v\(store.settings.schemaVersion)。現在はmemory-onlyで、拡張機能とのruntime同期はnot_provenです。通常入力とlocal workflowはネットワーク接続しません。Skill KeyのApp Group共有にはFull Accessが必要です。通常入力用の設定は境界後も保持します。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -63,7 +65,7 @@ struct KeyboardSettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("拡張機能で消費可能な設定モデル。memory-only。runtime同期は未証明。schemaバージョン\(store.settings.schemaVersion)。ネットワーク接続とFull Accessは使いません")
+        .accessibilityLabel("拡張機能で消費可能な設定モデル。memory-only。runtime同期は未証明。schemaバージョン\(store.settings.schemaVersion)。通常入力とlocal workflowはネットワーク接続しません。Skill KeyのApp Group共有にはFull Accessが必要です")
     }
 
     private var appearanceSection: some View {

@@ -1,0 +1,44 @@
+{
+  "schema_version": "mobile-ai-keyboard.real-device-e2e.v1",
+  "status": "not_proven",
+  "evidence_class": "protected_external",
+  "candidate": {
+    "source_commit": null,
+    "artifact_digest": null
+  },
+  "required_scenarios": [
+    "ordinary_typing",
+    "selection_rewrite",
+    "long_press_and_tap",
+    "emoji_and_newline",
+    "japanese_input",
+    "url_input",
+    "rtl_input",
+    "app_and_keyboard_switch",
+    "rotation_and_background_resume",
+    "secure_field_suppression",
+    "unsupported_custom_keyboard"
+  ],
+  "targets": [
+    {
+      "platform": "ios",
+      "device_class": "baseline",
+      "os": "iOS 17 or later",
+      "devices": ["iPhone baseline", "current iPhone", "small-screen iPhone", "iPad portrait-landscape"],
+      "apps": ["Messages", "Mail", "Safari", "LINE", "Slack", "Gmail", "Notion"],
+      "status": "not_proven",
+      "runs": []
+    },
+    {
+      "platform": "android",
+      "device_class": "baseline",
+      "os": "Android 11 or later",
+      "devices": ["Android 11 baseline phone", "current Pixel", "current Samsung Galaxy", "low-memory Android phone"],
+      "apps": ["Messages", "Mail", "Safari/Chrome", "LINE", "Slack", "Gmail", "Notion"],
+      "status": "not_proven",
+      "runs": []
+    }
+  ],
+  "required_field_classes": ["ordinary_text", "long_text", "emoji", "newline", "japanese", "url", "rtl", "secure_password", "one_time_code", "phone_number"],
+  "required_lifecycle_events": ["input_field_switch", "app_switch", "keyboard_switch", "rotation", "background_resume", "process_restart"]
+}

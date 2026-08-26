@@ -15,6 +15,7 @@ struct SkillKeysView: View {
                 keyboardPreview
                 assignedSection
                 availableSection
+                unavailableSection
                 boundaryCard
             }
             .padding()
@@ -85,15 +86,19 @@ struct SkillKeysView: View {
                     .font(.subheadline).foregroundStyle(.secondary)
             }
             ForEach(registry.activeBindings) { binding in
+                let skill = registry.skill(for: binding)
+                let isRunnable = skill?.isAssignable == true
                 Button { editingBinding = binding } label: {
                     HStack(spacing: 12) {
                         Text(binding.keyCode.displayLabel)
                             .font(.headline)
-                            .frame(width: 42, height: 42)
+                            .frame(minWidth: 44, minHeight: 44)
                             .background(Color.cyan.opacity(0.16), in: RoundedRectangle(cornerRadius: 10))
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(registry.skill(for: binding)?.name ?? binding.skillID).font(.headline)
-                            Text("長押しで実行 · v\(binding.skillVersion)").font(.caption).foregroundStyle(.secondary)
+                            Text(skill?.name ?? binding.skillID).font(.headline)
+                            Text(isRunnable ? "長押しで実行 · v\(binding.skillVersion)" : "準備中・割り当て不可 · v\(binding.skillVersion)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                         Spacer()
                         Image(systemName: "chevron.right").foregroundStyle(.tertiary)
@@ -103,8 +108,8 @@ struct SkillKeysView: View {
                 .buttonStyle(.plain)
                 .padding(14)
                 .background(.white, in: RoundedRectangle(cornerRadius: 16))
-                .accessibilityLabel("\(binding.keyCode.displayLabel)、\(registry.skill(for: binding)?.name ?? binding.skillID)、長押しで実行")
-                .accessibilityHint("再割り当てまたは削除")
+                .accessibilityLabel("\(binding.keyCode.displayLabel)、\(skill?.name ?? binding.skillID)、\(isRunnable ? "長押しで実行" : "準備中・割り当て不可")")
+                .accessibilityHint(isRunnable ? "再割り当てまたは削除" : "削除して割り当てを解除")
             }
         }
     }
@@ -112,7 +117,7 @@ struct SkillKeysView: View {
     private var availableSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Skillを追加").font(.title3.weight(.bold))
-            ForEach(registry.skills) { skill in
+            ForEach(registry.assignableSkills) { skill in
                 let installed = registry.snapshot.bindings.contains { $0.skillID == skill.id && $0.enabled }
                 Button { selectedSkill = skill } label: {
                     HStack(spacing: 12) {
@@ -131,6 +136,40 @@ struct SkillKeysView: View {
                 .buttonStyle(.plain)
                 .padding(14)
                 .background(.white, in: RoundedRectangle(cornerRadius: 16))
+            }
+        }
+    }
+
+    private var unavailableSection: some View {
+        Group {
+            if !registry.unavailableSkills.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("準備中のSkill")
+                        .font(.title3.weight(.bold))
+                    ForEach(registry.unavailableSkills) { skill in
+                        HStack(spacing: 12) {
+                            Image(systemName: skill.icon)
+                                .font(.title3)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 28)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(skill.name).font(.headline)
+                                Text("Host handoffはまだキーボードから実行できません。割り当て不可")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("準備中")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.black.opacity(0.04), in: RoundedRectangle(cornerRadius: 16))
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("\(skill.name)。Host handoffはまだ実行できないため、割り当てできません")
+                    }
+                }
             }
         }
     }
@@ -166,7 +205,7 @@ private struct TriggerKeySheet: View {
         _selectedKey = State(initialValue: existingBinding?.keyCode)
     }
 
-    private let rows = ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
+    private let keys = Array("qwertyuiopasdfghjklzxcvbnm")
 
     var body: some View {
         NavigationStack {
@@ -236,25 +275,22 @@ private struct TriggerKeySheet: View {
     }
 
     private var keyGrid: some View {
-        VStack(spacing: 7) {
-            ForEach(rows, id: \.self) { row in
-                HStack(spacing: 6) {
-                    ForEach(Array(row), id: \.self) { character in
-                        let key = ShortcutKeyCode(displayLabel: String(character))!
-                        let conflict = registry.binding(for: key)
-                        let isSelected = selectedKey == key
-                        Button { selectedKey = key } label: {
-                            Text(key.displayLabel)
-                                .font(.headline)
-                                .frame(maxWidth: .infinity, minHeight: 46)
-                                .background(isSelected ? Color.cyan.opacity(0.26) : Color.white, in: RoundedRectangle(cornerRadius: 9))
-                                .overlay(RoundedRectangle(cornerRadius: 9).stroke(isSelected ? Color.cyan : Color.clear, lineWidth: 2))
-                        }
-                        .disabled(conflict != nil && conflict?.id != existingBinding?.id)
-                        .accessibilityLabel(conflict.map { "\(key.displayLabel)、\(registry.skill(for: $0)?.name ?? "割り当て済み")" } ?? "\(key.displayLabel)、空き")
-                        .accessibilityValue(isSelected ? "選択中" : (conflict == nil || conflict?.id == existingBinding?.id ? "利用可能" : "利用不可"))
-                    }
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 44), spacing: 8)], spacing: 8) {
+            ForEach(keys, id: \.self) { character in
+                let key = ShortcutKeyCode(displayLabel: String(character))!
+                let conflict = registry.binding(for: key)
+                let isSelected = selectedKey == key
+                Button { selectedKey = key } label: {
+                    Text(key.displayLabel)
+                        .font(.headline)
+                        .frame(minWidth: 44, minHeight: 52)
+                        .frame(maxWidth: .infinity)
+                        .background(isSelected ? Color.cyan.opacity(0.26) : Color.white, in: RoundedRectangle(cornerRadius: 9))
+                        .overlay(RoundedRectangle(cornerRadius: 9).stroke(isSelected ? Color.cyan : Color.clear, lineWidth: 2))
                 }
+                .disabled(conflict != nil && conflict?.id != existingBinding?.id)
+                .accessibilityLabel(conflict.map { "\(key.displayLabel)、\(registry.skill(for: $0)?.name ?? "割り当て済み")" } ?? "\(key.displayLabel)、空き")
+                .accessibilityValue(isSelected ? "選択中" : (conflict == nil || conflict?.id == existingBinding?.id ? "利用可能" : "利用不可"))
             }
         }
         .padding(10)

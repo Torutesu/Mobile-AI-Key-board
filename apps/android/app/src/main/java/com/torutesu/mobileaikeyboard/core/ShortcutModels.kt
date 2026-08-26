@@ -40,6 +40,21 @@ data class TriggerKeyBinding(
     val order: Int = 0,
 )
 
+/** The only Skills the Android IME can execute without a host/provider handoff. */
+object ExecutableLocalSkills {
+    const val POLITE_REWRITE_ID = "local.polite-rewrite"
+    const val PUNCTUATION_POLISH_ID = "local.punctuation-polish"
+    const val VERSION = 1
+
+    val ids: Set<String> = setOf(POLITE_REWRITE_ID, PUNCTUATION_POLISH_ID)
+
+    fun canExecute(skillId: String, skillVersion: Int): Boolean =
+        skillId in ids && skillVersion == VERSION
+
+    fun isExecutable(binding: TriggerKeyBinding): Boolean =
+        canExecute(binding.skillId, binding.skillVersion)
+}
+
 data class ShortcutSnapshot(
     val schemaVersion: Int = SHORTCUT_SCHEMA_VERSION,
     val generation: Long = 0,
@@ -119,6 +134,7 @@ object ShortcutSnapshotValidator {
         if (binding.skillName.isBlank() || binding.skillName.codePointCount(0, binding.skillName.length) > MAX_LABEL_CODE_POINTS) return "label"
         if (binding.accessibleLabel.isBlank() || binding.accessibleLabel.codePointCount(0, binding.accessibleLabel.length) > MAX_LABEL_CODE_POINTS) return "accessible label"
         if (binding.order < 0 || binding.order >= SHORTCUT_MAX_BINDINGS) return "order"
+        if (!ExecutableLocalSkills.isExecutable(binding)) return "skill_not_executable_on_ime"
         return null
     }
 }
@@ -198,9 +214,8 @@ class ShortcutSnapshotStore(context: android.content.Context) {
 
     @Synchronized fun read(): ShortcutSnapshot {
         val active = preferences.getString(ACTIVE, null)?.let(ShortcutSnapshotCodec::decode)
-        if (active != null && active.isValid()) return active
         val previous = preferences.getString(LAST_GOOD, null)?.let(ShortcutSnapshotCodec::decode)
-        return if (previous != null && previous.isValid()) previous else ShortcutSnapshot.empty()
+        return ShortcutSnapshotRecovery.select(active, previous)
     }
 
     @Synchronized fun publish(candidate: ShortcutSnapshot): Boolean {
@@ -220,6 +235,15 @@ class ShortcutSnapshotStore(context: android.content.Context) {
         private const val ACTIVE = "active"
         private const val LAST_GOOD = "last_good"
         private const val MAX_SERIALIZED_BYTES = 32 * 1024
+    }
+}
+
+/** Pure migration/recovery policy, shared by the store and unit tests. */
+internal object ShortcutSnapshotRecovery {
+    fun select(active: ShortcutSnapshot?, previous: ShortcutSnapshot?): ShortcutSnapshot = when {
+        active?.isValid() == true -> active
+        previous?.isValid() == true -> previous
+        else -> ShortcutSnapshot.empty()
     }
 }
 

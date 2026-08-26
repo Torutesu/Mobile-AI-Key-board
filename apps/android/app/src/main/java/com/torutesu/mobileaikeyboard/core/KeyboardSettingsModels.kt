@@ -27,6 +27,12 @@ data class KeyboardSettingsState(
 
 data class ImeConsumableConfig(val theme: KeyboardTheme, val haptics: HapticMode, val keySize: KeySize, val oneHanded: OneHandedMode, val workflowPack: JapaneseWorkflowPack)
 
+/** Setup status is deliberately derived from both Android enablement and a real test-field edit. */
+data class ImeOnboardingStatus(val imeEnabled: Boolean, val testInput: String) {
+    val testFieldComplete: Boolean get() = testInput.isNotBlank()
+    val complete: Boolean get() = imeEnabled && testFieldComplete
+}
+
 sealed interface KeyboardSettingsEvent {
     data class SetTheme(val value: KeyboardTheme) : KeyboardSettingsEvent
     data class SetHaptics(val value: HapticMode) : KeyboardSettingsEvent

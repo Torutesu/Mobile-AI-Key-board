@@ -1,10 +1,18 @@
 package com.torutesu.mobileaikeyboard.core
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class KeyboardSettingsTest {
+    @Test
+    fun imeOnboardingRequiresEnablementAndNonBlankTestField() {
+        assertFalse(ImeOnboardingStatus(false, "typed").complete)
+        assertFalse(ImeOnboardingStatus(true, "").complete)
+        assertTrue(ImeOnboardingStatus(true, "typed").complete)
+        assertFalse(ImeOnboardingStatus(true, "  \n").complete)
+    }
     @Test
     fun settingsAreVersionedImeConsumableAndResettable() {
         var state = KeyboardSettingsState()

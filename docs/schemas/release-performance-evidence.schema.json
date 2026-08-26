@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-ai-keyboard.invalid/schemas/performance-evidence-v1.json",
+  "title": "Mobile AI Keyboard protected performance evidence",
+  "type": "object",
+  "required": ["schema_version", "status", "evidence_class", "candidate", "required_metrics", "measurements"],
+  "properties": {
+    "schema_version": {"const": "mobile-ai-keyboard.performance-evidence.v1"},
+    "status": {"enum": ["not_proven", "in_progress", "passed", "failed"]},
+    "evidence_class": {"const": "protected_external"},
+    "candidate": {"$ref": "#/$defs/candidate"},
+    "required_metrics": {"type": "array", "minItems": 14, "items": {"type": "string"}},
+    "measurements": {"type": "array", "items": {"$ref": "#/$defs/measurement"}},
+    "notes": {"type": "string"}
+  },
+  "$defs": {
+    "candidate": {"type": "object", "required": ["source_commit", "artifact_digest"], "properties": {"source_commit": {"type": ["string", "null"]}, "artifact_digest": {"type": ["string", "null"]}}, "additionalProperties": false},
+    "measurement": {"type": "object", "required": ["metric_id", "platform", "device", "status", "value", "unit", "evidence"], "properties": {"metric_id": {"type": "string"}, "platform": {"enum": ["ios", "android"]}, "device": {"type": "string"}, "status": {"enum": ["not_proven", "in_progress", "passed", "failed"]}, "value": {"type": ["number", "null"]}, "unit": {"type": "string"}, "evidence": {"type": "object"}}, "additionalProperties": false}
+  },
+  "additionalProperties": false
+}

@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -27,6 +28,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.torutesu.mobileaikeyboard.core.LATIN_QWERTY_V1
+import com.torutesu.mobileaikeyboard.core.ExecutableLocalSkills
 import com.torutesu.mobileaikeyboard.core.ShortcutEditResult
 import com.torutesu.mobileaikeyboard.core.ShortcutRegistry
 import com.torutesu.mobileaikeyboard.core.ShortcutSnapshot
@@ -37,8 +39,8 @@ import com.torutesu.mobileaikeyboard.core.TriggerKeyBinding
 private data class SkillCandidate(val id: String, val name: String, val version: Int, val digest: String)
 
 private val localSkillCandidates = listOf(
-    SkillCandidate("local.polite-rewrite", "丁寧に書き換え", 1, "sha256:${TextFingerprint.of("local.polite-rewrite:v1")}"),
-    SkillCandidate("local.punctuation-polish", "句読点を整える", 1, "sha256:${TextFingerprint.of("local.punctuation-polish:v1")}"),
+    SkillCandidate(ExecutableLocalSkills.POLITE_REWRITE_ID, "丁寧に書き換え", ExecutableLocalSkills.VERSION, "sha256:${TextFingerprint.of("local.polite-rewrite:v1")}"),
+    SkillCandidate(ExecutableLocalSkills.PUNCTUATION_POLISH_ID, "句読点を整える", ExecutableLocalSkills.VERSION, "sha256:${TextFingerprint.of("local.punctuation-polish:v1")}"),
 )
 
 @Composable
@@ -63,15 +65,19 @@ fun ShortcutKeysDashboard(
                             Text("${ShortcutKeyCode.displayLabel(binding.keyCode)} — ${binding.skillName}", fontWeight = FontWeight.SemiBold)
                             Text(if (binding.enabled) "長押しで実行 · v${binding.skillVersion}" else "無効 · v${binding.skillVersion}", style = MaterialTheme.typography.bodySmall)
                         }
-                        TextButton(onClick = { editing = binding; dialogOpen = true }) { Text("再割当") }
+                        TextButton(onClick = { editing = binding; dialogOpen = true }, modifier = Modifier.heightIn(min = 48.dp)) { Text("再割当") }
                         TextButton(onClick = {
                             val result = ShortcutRegistry.remove(snapshot, binding.bindingId)
                             if (result is ShortcutEditResult.Success) onPublish(result.snapshot)
-                        }) { Text("削除") }
+                        }, modifier = Modifier.heightIn(min = 48.dp)) { Text("削除") }
                     }
                 }
             }
-            Button(onClick = { editing = null; dialogOpen = true }, modifier = Modifier.fillMaxWidth()) { Text("Skill Keyを追加") }
+            Button(
+                onClick = { editing = null; dialogOpen = true },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                content = { Text("Skill Keyを追加") },
+            )
             Text("資格情報・入力内容・実行レシートはこのスナップショットに保存しません。", style = MaterialTheme.typography.bodySmall)
         }
     }
@@ -132,7 +138,8 @@ private fun ShortcutPickerDialog(
                     }
                 }
                 Text("QWERTY", fontWeight = FontWeight.SemiBold)
-                listOf("QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM").forEach { row ->
+                // Five columns keeps every choice comfortably tappable on narrow phones.
+                listOf("QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM").flatMap { it.chunked(5) }.forEach { row ->
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                         row.forEach { key ->
                             val label = key.toString()
@@ -140,7 +147,7 @@ private fun ShortcutPickerDialog(
                             OutlinedButton(
                                 onClick = { selectedKey = label },
                                 enabled = !occupied,
-                                modifier = Modifier.weight(1f).semantics {
+                                modifier = Modifier.weight(1f).heightIn(min = 48.dp).semantics {
                                     selected = selectedKey == label
                                     contentDescription = when {
                                         occupied -> "$label、別のSkillで使用中"
@@ -170,6 +177,6 @@ private fun ShortcutPickerDialog(
                 if (result is ShortcutEditResult.Success) onPublish(result.snapshot)
             }) { Text(if (editing == null) "Add" else "保存") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("キャンセル") } },
+        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text("キャンセル") } },
     )
 }

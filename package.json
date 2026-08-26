@@ -6,7 +6,9 @@
   "engines": { "node": ">=20.0.0" },
   "scripts": {
     "build": "tsc -b --pretty false",
-    "test": "pnpm -r test",
+    "test": "pnpm -r test && pnpm test:release",
+    "test:release": "node --test scripts/test/*.test.mjs",
+    "release:readiness": "node scripts/release-readiness.mjs",
     "typecheck": "tsc -b --pretty false",
     "check": "pnpm build && pnpm test"
   },

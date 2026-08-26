@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { skillDefinitionDigest, ShortcutSnapshot, shortcutSnapshotDigest } from '@mobile-ai-keyboard/contracts';
-import { PolicyViolation, validateShortcutActivation, validateShortcutBinding, validateShortcutLayout, validateShortcutSnapshot } from '../dist/index.js';
+import { PolicyViolation, validateShortcutActivation, validateShortcutBinding, validateShortcutLayout, validateShortcutProjectionAuthority, validateShortcutSnapshot } from '../dist/index.js';
 
 const user = 'usr_1234567890abcdef';
 const device = 'dev_1234567890abcdef';
@@ -35,6 +35,34 @@ test('snapshot rejects digest replay, generation replay, and device confusion', 
   assert.throws(() => validateShortcutSnapshot(snapshot, 1, { user_id: user, device_id: device }), /monotonic|generation/i);
   assert.throws(() => validateShortcutSnapshot({ ...snapshot, generation: 2 }, 0, { user_id: user, device_id: device }), /digest/i);
   assert.throws(() => validateShortcutSnapshot(snapshot, 0, { user_id: user, device_id: 'dev_abcdefabcdefabcd' }), /device/i);
+});
+
+test('projection authority cannot disguise network or write Skills as local keys', () => {
+  assert.equal(validateShortcutProjectionAuthority(binding, projection).execution_route, 'keyboard_local');
+  assert.throws(() => validateShortcutProjectionAuthority(binding, { ...projection, execution_route: 'host_handoff' }), (error) => error instanceof PolicyViolation && error.details.code === 'PROJECTION_AUTHORITY_MISMATCH');
+  assert.throws(() => validateShortcutProjectionAuthority(binding, { ...projection, tool_summaries: [{ operation: 'calendar.availability.read', required_scopes: ['calendar.availability.read'], side_effect: 'none' }] }), /Local shortcut authority/);
+
+  const connectedBinding = { ...binding, local_eligibility: 'connected_read', required_connection_ids: ['conn_1234567890abcdef'] };
+  const connectedProjection = { ...projection, execution_route: 'host_handoff', risk_ceiling: 'R2', confirmation: 'policy_required', tool_summaries: [{ operation: 'calendar.availability.read', required_scopes: ['calendar.availability.read'], side_effect: 'none' }] };
+  assert.equal(validateShortcutProjectionAuthority(connectedBinding, connectedProjection).risk_ceiling, 'R2');
+  assert.throws(() => validateShortcutProjectionAuthority(connectedBinding, { ...connectedProjection, tool_summaries: [{ ...connectedProjection.tool_summaries[0], side_effect: 'creates_private_event' }] }), /read-only/);
+
+  const writeBinding = { ...connectedBinding, local_eligibility: 'confirmed_write' };
+  const writeProjection = { ...connectedProjection, risk_ceiling: 'R3', tool_summaries: [{ operation: 'calendar.event.create_private', required_scopes: ['calendar.events.create_private'], side_effect: 'creates_private_event' }] };
+  assert.equal(validateShortcutProjectionAuthority(writeBinding, writeProjection).risk_ceiling, 'R3');
+  assert.throws(() => validateShortcutProjectionAuthority(writeBinding, { ...writeProjection, confirmation: 'none' }), /confirmation/);
+});
+
+test('enabled connected shortcuts require a currently active connection', () => {
+  const connectionId = 'conn_1234567890abcdef';
+  const connectedBinding = { ...binding, local_eligibility: 'connected_read', required_connection_ids: [connectionId] };
+  const connectedProjection = { ...projection, execution_route: 'host_handoff', risk_ceiling: 'R2', confirmation: 'policy_required', tool_summaries: [{ operation: 'calendar.availability.read', required_scopes: ['calendar.availability.read'], side_effect: 'none' }] };
+  const connectedLayout = { ...layout };
+  const unsigned = { ...makeSnapshot(), bindings: [connectedBinding], skills: [connectedProjection], layout: connectedLayout, connection_states: [{ connection_id: connectionId, state: 'expired', epoch: 1 }] };
+  delete unsigned.content_digest;
+  assert.throws(() => validateShortcutSnapshot({ ...unsigned, content_digest: shortcutSnapshotDigest(unsigned) }, 0, { user_id: user, device_id: device }), (error) => error instanceof PolicyViolation && error.details.code === 'CONNECTION_NOT_ACTIVE');
+  const active = { ...unsigned, connection_states: [{ connection_id: connectionId, state: 'active', epoch: 1 }] };
+  assert.equal(validateShortcutSnapshot({ ...active, content_digest: shortcutSnapshotDigest(active) }, 0, { user_id: user, device_id: device }).bindings[0].local_eligibility, 'connected_read');
 });
 
 test('activation is exact editor/generation bound and cannot run in sensitive fields', () => {

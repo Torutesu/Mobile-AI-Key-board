@@ -21,6 +21,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm audit --prod --audit-level high
+      - name: Run release readiness static gate
+        run: pnpm release:readiness -- --static-only --report "$RUNNER_TEMP/release-readiness.json"
+      - name: Upload release readiness report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-readiness-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-readiness.json
+          if-no-files-found: error
 
   ios:
     name: iOS host, extension, and core
@@ -52,7 +60,7 @@ jobs:
           plutil -lint MobileAIKeyboardHost/PrivacyInfo.xcprivacy MobileAIKeyboardExtension/PrivacyInfo.xcprivacy
           test -f "$app/PrivacyInfo.xcprivacy"
           test -f "$extension/PrivacyInfo.xcprivacy"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionAttributes:RequestsOpenAccess' "$extension/Info.plist")" = "false"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionAttributes:RequestsOpenAccess' "$extension/Info.plist")" = "true"
 
   android:
     name: Android app, IME, and core

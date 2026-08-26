@@ -9,7 +9,7 @@ Store declarations must match observed release behavior, not roadmap intent. The
 | Surface | Current repository behavior | Store statement boundary |
 | --- | --- | --- |
 | Ordinary typing | local native keyboard/IME path | no typed content is sent during ordinary typing |
-| iOS Full Access | `RequestsOpenAccess=false` | do not instruct users that Full Access is required for the current fixture |
+| iOS Full Access | `RequestsOpenAccess=true` in the extension target and built extension | Full Access is currently requested for App Group-backed Skill Keys/settings synchronization; ordinary typing remains available without network access, and the current fixture does not transmit typed content |
 | Android network | no `android.permission.INTERNET` | current APK cannot perform provider/LLM network calls |
 | Text fixture | deterministic on-device rewrite | label as local fixture, not cloud AI |
 | Account/OAuth/providers | local fixture state only | do not claim real sign-in, OAuth, Calendar, Notion, or Maps connectivity |
@@ -30,6 +30,10 @@ Required review evidence:
 - clean-install and keyboard-enable screenshots on physical devices;
 - network capture for ordinary typing and each explicitly invoked destination;
 - account/data deletion evidence without support intervention.
+
+### Full Access disclosure boundary
+
+The checked-in extension requests Full Access because the Skill Keys implementation uses the shared App Group to make content-free key assignments available to the keyboard extension. This is a capability request, not evidence that the current fixture sends typed content: ordinary typing and the deterministic text fixtures remain local, and the repository contains no live LLM, OAuth, provider, or telemetry transport. A production release must show the exact destination, data fields, purpose, retention, and deletion behavior before each network-backed Skill run, provide an external-send kill switch, and re-qualify the archived extension. Until that evidence exists, Full Access, archive behavior, and physical-device behavior remain `not_proven`.
 
 ## Play Data safety baseline
 

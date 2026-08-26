@@ -67,6 +67,10 @@ Secrets never enter general application tables, model context, analytics, suppor
 - App identity: use only OS-supported, documented signals. Do not fingerprint host apps.
 - Secure input: disable AI UI before attempting context access.
 
+### iOS Full Access disclosure
+
+The current iOS extension requests Full Access (`RequestsOpenAccess=true`) so its content-free Skill Keys/settings projection can use the shared App Group. Full Access does not turn ordinary typing into a network operation in this fixture: no live transport is present, and ordinary typing remains the protected fallback. A release candidate must disclose the exact data, destination, purpose, retention, and deletion behavior for each explicitly invoked network-backed Skill before submission. Source manifests and simulator builds are configuration evidence only; archived entitlements, runtime traffic, and physical-device behavior remain `not_proven` until independently verified.
+
 Client redaction warns about passwords, API keys, card patterns, private keys, one-time codes, and high-risk identifiers. Redaction is defense-in-depth; detected secrets are blocked by default rather than silently altered.
 
 ## 7. Authentication and device security

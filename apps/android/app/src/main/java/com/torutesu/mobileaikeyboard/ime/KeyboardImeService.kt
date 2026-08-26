@@ -7,6 +7,7 @@ import com.torutesu.mobileaikeyboard.core.BoundedCapture
 import com.torutesu.mobileaikeyboard.core.CommandSession
 import com.torutesu.mobileaikeyboard.core.CommandSessionReducer
 import com.torutesu.mobileaikeyboard.core.ContentFreeTelemetry
+import com.torutesu.mobileaikeyboard.core.ExecutableLocalSkills
 import com.torutesu.mobileaikeyboard.core.InputSource
 import com.torutesu.mobileaikeyboard.core.LocalPoliteRewriteService
 import com.torutesu.mobileaikeyboard.core.NoOpTelemetry
@@ -104,7 +105,7 @@ class KeyboardImeService : InputMethodService() {
 
     /** A physical key is an explicit action surface; it never runs on key-down. */
     private fun invokeShortcut(binding: TriggerKeyBinding) {
-        if (lockReason != null || !binding.enabled) return
+        if (lockReason != null || !binding.enabled || !ExecutableLocalSkills.isExecutable(binding)) return
         val current = shortcutStore.read()
         val exact = current.bindings.firstOrNull {
             it.bindingId == binding.bindingId && it.keyCode == binding.keyCode && it.skillDigest == binding.skillDigest && it.enabled

@@ -49,11 +49,9 @@ fun HostAppDashboard(
     onShortcutPublish: (ShortcutSnapshot) -> Boolean = { false },
 ) {
     Text("アカウント・デバイス・Activity", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-    Text("接続先に依存しないローカルfixture表示。実identity/backend接続は未証明です。")
+    Text("接続先に依存しないローカル機能のみを表示しています。外部サービス連携はベータでは利用できません。")
     AccountCard(state.account, dispatch)
     DevicesCard(state, dispatch)
-    ConnectionsDashboard(state, dispatch)
-    CalendarWriteDashboard(state, dispatch)
     SkillBuilderDashboard(state, dispatch)
     ShortcutKeysDashboard(shortcutSnapshot, onShortcutPublish)
     KeyboardSettingsDashboard(state, dispatch)
@@ -145,12 +143,15 @@ private fun DeviceRow(device: DeviceState, dispatch: (HostEvent) -> Unit) {
 
 @Composable
 private fun ActivityCard(state: HostAppState, dispatch: (HostEvent) -> Unit) {
-    val selected = state.runs.firstOrNull { it.id == state.selectedRunId }
+    // Connector/provider fixture runs are intentionally kept out of the product
+    // surface until a real authenticated E2E exists.
+    val localRuns = state.runs.filter { it.skillId.startsWith("local.") }
+    val selected = localRuns.firstOrNull { it.id == state.selectedRunId }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Activity", style = MaterialTheme.typography.titleLarge)
             Text("content-free receiptのみを表示します。入力文、選択文、出力文は保存・表示しません。", style = MaterialTheme.typography.bodySmall)
-            state.runs.forEach { run -> ActivityRow(run, selected?.id == run.id, dispatch) }
+            localRuns.forEach { run -> ActivityRow(run, selected?.id == run.id, dispatch) }
             selected?.let { ActivityDetail(it) }
         }
     }

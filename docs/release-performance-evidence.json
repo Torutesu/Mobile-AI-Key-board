@@ -1,0 +1,27 @@
+{
+  "schema_version": "mobile-ai-keyboard.performance-evidence.v1",
+  "status": "not_proven",
+  "evidence_class": "protected_external",
+  "candidate": {
+    "source_commit": null,
+    "artifact_digest": null
+  },
+  "required_metrics": [
+    "key_to_commit_p50_ms",
+    "key_to_commit_p95_ms",
+    "keyboard_cold_open_p95_ms",
+    "keyboard_warm_open_p95_ms",
+    "long_press_false_activation_rate",
+    "ordinary_tap_drop_rate",
+    "skill_completion_p95_ms",
+    "skill_failure_rate",
+    "skill_cancel_rate",
+    "memory_pressure_extension_ime_kill_rate",
+    "crash_free_sessions_rate",
+    "android_anr_rate",
+    "offline_success_rate",
+    "provider_timeout_recovery_rate"
+  ],
+  "measurements": [],
+  "notes": "A local fixture, simulator, JVM, or self-attested measurement must not be added as production performance evidence. Populate measurements only with protected runner/device captures bound to the candidate source and artifact."
+}

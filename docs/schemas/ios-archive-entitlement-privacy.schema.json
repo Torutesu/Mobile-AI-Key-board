@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-ai-keyboard.invalid/schemas/ios-archive-entitlement-privacy-v1.json",
+  "title": "Protected iOS archive entitlement and privacy inspection",
+  "type": "object",
+  "required": ["schema_version", "status", "evidence_class", "candidate", "entitlements", "extension_info", "privacy_manifests"],
+  "properties": {
+    "schema_version": {"const": "mobile-ai-keyboard.ios-archive.v1"},
+    "status": {"enum": ["not_proven", "in_progress", "passed", "failed"]},
+    "evidence_class": {"const": "protected_external"},
+    "candidate": {"type": "object", "required": ["source_commit", "artifact_digest"], "properties": {"source_commit": {"type": ["string", "null"]}, "artifact_digest": {"type": ["string", "null"]}}, "additionalProperties": false},
+    "entitlements": {"type": "object", "required": ["host", "extension"], "properties": {"host": {"type": "object"}, "extension": {"type": "object"}}, "additionalProperties": false},
+    "extension_info": {"type": "object", "required": ["requests_open_access"], "properties": {"requests_open_access": {"type": ["boolean", "null"]}}, "additionalProperties": false},
+    "privacy_manifests": {"type": "object", "required": ["host", "extension"], "properties": {"host": {"type": "object"}, "extension": {"type": "object"}}, "additionalProperties": false},
+    "evidence": {"type": ["object", "null"]},
+    "notes": {"type": "string"}
+  },
+  "additionalProperties": false
+}

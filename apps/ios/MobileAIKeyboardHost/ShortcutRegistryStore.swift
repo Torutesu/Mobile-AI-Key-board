@@ -13,6 +13,10 @@ struct ShortcutSkillOption: Identifiable, Equatable {
     let inputSources: [ShortcutSource]
     let route: ShortcutExecutionRoute
 
+    /// A host handoff is not executable from the keyboard extension yet. Keep it
+    /// visible only as an explicit roadmap item; never let it reach assignment.
+    var isAssignable: Bool { route == .keyboardLocal }
+
     var projection: ShortcutSkillProjectionV1 {
         ShortcutSkillProjectionV1(id: id, versionID: versionID, skillVersion: version, skillDigest: digest, name: name, description: description, inputSources: inputSources, executionRoute: route)
     }
@@ -57,6 +61,8 @@ final class ShortcutRegistryStore: ObservableObject {
     }
 
     var activeBindings: [ShortcutBindingV1] { snapshot.bindings.filter(\.enabled) }
+    var assignableSkills: [ShortcutSkillOption] { skills.filter(\.isAssignable) }
+    var unavailableSkills: [ShortcutSkillOption] { skills.filter { !$0.isAssignable } }
     var assignedKeyCount: Int { activeBindings.count }
 
     func binding(for key: ShortcutKeyCode) -> ShortcutBindingV1? {
@@ -69,6 +75,7 @@ final class ShortcutRegistryStore: ObservableObject {
 
     func assign(skillID: String, key: ShortcutKeyCode) throws {
         guard let skill = skills.first(where: { $0.id == skillID }) else { throw ShortcutRegistryError.skillUnavailable }
+        guard skill.isAssignable else { throw ShortcutRegistryError.skillUnavailable }
         if let conflict = binding(for: key) { throw ShortcutRegistryError.keyOccupied(self.skill(for: conflict)?.name ?? conflict.skillID) }
         let now = Date()
         let binding = ShortcutBindingV1(id: "bind_\(UUID().uuidString)", userID: userID, deviceID: deviceID, skillID: skill.id, versionID: skill.versionID, skillVersion: skill.version, skillDigest: skill.digest, keyCode: key, presentation: ShortcutPresentation(iconValue: skill.icon, shortLabel: skill.name, accessibilityLabel: "\(key.displayLabel)、\(skill.name)", accessibilityHint: "長押しで\(skill.name)を実行", tintToken: .accent), executionRoute: skill.route, createdAt: now, updatedAt: now)
@@ -76,7 +83,7 @@ final class ShortcutRegistryStore: ObservableObject {
     }
 
     func reassign(bindingID: String, to key: ShortcutKeyCode) throws {
-        guard let old = snapshot.bindings.first(where: { $0.id == bindingID }), skill(for: old) != nil else { throw ShortcutRegistryError.skillUnavailable }
+        guard let old = snapshot.bindings.first(where: { $0.id == bindingID }), let oldSkill = skill(for: old), oldSkill.isAssignable else { throw ShortcutRegistryError.skillUnavailable }
         if let conflict = binding(for: key), conflict.id != bindingID { throw ShortcutRegistryError.keyOccupied(self.skill(for: conflict)?.name ?? conflict.skillID) }
         var updated = old
         updated = ShortcutBindingV1(id: old.id, userID: old.userID, deviceID: old.deviceID, skillID: old.skillID, versionID: old.versionID, skillVersion: old.skillVersion, skillDigest: old.skillDigest, keyCode: key, presentation: old.presentation, enabled: old.enabled, executionRoute: old.executionRoute, requiredConnectionIDs: old.requiredConnectionIDs, createdAt: old.createdAt, updatedAt: Date())
@@ -85,6 +92,7 @@ final class ShortcutRegistryStore: ObservableObject {
 
     func setEnabled(bindingID: String, enabled: Bool) throws {
         guard let old = snapshot.bindings.first(where: { $0.id == bindingID }) else { throw ShortcutRegistryError.skillUnavailable }
+        if enabled, let oldSkill = skill(for: old), !oldSkill.isAssignable { throw ShortcutRegistryError.skillUnavailable }
         let updated = ShortcutBindingV1(id: old.id, userID: old.userID, deviceID: old.deviceID, skillID: old.skillID, versionID: old.versionID, skillVersion: old.skillVersion, skillDigest: old.skillDigest, keyCode: old.keyCode, presentation: old.presentation, enabled: enabled, executionRoute: old.executionRoute, requiredConnectionIDs: old.requiredConnectionIDs, createdAt: old.createdAt, updatedAt: Date())
         try publish(bindings: snapshot.bindings.map { $0.id == bindingID ? updated : $0 }, skills: snapshot.skills, revision: snapshot.layout.revision + 1)
     }

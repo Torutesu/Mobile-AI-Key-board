@@ -3,6 +3,7 @@ import MobileAIKeyboardCore
 
 struct AccountDashboardView: View {
     @EnvironmentObject private var store: AccountActivityStore
+    @EnvironmentObject private var shortcutRegistry: ShortcutRegistryStore
 
     var body: some View {
         ScrollView {
@@ -14,7 +15,7 @@ struct AccountDashboardView: View {
                 navigationCard(title: "Calendar write", subtitle: "R3・招待なしprivate event（fixture）", systemImage: "calendar.badge.plus") { CalendarWriteView() }
                 navigationCard(title: "Private Skill Builder", subtitle: "コードなし・private v1・fixture deploy", systemImage: "wand.and.stars") { SkillBuilderView() }
                 navigationCard(title: "キーボード設定", subtitle: "テーマ・キーサイズ・片手モード・workflow packs", systemImage: "keyboard") { KeyboardSettingsView() }
-                navigationCard(title: "Skill Keys", subtitle: "QWERTYキーへの割り当て・再割り当て・削除", systemImage: "keyboard.badge.ellipsis") { SkillKeysView() }
+                navigationCard(title: "Skill Keys", subtitle: "QWERTYキーへの割り当て・再割り当て・削除", systemImage: "keyboard.badge.ellipsis") { SkillKeysView().environmentObject(shortcutRegistry) }
                 navigationCard(title: "Contextual suggestions", subtitle: "端末内候補・raw textなし・自動適用なし", systemImage: "sparkles") { ContextualSuggestionsView() }
                 navigationCard(title: "Trust Preview / Skill catalog", subtitle: "SK-006 metadata・provenance・not_proven表示", systemImage: "checkmark.seal") { TrustCatalogView() }
                 navigationCard(title: "Team policy", subtitle: "owner/version/digest・explicit upgrade・revoke", systemImage: "person.3") { TeamPolicyView() }

@@ -343,3 +343,52 @@ public struct LaunchReadinessFixture: Equatable, Sendable {
         self.incidentEntry = incidentEntry
     }
 }
+
+/// The host cannot introspect keyboard-extension settings directly. The extension
+/// writes this content-free status into the App Group so onboarding can explain
+/// what is known and what still needs a user check after returning from Settings.
+public struct KeyboardAccessStatus: Codable, Equatable, Sendable {
+    public let fullAccessEnabled: Bool
+    public let appGroupAvailable: Bool
+    public let checkedAt: Date
+
+    public init(fullAccessEnabled: Bool, appGroupAvailable: Bool, checkedAt: Date = Date()) {
+        self.fullAccessEnabled = fullAccessEnabled
+        self.appGroupAvailable = appGroupAvailable
+        self.checkedAt = checkedAt
+    }
+}
+
+/// Stores only keyboard capability state. It never stores text, prompts, tokens,
+/// account identifiers, or provider data.
+public final class AppGroupKeyboardAccessStatusStore: @unchecked Sendable {
+    public static let appGroupIdentifier = AppGroupShortcutSnapshotStore.appGroupIdentifier
+    private let defaults: UserDefaults?
+
+    public init() {
+        let fileManager = FileManager.default
+        if fileManager.containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupIdentifier) != nil {
+            defaults = UserDefaults(suiteName: Self.appGroupIdentifier)
+        } else {
+            defaults = nil
+        }
+    }
+
+    public var isUsingSharedAppGroup: Bool { defaults != nil }
+
+    public func load() -> KeyboardAccessStatus? {
+        guard let data = defaults?.data(forKey: Self.storageKey) else { return nil }
+        return try? Self.decoder.decode(KeyboardAccessStatus.self, from: data)
+    }
+
+    public func publish(fullAccessEnabled: Bool) {
+        guard let defaults else { return }
+        let status = KeyboardAccessStatus(fullAccessEnabled: fullAccessEnabled, appGroupAvailable: true)
+        guard let data = try? Self.encoder.encode(status) else { return }
+        defaults.set(data, forKey: Self.storageKey)
+    }
+
+    private static let storageKey = "keyboard-access-status-v1"
+    private static let encoder = JSONEncoder()
+    private static let decoder = JSONDecoder()
+}

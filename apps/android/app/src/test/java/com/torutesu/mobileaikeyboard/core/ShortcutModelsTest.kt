@@ -75,4 +75,25 @@ class ShortcutModelsTest {
         invalidEnabledLines[1] = invalidEnabledFields.joinToString("\t")
         assertEquals(null, ShortcutSnapshotCodec.decode(invalidEnabledLines.joinToString("\n")))
     }
+
+    @Test
+    fun snapshotRejectsSkillsThatTheImeCannotExecute() {
+        val unsupported = binding().copy(skillId = "calendar.availability.read")
+        val snapshot = ShortcutSnapshot(generation = 1, bindings = listOf(unsupported))
+        assertFalse(snapshot.isValid())
+        assertTrue(ShortcutRegistry.add(ShortcutSnapshot.empty(), unsupported) is ShortcutEditResult.Rejected)
+        assertTrue(ExecutableLocalSkills.canExecute(ExecutableLocalSkills.POLITE_REWRITE_ID, 1))
+        assertFalse(ExecutableLocalSkills.canExecute(ExecutableLocalSkills.POLITE_REWRITE_ID, 2))
+    }
+
+    @Test
+    fun storeFallsBackToLastGoodWhenAnOlderNonlocalBindingIsRejected() {
+        val good = ShortcutSnapshot(generation = 1, bindings = listOf(binding()))
+        val rejected = ShortcutSnapshot(
+            generation = 2,
+            bindings = listOf(binding().copy(skillId = "calendar.availability.read")),
+        )
+        assertEquals(good, ShortcutSnapshotRecovery.select(rejected, good))
+        assertEquals(ShortcutSnapshot.empty(), ShortcutSnapshotRecovery.select(rejected, rejected))
+    }
 }

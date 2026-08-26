@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.graphics.Typeface
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.widget.Button
 import android.widget.EditText
@@ -71,6 +72,10 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
         root.addView(toolbar)
         val rows = if (numericMode) listOf("1234567890", "-/:;()\$&@", ".,?!'\"")
         else listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
+        val activeBindings = shortcutSnapshot.bindings.filter { it.enabled }
+        if (activeBindings.isNotEmpty()) {
+            root.addView(label("青枠のキーは長押しでSkillを実行（${activeBindings.joinToString { it.skillName }}）", 12f))
+        }
         rows.forEach { letters ->
             val row = row()
             letters.forEach { letter ->
@@ -253,10 +258,17 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
                 setStroke(dp(2), Color.rgb(17, 156, 243))
                 cornerRadius = dp(8).toFloat()
             }
+            tooltipText = "${binding.skillName}（長押し）"
         }
         layoutParams = LinearLayout.LayoutParams(0, dp(52), weight).apply { setMargins(dp(2), dp(2), dp(2), dp(2)) }
+        val commitBoundCharacter = {
+            callbacks.onText(if (shift) text.uppercase() else text.lowercase())
+            shift = false
+        }
         setOnClickListener {
-            if (text.length == 1 && text[0].isLetter()) {
+            if (binding != null) {
+                commitBoundCharacter()
+            } else if (text.length == 1 && text[0].isLetter()) {
                 callbacks.onText(if (shift) text.uppercase() else text.lowercase())
                 shift = false
             } else if (text.length == 1 && !text[0].isLetterOrDigit()) {
@@ -264,16 +276,20 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
             }
         }
         binding?.let { shortcut ->
-            // Use an explicit timer so OEM ViewConfiguration values cannot
-            // change the 450ms product boundary. Once fired, ACTION_UP is
-            // consumed and the ordinary character is never committed.
+            // Own the entire touch sequence. Letting Button also process ACTION_UP
+            // can commit the character after the delayed Skill callback on some OEMs.
+            // Explicitly committing only the short, uncancelled path makes a Skill
+            // invocation and a character tap mutually exclusive.
             var longPressFired = false
             var cancelled = false
+            var isDown = false
             var downX = 0f
             var downY = 0f
             val trigger = Runnable {
-                if (!cancelled && isPressed) {
+                if (!cancelled && isDown) {
                     longPressFired = true
+                    isPressed = false
+                    performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                     callbacks.onShortcut(shortcut)
                 }
             }
@@ -282,10 +298,12 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
                     MotionEvent.ACTION_DOWN -> {
                         longPressFired = false
                         cancelled = false
+                        isDown = true
                         downX = event.x
                         downY = event.y
+                        isPressed = true
                         postDelayed(trigger, 450L)
-                        false
+                        true
                     }
                     MotionEvent.ACTION_MOVE -> {
                         val dx = event.x - downX
@@ -293,23 +311,42 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
                         val tooFar = kotlin.math.hypot(dx.toDouble(), dy.toDouble()) > 12f * density
                         if (tooFar) {
                             cancelled = true
+                            isDown = false
                             removeCallbacks(trigger)
+                            isPressed = false
                         }
-                        false
+                        true
                     }
                     MotionEvent.ACTION_POINTER_DOWN -> {
                         cancelled = true
+                        isDown = false
                         removeCallbacks(trigger)
-                        false
+                        isPressed = false
+                        true
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         removeCallbacks(trigger)
-                        val consume = longPressFired
-                        if (event.actionMasked == MotionEvent.ACTION_CANCEL) cancelled = true
+                        val commitTap = event.actionMasked == MotionEvent.ACTION_UP && isDown && !cancelled && !longPressFired
+                        if (commitTap) {
+                            // Keep the click path accessible while ensuring it is
+                            // invoked once (the listener owns the raw touch stream).
+                            performClick()
+                        }
+                        isDown = false
+                        isPressed = false
                         longPressFired = false
-                        consume
+                        cancelled = true
+                        // Consume both completed and cancelled sequences so Button
+                        // cannot dispatch a second click after this listener.
+                        true
                     }
-                    else -> false
+                    else -> {
+                        cancelled = true
+                        isDown = false
+                        removeCallbacks(trigger)
+                        isPressed = false
+                        true
+                    }
                 }
             }
         }
