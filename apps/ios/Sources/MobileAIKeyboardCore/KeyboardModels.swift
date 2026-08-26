@@ -156,6 +156,7 @@ public enum KeyboardError: String, Equatable, Sendable {
     case resultTooLarge
     case protectedEntityChanged
     case activeSelectionNotApproved
+    case surroundingContextApplyUnavailable
 
     public var recoveryMessage: String {
         switch self {
@@ -169,6 +170,7 @@ public enum KeyboardError: String, Equatable, Sendable {
         case .resultTooLarge: return "結果が10,000文字を超えているため適用できません。"
         case .protectedEntityChanged: return "保護対象の名前・日時・数値・URLなどが変更されたため適用を停止しました。"
         case .activeSelectionNotApproved: return "未承認の選択範囲を置換する可能性があるため適用を停止しました。選択範囲を入力ソースに指定してください。"
+        case .surroundingContextApplyUnavailable: return "前後の文章は安全に範囲置換できないため、自動適用を停止しました。結果をコピーしてください。"
         }
     }
 }

@@ -112,6 +112,24 @@ class KeyboardFoundationTest {
     }
 
     @Test
+    fun selectionOnlyShortcut_neverFallsBackToSkillLabelAsEditorContent() {
+        var session = CommandSessionReducer.reduce(CommandSession(), SessionEvent.BeginCommand)
+        // Production Shortcut invocation deliberately supplies no command: the
+        // Skill label is metadata and must never become transformable content.
+        session = CommandSessionReducer.reduce(session, SessionEvent.UpdateCommand(""))
+        session = CommandSessionReducer.reduce(session, SessionEvent.ToggleSource(InputSource.SELECTION, true))
+        session = CommandSessionReducer.reduce(session, SessionEvent.CapturePrepared(
+            BoundedCapture("", "", "", "", false, false, "fingerprint"),
+        ))
+        assertEquals(SessionPhase.CAPTURE_REVIEW, session.phase)
+        assertEquals("", session.target)
+        assertFalse(session.canAcknowledge)
+        assertTrue(session.preview?.blockedReason?.contains("文章") == true)
+        session = CommandSessionReducer.reduce(session, SessionEvent.AcknowledgeCapture)
+        assertEquals(SessionPhase.CAPTURE_REVIEW, session.phase)
+    }
+
+    @Test
     fun applyAndUndoStateMachine_handlesStaleRejection() {
         var session = CommandSession(phase = SessionPhase.RESULT_REVIEW, resultText = "新しい文")
         session = CommandSessionReducer.reduce(session, SessionEvent.ApplyRejected("stale"))

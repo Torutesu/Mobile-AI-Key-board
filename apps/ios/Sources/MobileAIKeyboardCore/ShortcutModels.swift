@@ -180,6 +180,21 @@ public struct ShortcutSkillProjectionV1: Codable, Equatable, Sendable, Identifia
     }
 }
 
+/// v1 local transforms can safely replace only an explicit editor selection.
+/// Surrounding context is readable on some hosts, but UIInputViewController
+/// cannot atomically replace that arbitrary range; treating it as replaceable
+/// would duplicate the original text when the result is inserted.
+public enum ShortcutCapturePolicy {
+    public static func localSelection(skill: ShortcutSkillProjectionV1, selectedText: String?) -> String? {
+        guard skill.executionRoute == .keyboardLocal,
+              skill.outputType == .replaceSelection,
+              skill.inputSources.contains(.selection),
+              let selectedText,
+              !selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return selectedText
+    }
+}
+
 public struct ShortcutToolSummary: Codable, Equatable, Sendable {
     public let operation: String
     public let requiredScopes: [String]

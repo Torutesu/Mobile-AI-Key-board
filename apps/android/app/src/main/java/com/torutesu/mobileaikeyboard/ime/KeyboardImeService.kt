@@ -138,7 +138,10 @@ class KeyboardImeService : InputMethodService() {
         // and remains ephemeral until the existing Capture Review acknowledges it.
         // Bundled v1 Skill Keys declare selection-only input. Do not capture
         // surrounding editor text merely because the IME can access it.
-        capture(exact.skillName, useSelection = true, useSurrounding = false)
+        // A Skill label is metadata, never fallback editor content. Bundled v1
+        // shortcuts are selection-only; an empty selection must therefore
+        // produce a blocked Capture Review instead of rewriting the Skill name.
+        capture(command = "", useSelection = true, useSurrounding = false)
     }
 
     private fun capture(command: String, useSelection: Boolean, useSurrounding: Boolean) {

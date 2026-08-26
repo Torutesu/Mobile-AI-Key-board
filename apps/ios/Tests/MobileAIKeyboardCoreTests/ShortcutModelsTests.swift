@@ -65,6 +65,25 @@ final class ShortcutModelsTests: XCTestCase {
         }
     }
 
+    func testLocalShortcutCaptureRequiresExplicitNonblankSelection() {
+        let skill = makeSnapshot().skills[0]
+        XCTAssertNil(ShortcutCapturePolicy.localSelection(skill: skill, selectedText: nil))
+        XCTAssertNil(ShortcutCapturePolicy.localSelection(skill: skill, selectedText: "  \n"))
+        XCTAssertEqual(ShortcutCapturePolicy.localSelection(skill: skill, selectedText: "選択した文章"), "選択した文章")
+
+        let unsafeContextOnly = ShortcutSkillProjectionV1(
+            id: skill.id,
+            versionID: skill.versionID,
+            skillVersion: skill.skillVersion,
+            skillDigest: skill.skillDigest,
+            name: skill.name,
+            description: skill.description,
+            inputSources: [.surroundingText],
+            outputType: .replaceSelection
+        )
+        XCTAssertNil(ShortcutCapturePolicy.localSelection(skill: unsafeContextOnly, selectedText: "選択した文章"))
+    }
+
     private func makeSnapshot() -> ShortcutSnapshotV1 {
         let skillDigest = ShortcutDigest.sha256("test-skill:v1")
         let skill = ShortcutSkillProjectionV1(id: "skill_test", versionID: "sv_test", skillVersion: 1, skillDigest: skillDigest, name: "Test", description: "local only")

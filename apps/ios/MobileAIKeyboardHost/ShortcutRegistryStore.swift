@@ -194,8 +194,8 @@ final class ShortcutRegistryStore: ObservableObject {
     }
 
     static let fixtureSkills: [ShortcutSkillOption] = [
-        ShortcutSkillOption(id: "skill_polite_local_v1", versionID: "sv_polite_local_1", version: 1, digest: ShortcutDigest.sha256("skill_polite_local:v1"), name: "丁寧に整える", description: "選択した文章のトーンを丁寧に整えます。", icon: "text.badge.checkmark", inputSources: [.selection, .surroundingText], route: .keyboardLocal),
-        ShortcutSkillOption(id: "skill_punctuation_local_v1", versionID: "sv_punctuation_local_1", version: 1, digest: ShortcutDigest.sha256("skill_punctuation_local:v1"), name: "句読点を整える", description: "空白と句読点を端末内で読みやすく整えます。", icon: "text.alignleft", inputSources: [.selection, .surroundingText], route: .keyboardLocal),
+        ShortcutSkillOption(id: "skill_polite_local_v1", versionID: "sv_polite_local_1", version: 1, digest: ShortcutDigest.sha256("skill_polite_local:v1"), name: "丁寧に整える", description: "選択した文章のトーンを丁寧に整えます。", icon: "text.badge.checkmark", inputSources: [.selection], route: .keyboardLocal),
+        ShortcutSkillOption(id: "skill_punctuation_local_v1", versionID: "sv_punctuation_local_1", version: 1, digest: ShortcutDigest.sha256("skill_punctuation_local:v1"), name: "句読点を整える", description: "選択した文章の空白と句読点を端末内で読みやすく整えます。", icon: "text.alignleft", inputSources: [.selection], route: .keyboardLocal),
         ShortcutSkillOption(id: "skill_calendar_local_v1", versionID: "sv_calendar_local_1", version: 1, digest: ShortcutDigest.sha256("skill_calendar_local:v1"), name: "空き時間を探す", description: "接続済みカレンダーの読み取りレビューを開きます。", icon: "calendar", inputSources: [.command, .currentDateTime], route: .hostHandoff)
     ]
 }

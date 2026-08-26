@@ -380,6 +380,14 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
             }
         }
         binding?.let { shortcut ->
+            // Expose a real ACTION_LONG_CLICK to accessibility services. Raw
+            // touch still owns tap-vs-hold arbitration below, while TalkBack
+            // can invoke the exact same action without synthesizing pointer
+            // timing. ACTION_CLICK remains ordinary character input.
+            setOnLongClickListener {
+                callbacks.onShortcut(shortcut)
+                true
+            }
             // Own the entire touch sequence. Letting Button also process ACTION_UP
             // can commit the character after the delayed Skill callback on some OEMs.
             // Explicitly committing only the short, uncancelled path makes a Skill
@@ -396,7 +404,7 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
                     if (currentConfig.haptics != com.torutesu.mobileaikeyboard.core.HapticMode.OFF) {
                         performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                     }
-                    callbacks.onShortcut(shortcut)
+                    performLongClick()
                 }
             }
             setOnTouchListener { _, event ->

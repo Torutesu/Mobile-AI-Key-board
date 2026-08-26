@@ -44,6 +44,7 @@ final class KeyboardViewController: UIInputViewController {
         super.viewDidLoad()
         view.backgroundColor = .secondarySystemBackground
         buildTypingView()
+        refreshFieldSecurityFromProxy()
         updateFullAccessState()
         refreshShortcutSnapshot()
         // iOS routes secure text fields to the system keyboard and does not expose their traits to
@@ -53,6 +54,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        refreshFieldSecurityFromProxy()
         updateFullAccessState()
         consumedLongPressKey = nil
         longPressBeganKey = nil
@@ -401,27 +403,17 @@ final class KeyboardViewController: UIInputViewController {
             UIAccessibility.post(notification: .announcement, argument: statusLabel.text)
             return
         }
-            let selected = textDocumentProxy.selectedText ?? ""
-            let before = textDocumentProxy.documentContextBeforeInput ?? ""
-            let after = textDocumentProxy.documentContextAfterInput ?? ""
-            let source: CaptureSource
-            let text: String
-            if skill.inputSources.contains(.selection), !selected.isEmpty {
-                source = .selection; text = selected
-            } else if skill.inputSources.contains(.surroundingText), !before.isEmpty || !after.isEmpty {
-                source = .surroundingContext
-                text = String(before.suffix(LocalTextLimits.surroundingBeforeCharacters)) + String(after.prefix(LocalTextLimits.surroundingAfterCharacters))
-            } else {
+            guard let text = ShortcutCapturePolicy.localSelection(skill: skill, selectedText: textDocumentProxy.selectedText) else {
                 presentRecoverableError(.emptyInput)
                 return
             }
+            let source: CaptureSource = .selection
             guard text.count <= LocalTextLimits.selectionCharacters else { presentRecoverableError(.captureTooLarge); return }
             let redaction = redactor.redact(text)
-            let target = source == .selection ? selected : before + after
             pendingShortcutSkill = skill
             pendingShortcutActivation = ShortcutActivationV1(binding: exactBinding, snapshot: snapshot, editorSessionID: documentIdentifier)
             selectedSource = source
-            captureDraft = CaptureDraft(text: text, source: source, fieldFingerprint: locking.fingerprint(target), redactedText: redaction.redacted, externalTransmissionAllowed: false, fallbackMessage: "\(skill.name) v\(skill.skillVersion)。内容を確認してから端末内で実行します。", documentIdentifier: documentIdentifier)
+            captureDraft = CaptureDraft(text: text, source: source, fieldFingerprint: locking.fingerprint(text), redactedText: redaction.redacted, externalTransmissionAllowed: false, fallbackMessage: "\(skill.name) v\(skill.skillVersion)。選択範囲を確認してから端末内で実行します。", documentIdentifier: documentIdentifier)
             captureAcknowledged = false
             transition(.beginCapture(captureDraft!))
             showCaptureReview(captureDraft!, redactionBlocked: redaction.blocked)
@@ -651,6 +643,14 @@ final class KeyboardViewController: UIInputViewController {
         let proposed = resultTextView.text ?? ""
         guard proposed.count <= LocalTextLimits.resultCharacters else { presentRecoverableError(.resultTooLarge); return }
         guard result.preservedEntities.allSatisfy({ proposed.contains($0) }) else { presentRecoverableError(.protectedEntityChanged); return }
+        // UIInputViewController can replace the active selection, but it has no
+        // atomic API for replacing an arbitrary before/after context window.
+        // Inserting here would duplicate the original text. Keep Copy available
+        // and fail closed until a range-authoritative host handoff exists.
+        guard draft.source != .surroundingContext else {
+            presentRecoverableError(.surroundingContextApplyUnavailable)
+            return
+        }
         if draft.source != .selection, !(textDocumentProxy.selectedText ?? "").isEmpty {
             presentRecoverableError(.activeSelectionNotApproved)
             return
@@ -836,6 +836,7 @@ final class KeyboardViewController: UIInputViewController {
     /// is accepted only when the resulting document identity and whole-field fingerprint match.
     func textDidChange(_ textInput: UITextInput) {
         updateReturnKeyPresentation()
+        refreshFieldSecurityFromProxy()
         if case .applied(let token) = machine.screen {
             let currentField = (textDocumentProxy.documentContextBeforeInput ?? "") + (textDocumentProxy.documentContextAfterInput ?? "")
             let identityMatches = token.documentIdentifier == nil || token.documentIdentifier == documentIdentifier
@@ -850,6 +851,25 @@ final class KeyboardViewController: UIInputViewController {
     func updateFieldSecurity(_ context: FieldSecurityContext) {
         if let reason = policy.lockReason(for: context) { transition(.lock(reason)) }
         else if case .locked = machine.screen { transition(.unlock) }
+    }
+
+    private func refreshFieldSecurityFromProxy() {
+        let keyboardType: String?
+        switch textDocumentProxy.keyboardType {
+        case .asciiCapableNumberPad: keyboardType = "asciiCapableNumberPad"
+        case .phonePad: keyboardType = "phonePad"
+        case .numberPad: keyboardType = "numberPad"
+        case .decimalPad: keyboardType = "decimalPad"
+        default: keyboardType = nil
+        }
+        updateFieldSecurity(FieldSecurityContext(
+            // UIKit exposes this trait as optional through the document proxy;
+            // nil means the host did not mark the field secure. Explicit
+            // sensitive content types below still fail closed.
+            isSecureTextEntry: textDocumentProxy.isSecureTextEntry ?? false,
+            textContentType: textDocumentProxy.textContentType?.rawValue,
+            keyboardType: keyboardType
+        ))
     }
 }
 
