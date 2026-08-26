@@ -12,5 +12,5 @@
     "ordinary_tap_drop_rate": {"unit": "ratio", "maximum": 0.001}
   },
   "required_observation_binding": ["candidate_digest", "platform", "environment", "evidence.kind", "sample_count"],
-  "protected_pass_requirements": ["environment=protected_device", "evidence.kind=protected_external", "protected_runner_attestation", "artifact_digest"]
+  "protected_pass_requirements": ["environment=protected_device", "evidence.kind=protected_external", "protected_runner_attestation", "candidate.source_commit matches expected candidate_sha", "candidate.artifact_digest", "evidence.source_commit matches candidate", "evidence.artifact_digest matches candidate"]
 }

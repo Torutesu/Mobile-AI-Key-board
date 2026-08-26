@@ -9,14 +9,15 @@
     "status": {"enum": ["not_proven", "in_progress", "passed", "failed"]},
     "evidence_class": {"const": "protected_external"},
     "candidate": {"$ref": "#/$defs/candidate"},
-    "required_scenarios": {"type": "array", "minItems": 11, "items": {"type": "string"}},
+    "required_scenarios": {"type": "array", "minItems": 13, "items": {"type": "string"}},
     "targets": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/target"}},
     "required_field_classes": {"type": "array", "minItems": 10, "items": {"type": "string"}},
     "required_lifecycle_events": {"type": "array", "minItems": 6, "items": {"type": "string"}}
   },
   "$defs": {
     "candidate": {"type": "object", "required": ["source_commit", "artifact_digest"], "properties": {"source_commit": {"type": ["string", "null"]}, "artifact_digest": {"type": ["string", "null"]}}, "additionalProperties": false},
-    "target": {"type": "object", "required": ["platform", "device_class", "os", "devices", "apps", "status", "runs"], "properties": {"platform": {"enum": ["ios", "android"]}, "device_class": {"type": "string"}, "os": {"type": "string"}, "devices": {"type": "array", "minItems": 1, "items": {"type": "string"}}, "apps": {"type": "array", "minItems": 7, "items": {"type": "string"}}, "status": {"enum": ["not_proven", "in_progress", "passed", "failed"]}, "runs": {"type": "array", "items": {"type": "object"}}}, "additionalProperties": false}
+    "target": {"type": "object", "required": ["platform", "device_class", "os", "devices", "apps", "status", "runs"], "properties": {"platform": {"enum": ["ios", "android"]}, "device_class": {"type": "string"}, "os": {"type": "string"}, "devices": {"type": "array", "minItems": 1, "items": {"type": "string"}}, "apps": {"type": "array", "minItems": 7, "items": {"type": "string"}}, "status": {"enum": ["not_proven", "in_progress", "passed", "failed"]}, "runs": {"type": "array", "items": {"$ref": "#/$defs/run"}}}, "additionalProperties": false},
+    "run": {"type": "object", "required": ["run_id", "runner_id", "attested", "evidence_class", "environment", "device_id", "source_commit", "artifact_digest", "scenarios", "accessibility_tools"], "properties": {"run_id": {"type": "string", "minLength": 1}, "runner_id": {"type": "string", "minLength": 1}, "attested": {"const": true}, "evidence_class": {"const": "protected_external"}, "environment": {"const": "protected_device"}, "device_id": {"type": "string", "minLength": 1}, "source_commit": {"type": "string", "pattern": "^[a-fA-F0-9]{40}$"}, "artifact_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}, "app": {"type": "string"}, "scenarios": {"type": "array", "minItems": 1, "items": {"type": "string"}}, "accessibility_tools": {"type": "array", "minItems": 1, "items": {"type": "string"}}}, "additionalProperties": true}
   },
   "additionalProperties": false
 }

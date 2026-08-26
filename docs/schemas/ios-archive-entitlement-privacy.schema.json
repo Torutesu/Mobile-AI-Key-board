@@ -12,7 +12,7 @@
     "entitlements": {"type": "object", "required": ["host", "extension"], "properties": {"host": {"type": "object"}, "extension": {"type": "object"}}, "additionalProperties": false},
     "extension_info": {"type": "object", "required": ["requests_open_access"], "properties": {"requests_open_access": {"type": ["boolean", "null"]}}, "additionalProperties": false},
     "privacy_manifests": {"type": "object", "required": ["host", "extension"], "properties": {"host": {"type": "object"}, "extension": {"type": "object"}}, "additionalProperties": false},
-    "evidence": {"type": ["object", "null"]},
+    "evidence": {"type": ["object", "null"], "properties": {"class": {"const": "protected_external"}, "environment": {"const": "protected_device"}, "source_commit": {"type": "string", "pattern": "^[a-fA-F0-9]{40}$"}, "artifact_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}, "run_id": {"type": "string", "minLength": 1}, "runner_id": {"type": "string", "minLength": 1}, "attested": {"const": true}}, "additionalProperties": true},
     "notes": {"type": "string"}
   },
   "additionalProperties": false

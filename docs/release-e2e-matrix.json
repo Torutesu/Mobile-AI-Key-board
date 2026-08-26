@@ -17,7 +17,9 @@
     "app_and_keyboard_switch",
     "rotation_and_background_resume",
     "secure_field_suppression",
-    "unsupported_custom_keyboard"
+    "unsupported_custom_keyboard",
+    "accessibility_screen_reader",
+    "accessibility_font_scale"
   ],
   "targets": [
     {

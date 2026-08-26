@@ -143,9 +143,20 @@ final class ShortcutRegistryStore: ObservableObject {
 
     func refresh() {
         guard let loaded = storage.loadLastKnownGood() else { return }
+        // Keep candidates added during this process until the user assigns
+        // them. They are intentionally not persisted before assignment, but
+        // navigating between host screens must not discard the candidate.
+        let unassignedCandidates = skills.filter { candidate in
+            candidate.id.hasPrefix("skill_private_") &&
+            !loaded.skills.contains { $0.id == candidate.id && $0.versionID == candidate.versionID }
+        }
         snapshot = loaded
         let persisted = loaded.skills.compactMap(Self.skillOption(from:))
-        skills = Self.fixtureSkills + persisted.filter { option in !Self.fixtureSkills.contains { $0.id == option.id && $0.versionID == option.versionID } }
+        let restored = persisted.filter { option in !Self.fixtureSkills.contains { $0.id == option.id && $0.versionID == option.versionID } }
+        skills = Self.fixtureSkills + restored + unassignedCandidates.filter { candidate in
+            !Self.fixtureSkills.contains { $0.id == candidate.id && $0.versionID == candidate.versionID } &&
+            !restored.contains { $0.id == candidate.id && $0.versionID == candidate.versionID }
+        }
         statusMessage = storage.isUsingSharedAppGroup ? "キーボードと共有済み" : "App Group未設定のためhost内fallback"
     }
 
@@ -182,7 +193,30 @@ final class ShortcutRegistryStore: ObservableObject {
         statusMessage = "「\(option.name)」をキーボード候補に追加しました。A–Zキーを割り当ててください"
     }
 
+    /// Private builder output is account-bound even though execution is local.
+    /// Losing that account boundary must remove both unassigned candidates and
+    /// assigned projections so another subject cannot inherit a trigger key.
+    func clearPrivateSkillsForAccountBoundary() throws {
+        let privateIDs = Set(skills.filter { $0.id.hasPrefix("skill_private_") }.map(\.id))
+        guard !privateIDs.isEmpty else { return }
+        let retainedBindings = snapshot.bindings.filter { !privateIDs.contains($0.skillID) }
+        let retainedProjections = snapshot.skills.filter { !privateIDs.contains($0.id) }
+        try publish(bindings: retainedBindings, skills: retainedProjections, revision: snapshot.layout.revision + 1)
+        let restored = retainedProjections.compactMap(Self.skillOption(from:))
+        skills = Self.fixtureSkills + restored.filter { option in
+            !Self.fixtureSkills.contains { $0.id == option.id && $0.versionID == option.versionID }
+        }
+        statusMessage = "アカウント境界の変更によりPrivate Skill Keysを削除しました"
+    }
+
 #if DEBUG
+    /// Deterministic host-only reset used by the Simulator UI harness. It
+    /// creates a new empty validated generation rather than deleting files.
+    func resetForUITest() {
+        try? publish(bindings: [], skills: [], revision: snapshot.layout.revision + 1)
+        skills = Self.fixtureSkills
+    }
+
     func seedQAStateIfNeeded() {
         guard activeBindings.isEmpty else { return }
         try? assign(skillID: "skill_polite_local_v1", key: .keyH)

@@ -188,7 +188,22 @@ struct SkillBuilderView: View {
                     .buttonStyle(.bordered)
                     .frame(maxWidth: .infinity, minHeight: 44)
                 Button("schema / policy / static検証") {
-                    store.send(.editDraft(draft))
+                    // The advanced schema is a projection of the typed manifest,
+                    // not a second source of truth. Re-canonicalize immediately
+                    // before validation so changing a picker or test example
+                    // cannot leave a stale schema that the user must repair by
+                    // discovering the Advanced disclosure control.
+                    let candidate = SkillBuilderDraft(
+                        name: name,
+                        icon: icon,
+                        desiredOutcome: desiredOutcome,
+                        plainDescription: plainDescription,
+                        advancedSchema: manifest.canonicalSchema,
+                        bindingIdentifier: bindingIdentifier,
+                        manifest: manifest
+                    )
+                    advancedSchema = candidate.advancedSchema
+                    store.send(.editDraft(candidate))
                     store.send(.validate)
                 }
                 .buttonStyle(.borderedProminent)
@@ -250,6 +265,7 @@ struct SkillBuilderView: View {
                     store.send(.confirmDeploy(digest: digest, now: Date()))
                 }
                 .buttonStyle(.borderedProminent).frame(minHeight: 44)
+                .accessibilityIdentifier("confirm-private-deploy")
             }
             Button("編集してdeploy確認を破棄") { store.send(.editDraft(draft)) }
                 .buttonStyle(.bordered).frame(minHeight: 44)
@@ -276,6 +292,7 @@ struct SkillBuilderView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .frame(maxWidth: .infinity, minHeight: 44)
+                    .accessibilityIdentifier("add-private-\(version.id)")
                     Button(store.skillBuilder.installedBinding?.versionID == version.id ? "installed binding pin済み" : "このversionをbinding pin") {
                         store.send(.installBinding(versionID: version.id, digest: version.digest, bindingIdentifier: version.draft.bindingIdentifier, now: Date()))
                     }
@@ -295,6 +312,7 @@ struct SkillBuilderView: View {
                     .frame(maxWidth: .infinity, minHeight: 44)
             }
             .buttonStyle(.bordered)
+            .accessibilityIdentifier("open-skill-keys")
             Divider()
             Label("private sharing（fixture）", systemImage: "person.badge.plus").font(.subheadline.bold())
             Text("recipient・version・digest・expiryに束縛したprivate shareだけを作成できます。public publishは無効です。")

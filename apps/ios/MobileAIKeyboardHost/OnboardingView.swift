@@ -5,6 +5,7 @@ import MobileAIKeyboardCore
 struct OnboardingView: View {
     @State private var showKeyboardInstructions = false
     @State private var accessStatus: KeyboardAccessStatus?
+    @State private var accountBoundaryErrorMessage: String?
     @StateObject private var accountStore = AccountActivityStore()
     @StateObject private var shortcutRegistry = ShortcutRegistryStore()
     private let accessStatusStore = AppGroupKeyboardAccessStatusStore()
@@ -77,6 +78,32 @@ struct OnboardingView: View {
                 KeyboardInstructionsView()
             }
             .onAppear { accessStatus = accessStatusStore.load() }
+            .onChange(of: accountStore.state.account) { account in
+                if !account.canUseAuthenticatedFeatures {
+                    clearPrivateSkillBoundary()
+                }
+            }
+            .onChange(of: accountStore.state.deletion) { deletion in
+                if deletion != .idle {
+                    clearPrivateSkillBoundary()
+                }
+            }
+            .alert("Private Skill Keysを削除できませんでした", isPresented: Binding(
+                get: { accountBoundaryErrorMessage != nil },
+                set: { if !$0 { accountBoundaryErrorMessage = nil } }
+            )) {
+                Button("閉じる", role: .cancel) {}
+            } message: {
+                Text("\(accountBoundaryErrorMessage ?? "不明なエラー")。キーボードのフルアクセスを無効にしてから再試行してください。")
+            }
+        }
+    }
+
+    private func clearPrivateSkillBoundary() {
+        do {
+            try shortcutRegistry.clearPrivateSkillsForAccountBoundary()
+        } catch {
+            accountBoundaryErrorMessage = error.localizedDescription
         }
     }
 

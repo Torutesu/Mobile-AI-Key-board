@@ -70,9 +70,27 @@ targets:
             PrefersRightToLeft: false
             PrimaryLanguage: en-US
             RequestsOpenAccess: true
+  MobileAIKeyboardUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: MobileAIKeyboardHost
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.torutesu.mobileaikeyboard.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "6.0"
+        TEST_TARGET_NAME: MobileAIKeyboardHost
 schemes:
   MobileAIKeyboard:
     build:
       targets:
         MobileAIKeyboardHost: all
         MobileAIKeyboardExtension: all
+    test:
+      targets:
+        - name: MobileAIKeyboardUITests
+          parallelizable: false
+          randomExecutionOrder: false

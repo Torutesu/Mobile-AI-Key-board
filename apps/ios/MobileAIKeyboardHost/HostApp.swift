@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct MobileAIKeyboardHostApp: App {
+    @StateObject private var accountStore = AccountActivityStore()
     @StateObject private var shortcutRegistry = ShortcutRegistryStore()
 
     var body: some Scene {
@@ -10,6 +11,16 @@ struct MobileAIKeyboardHostApp: App {
             if ProcessInfo.processInfo.arguments.contains("-skill-keys-qa") || ProcessInfo.processInfo.arguments.contains("-trigger-key-sheet-qa") {
                 NavigationStack { SkillKeysView() }
                     .environmentObject(shortcutRegistry)
+            } else if ProcessInfo.processInfo.arguments.contains("-skill-builder-qa") {
+                NavigationStack { SkillBuilderView() }
+                    .environmentObject(accountStore)
+                    .environmentObject(shortcutRegistry)
+                    .onAppear {
+                        if ProcessInfo.processInfo.arguments.contains("-ui-test-reset") {
+                            shortcutRegistry.resetForUITest()
+                        }
+                        accountStore.send(.signInFixture(label: "UI Test"))
+                    }
             } else {
                 OnboardingView()
             }

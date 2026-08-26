@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
+const COMMIT_SHA = /^[a-f0-9]{40}$/i;
 const DEFAULTS = {
   manifest: 'docs/release-evidence-manifest.json',
   matrix: 'docs/release-e2e-matrix.json',
@@ -30,6 +31,7 @@ const requiredScenarios = [
   'emoji_and_newline', 'japanese_input', 'url_input', 'rtl_input',
   'app_and_keyboard_switch', 'rotation_and_background_resume',
   'secure_field_suppression', 'unsupported_custom_keyboard',
+  'accessibility_screen_reader', 'accessibility_font_scale',
 ];
 const requiredMetrics = [
   'key_to_commit_p50_ms', 'key_to_commit_p95_ms', 'keyboard_cold_open_p95_ms',
@@ -176,12 +178,20 @@ function sourceChecks(args, manifest) {
   results.push(/release-readiness\.json/.test(workflow)
     ? check('ci.artifact.release_readiness', 'pass', 'CI writes and uploads a release-readiness report')
     : check('ci.artifact.release_readiness', 'fail', 'CI must preserve the machine-readable release-readiness report'));
+  const hasIosUiTestCommand = /\bxcodebuild[\s\S]{0,1200}\btest\b/.test(workflow);
+  const hasAndroidInstrumentationCommand = /\bconnected(?:Debug|Release)AndroidTest\b/.test(workflow);
+  results.push(hasIosUiTestCommand && hasAndroidInstrumentationCommand
+    ? check('ci.ui_test_lane', 'pass', 'CI declares both iOS UI-test and Android instrumentation lanes')
+    : check('ci.ui_test_lane', 'not_proven', 'CI currently builds the iOS Simulator and Android debug APK but does not execute both UI-test/instrumentation lanes'));
   return results;
 }
 
 function validateCandidate(candidate, status, label, expectedSha = null) {
   if (status !== 'passed') return null;
   if (!candidate || !candidate.source_commit || !candidate.artifact_digest) return `${label} passed without candidate source_commit and artifact_digest`;
+  if (!COMMIT_SHA.test(candidate.source_commit)) return `${label} source_commit is not a full git SHA-1`;
+  if (!DIGEST.test(candidate.artifact_digest)) return `${label} artifact_digest is not a sha256 digest`;
+  if (!expectedSha) return `${label} passed without an expected candidate_sha input`;
   if (expectedSha && candidate.source_commit !== expectedSha) return `${label} source_commit does not match candidate_sha`;
   return null;
 }
@@ -196,11 +206,23 @@ function validateMatrix(matrix, expectedSha = null) {
   for (const target of matrix.targets ?? []) {
     if (!Array.isArray(target.devices) || target.devices.length === 0) errors.push(`${target.platform} has no devices`);
     if (!Array.isArray(target.apps) || target.apps.length < 7) errors.push(`${target.platform} has fewer than seven apps`);
+    if (!['not_proven', 'in_progress', 'passed', 'failed'].includes(target.status)) errors.push(`${target.platform} has an invalid status`);
     if (target.status === 'passed') {
       for (const run of target.runs ?? []) {
         if (run.evidence_class !== 'protected_external' || !run.run_id || !run.runner_id || run.attested !== true) errors.push(`${target.platform} passed run is not protected/attested`);
-        if (/(fixture|simulator|jvm|local|self[-_ ]?attest)/i.test(JSON.stringify(run))) errors.push(`${target.platform} passed run contains a fixture/simulator/local marker`);
+        if (run.environment !== 'protected_device') errors.push(`${target.platform} passed run is not explicitly classified as protected_device`);
+        if (!run.device_id || !run.source_commit || !run.artifact_digest) errors.push(`${target.platform} passed run is missing device_id/source_commit/artifact_digest binding`);
+        if (run.source_commit !== matrix.candidate?.source_commit) errors.push(`${target.platform} passed run source_commit does not match matrix candidate`);
+        if (run.artifact_digest !== matrix.candidate?.artifact_digest) errors.push(`${target.platform} passed run artifact_digest does not match matrix candidate`);
+        if (!DIGEST.test(run.artifact_digest ?? '')) errors.push(`${target.platform} passed run artifact_digest is invalid`);
+        if (!Array.isArray(run.scenarios) || run.scenarios.length === 0) errors.push(`${target.platform} passed run is missing scenario coverage`);
+        if (!Array.isArray(run.accessibility_tools) || run.accessibility_tools.length === 0) errors.push(`${target.platform} passed run is missing accessibility tool evidence`);
+        if (/(fixture|simulator|emulator|jvm|ui[-_ ]?test|local|self[-_ ]?attest)/i.test(JSON.stringify(run))) errors.push(`${target.platform} passed run contains a fixture/simulator/emulator/UI-test/local marker`);
       }
+      const coveredScenarios = new Set((target.runs ?? []).flatMap((run) => Array.isArray(run.scenarios) ? run.scenarios : []));
+      for (const scenario of requiredScenarios) if (!coveredScenarios.has(scenario)) errors.push(`${target.platform} passed evidence does not cover scenario ${scenario}`);
+      const requiredAccessibilityTool = target.platform === 'ios' ? 'voiceover' : 'talkback';
+      if (!(target.runs ?? []).some((run) => run.accessibility_tools?.includes(requiredAccessibilityTool))) errors.push(`${target.platform} passed evidence does not include ${requiredAccessibilityTool} coverage`);
     }
   }
   if (matrix.status === 'passed') {
@@ -208,7 +230,7 @@ function validateMatrix(matrix, expectedSha = null) {
       if (target.status !== 'passed' || !Array.isArray(target.runs) || target.runs.length === 0) errors.push(`${target.platform} passed without a protected run`);
     }
   }
-  const candidateError = validateCandidate(matrix.candidate, matrix.status, 'E2E matrix', expectedSha);
+  const candidateError = validateCandidate(matrix.candidate, matrix.status === 'passed' || (matrix.targets ?? []).some((target) => target.status === 'passed') ? 'passed' : matrix.status, 'E2E matrix', expectedSha);
   if (candidateError) errors.push(candidateError);
   return errors;
 }
@@ -220,12 +242,20 @@ function validatePerformance(performance, expectedSha = null) {
   for (const metric of requiredMetrics) if (!performance.required_metrics?.includes(metric)) errors.push(`missing metric ${metric}`);
   const seen = new Set();
   for (const measurement of performance.measurements ?? []) {
+    if (!requiredMetrics.includes(measurement.metric_id)) errors.push(`unknown performance metric ${measurement.metric_id ?? 'missing'}`);
+    if (!['ios', 'android'].includes(measurement.platform)) errors.push(`unknown performance platform ${measurement.platform ?? 'missing'}`);
+    if (!['not_proven', 'in_progress', 'passed', 'failed'].includes(measurement.status)) errors.push(`${measurement.metric_id ?? 'missing'} has an invalid status`);
     if (seen.has(measurement.metric_id)) errors.push(`duplicate metric ${measurement.metric_id}`);
     seen.add(measurement.metric_id);
     if (measurement.status === 'passed') {
       const evidence = measurement.evidence ?? {};
       if (evidence.class !== 'protected_external' || !evidence.run_id || !evidence.runner_id || evidence.attested !== true || !evidence.artifact_digest) errors.push(`${measurement.metric_id} passed without protected evidence binding`);
-      if (/(fixture|simulator|jvm|local|self[-_ ]?attest)/i.test(JSON.stringify(measurement))) errors.push(`${measurement.metric_id} passed measurement contains a fixture/simulator/local marker`);
+      if (evidence.environment !== 'protected_device') errors.push(`${measurement.metric_id} passed measurement is not explicitly classified as protected_device`);
+      if (evidence.source_commit !== performance.candidate?.source_commit) errors.push(`${measurement.metric_id} source_commit does not match performance candidate`);
+      if (evidence.artifact_digest !== performance.candidate?.artifact_digest) errors.push(`${measurement.metric_id} artifact_digest does not match performance candidate`);
+      if (!DIGEST.test(evidence.artifact_digest ?? '')) errors.push(`${measurement.metric_id} evidence artifact_digest is invalid`);
+      if (typeof measurement.device !== 'string' || measurement.device.trim() === '') errors.push(`${measurement.metric_id} passed measurement has no device identity`);
+      if (/(fixture|simulator|emulator|jvm|ui[-_ ]?test|local|self[-_ ]?attest)/i.test(JSON.stringify(measurement))) errors.push(`${measurement.metric_id} passed measurement contains a fixture/simulator/emulator/UI-test/local marker`);
     }
   }
   if (performance.status === 'passed') {
@@ -243,6 +273,11 @@ function validateIosArchive(archive, expectedSha = null) {
   if (archive.status === 'passed') {
     const evidence = archive.evidence ?? {};
     if (evidence.class !== 'protected_external' || !evidence.run_id || !evidence.runner_id || evidence.attested !== true || !evidence.artifact_digest) errors.push('archive passed without protected evidence binding');
+    if (evidence.environment !== 'protected_device') errors.push('archive passed evidence is not explicitly classified as protected_device');
+    if (evidence.source_commit !== archive.candidate?.source_commit) errors.push('archive evidence source_commit does not match candidate');
+    if (evidence.artifact_digest !== archive.candidate?.artifact_digest) errors.push('archive evidence artifact_digest does not match candidate');
+    if (!DIGEST.test(evidence.artifact_digest ?? '')) errors.push('archive evidence artifact_digest is invalid');
+    if (/(fixture|simulator|emulator|jvm|ui[-_ ]?test|local|self[-_ ]?attest)/i.test(JSON.stringify(archive))) errors.push('archive passed evidence contains a fixture/simulator/emulator/UI-test/local marker');
     if (!archive.entitlements?.host?.app_group || archive.entitlements.host.app_group !== archive.entitlements?.extension?.app_group) errors.push('archived host and extension must contain the same App Group entitlement');
     if (archive.extension_info?.requests_open_access !== true) errors.push('archived extension Info.plist must request the declared Full Access value');
     if (!archive.privacy_manifests?.host || !archive.privacy_manifests?.extension) errors.push('archive must contain host and extension privacy manifest inspection');
@@ -252,7 +287,7 @@ function validateIosArchive(archive, expectedSha = null) {
   return errors;
 }
 
-function validateBenchmark(report) {
+function validateBenchmark(report, expectedSha = null) {
   const errors = [];
   if (report.schema_version !== 'mobile-ai-keyboard.performance-benchmark.v1') errors.push('wrong schema_version');
   if (!DIGEST.test(report.candidate_digest ?? '')) errors.push('candidate_digest is invalid');
@@ -293,6 +328,16 @@ function validateBenchmark(report) {
   if (report.evidence?.kind !== expectedEvidenceKind) errors.push('report evidence kind does not match environment');
   if (report.environment === 'protected_device' && (report.evidence?.verifier_kind !== 'protected_runner' || !report.evidence?.verifier_id || !DIGEST.test(report.evidence?.artifact_digest ?? ''))) errors.push('protected benchmark evidence requires runner attestation and artifact binding');
   if (report.environment === 'protected_device' && (report.observations ?? []).some((observation) => observation.evidence?.kind !== 'protected_external')) errors.push('protected benchmark cannot contain fixture or simulator observations');
+  if (report.environment === 'protected_device') {
+    const candidateError = validateCandidate(report.candidate, 'passed', 'Protected benchmark', expectedSha);
+    if (candidateError) errors.push(candidateError);
+    if (report.evidence?.source_commit !== report.candidate?.source_commit) errors.push('protected benchmark evidence source_commit does not match candidate');
+    if (report.evidence?.artifact_digest !== report.candidate?.artifact_digest) errors.push('protected benchmark evidence artifact_digest does not match candidate');
+    for (const observation of report.observations ?? []) {
+      if (observation.evidence?.source_commit !== report.candidate?.source_commit) errors.push(`${observation.platform}:${observation.metric} source_commit does not match benchmark candidate`);
+      if (observation.evidence?.artifact_digest !== report.candidate?.artifact_digest) errors.push(`${observation.platform}:${observation.metric} artifact_digest does not match benchmark candidate`);
+    }
+  }
   if (report.qualification_status === 'passed' && (report.environment !== 'protected_device' || report.evidence?.kind !== 'protected_external' || report.evidence?.verifier_kind !== 'protected_runner' || !report.evidence?.verifier_id || !report.evidence?.artifact_digest)) errors.push('benchmark qualification pass requires protected device evidence');
   if (report.qualification_status === 'passed' && report.observations.some((observation) => observation.evidence?.kind !== 'protected_external' || observation.environment !== 'protected_device' || observation.candidate_digest !== report.candidate_digest)) errors.push('protected benchmark observations are not bound to report evidence/environment/candidate');
   const expectedQualification = expectedDiagnostic === 'failed' ? 'failed' : report.environment === 'protected_device' ? 'passed' : 'not_proven';
@@ -331,7 +376,7 @@ function evidenceChecks(args) {
     results.push(check('evidence.ios_archive.proof', errors.length ? 'fail' : (archive.status === 'passed' ? 'pass' : 'not_proven'), archive.status === 'not_proven' ? 'no protected signed archive inspection is recorded' : (errors.length ? 'archive evidence contains invalid proof' : 'protected archive inspection is bound to this candidate')));
   }
   if (benchmark) {
-    const errors = validateBenchmark(benchmark);
+    const errors = validateBenchmark(benchmark, args.candidateSha);
     results.push(check('evidence.benchmark.schema', errors.length ? 'fail' : 'pass', errors.length ? errors.join('; ') : 'benchmark report contains all platform/metric bindings'));
     results.push(check('evidence.benchmark.proof', errors.length ? 'fail' : (benchmark.qualification_status === 'passed' ? 'pass' : 'not_proven'), benchmark.qualification_status === 'failed' ? 'deterministic benchmark regression detected' : (benchmark.qualification_status === 'not_proven' ? 'diagnostic result is not physical-device qualification' : 'protected benchmark is bound to this candidate')));
   }

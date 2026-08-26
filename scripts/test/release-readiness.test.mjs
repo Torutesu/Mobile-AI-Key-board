@@ -58,6 +58,90 @@ test('fixture and simulator markers cannot qualify a passed E2E run', () => {
   }
 });
 
+test('passed E2E evidence is bound to a real-device classification and one candidate artifact', () => {
+  const matrix = JSON.parse(fs.readFileSync(path.join(root, 'docs/release-e2e-matrix.json'), 'utf8'));
+  const sourceCommit = 'a'.repeat(40);
+  const artifactDigest = `sha256:${'b'.repeat(64)}`;
+  matrix.status = 'passed';
+  matrix.candidate = { source_commit: sourceCommit, artifact_digest: artifactDigest };
+  matrix.targets = matrix.targets.map((target) => ({
+    ...target,
+    status: 'passed',
+    runs: [{
+      run_id: `protected-${target.platform}-1`,
+      runner_id: `runner-${target.platform}-1`,
+      attested: true,
+      evidence_class: 'protected_external',
+      environment: 'protected_device',
+      device_id: `${target.platform}-device-1`,
+      source_commit: sourceCommit,
+      artifact_digest: artifactDigest,
+      scenarios: matrix.required_scenarios,
+      accessibility_tools: [target.platform === 'ios' ? 'voiceover' : 'talkback'],
+    }],
+  }));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mobile-ai-keyboard-e2e-'));
+  const file = path.join(tempDir, 'matrix.json');
+  try {
+    fs.writeFileSync(file, `${JSON.stringify(matrix)}\n`);
+    const valid = evaluate({ staticOnly: true, matrix: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.e2e.schema');
+    assert.equal(valid.status, 'pass');
+
+    const tampered = { ...matrix, targets: matrix.targets.map((target) => ({ ...target, runs: target.runs.map((run) => ({ ...run, artifact_digest: `sha256:${'c'.repeat(64)}` })) })) };
+    fs.writeFileSync(file, `${JSON.stringify(tampered)}\n`);
+    const rejected = evaluate({ staticOnly: true, matrix: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.e2e.schema');
+    assert.equal(rejected.status, 'fail');
+    assert.match(rejected.detail, /artifact_digest/);
+
+    fs.writeFileSync(file, `${JSON.stringify(matrix)}\n`);
+    const missingSha = evaluate({ staticOnly: true, matrix: file, candidateSha: null }).checks.find((check) => check.code === 'evidence.e2e.schema');
+    assert.equal(missingSha.status, 'fail');
+    assert.match(missingSha.detail, /candidate_sha/);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('passed performance evidence binds every measurement to the candidate artifact and protected device', () => {
+  const performance = JSON.parse(fs.readFileSync(path.join(root, 'docs/release-performance-evidence.json'), 'utf8'));
+  const sourceCommit = 'd'.repeat(40);
+  const artifactDigest = `sha256:${'e'.repeat(64)}`;
+  performance.status = 'passed';
+  performance.candidate = { source_commit: sourceCommit, artifact_digest: artifactDigest };
+  performance.measurements = performance.required_metrics.map((metric, index) => ({
+    metric_id: metric,
+    platform: index % 2 === 0 ? 'ios' : 'android',
+    device: `device-${index}`,
+    status: 'passed',
+    value: 1,
+    unit: 'ms',
+    evidence: {
+      class: 'protected_external',
+      environment: 'protected_device',
+      source_commit: sourceCommit,
+      artifact_digest: artifactDigest,
+      run_id: `performance-run-${index}`,
+      runner_id: 'protected-runner-1',
+      attested: true,
+    },
+  }));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mobile-ai-keyboard-performance-'));
+  const file = path.join(tempDir, 'performance.json');
+  try {
+    fs.writeFileSync(file, `${JSON.stringify(performance)}\n`);
+    const valid = evaluate({ staticOnly: true, performance: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.performance.schema');
+    assert.equal(valid.status, 'pass');
+
+    const tampered = { ...performance, measurements: performance.measurements.map((measurement, index) => index === 0 ? { ...measurement, evidence: { ...measurement.evidence, artifact_digest: `sha256:${'f'.repeat(64)}` } } : measurement) };
+    fs.writeFileSync(file, `${JSON.stringify(tampered)}\n`);
+    const rejected = evaluate({ staticOnly: true, performance: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.performance.schema');
+    assert.equal(rejected.status, 'fail');
+    assert.match(rejected.detail, /artifact_digest/);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('archive evidence distinguishes extension Info.plist from code-signing entitlements', () => {
   const file = path.join(root, 'docs/ios-archive-entitlement-privacy.json');
   const original = fs.readFileSync(file, 'utf8');

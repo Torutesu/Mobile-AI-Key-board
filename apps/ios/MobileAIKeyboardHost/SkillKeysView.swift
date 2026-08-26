@@ -139,9 +139,12 @@ struct SkillKeysView: View {
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(installed ? .secondary : .primary)
                     }
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
                 .disabled(installed)
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("skill-option-\(skill.id)")
                 .padding(14)
                 .background(.white, in: RoundedRectangle(cornerRadius: 16))
             }
@@ -262,15 +265,24 @@ private struct TriggerKeySheet: View {
                 }
                 .padding()
             }
+            .accessibilityIdentifier("trigger-key-scroll")
             .background(Color(red: 0.945, green: 0.961, blue: 0.984).ignoresSafeArea())
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 10) {
+                    Button(fixtureHasRun ? "もう一度テスト実行" : "端末内でテスト実行") {
+                        runFixture()
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(Color.cyan.opacity(0.16), in: Capsule())
+                    .accessibilityIdentifier("run-local-fixture")
                     Button(existingBinding == nil ? "Add" : "再割り当て") { saveSelection() }
                         .font(.headline)
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity, minHeight: 54)
                         .background(canSave ? Color.black : Color.gray, in: Capsule())
                         .disabled(!canSave)
+                        .accessibilityIdentifier(existingBinding == nil ? "save-skill-key" : "save-skill-key-reassignment")
                     Button("キャンセル") { dismiss() }
                         .font(.headline)
                         .foregroundStyle(.primary)
@@ -354,12 +366,6 @@ private struct TriggerKeySheet: View {
                 .background(Color.white, in: RoundedRectangle(cornerRadius: 10))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.black.opacity(0.08)))
                 .accessibilityLabel("fixture入力")
-            Button(fixtureHasRun ? "もう一度テスト実行" : "端末内でテスト実行") {
-                runFixture()
-            }
-            .font(.subheadline.weight(.semibold))
-            .frame(maxWidth: .infinity, minHeight: 44)
-            .background(Color.cyan.opacity(0.16), in: Capsule())
             if let fixtureOutput {
                 VStack(alignment: .leading, spacing: 4) {
                     Label("テスト成功", systemImage: "checkmark.circle.fill")
@@ -376,6 +382,7 @@ private struct TriggerKeySheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
                 .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("fixture-success")
             }
         }
         .padding(14)
@@ -387,20 +394,22 @@ private struct TriggerKeySheet: View {
     }
 
     private func runFixture() {
-        guard let pack = fixturePack else {
-            fixtureHasRun = false
-            fixtureOutput = nil
-            errorMessage = "このSkillの端末内fixtureはまだ用意されていません。"
-            return
+        let output: String?
+        if let pack = fixturePack {
+            output = JapaneseWorkflowEngine().transform(fixtureInput, pack: pack)?.rewritten
+        } else {
+            // Private candidates use the same closed local executor as the
+            // extension. Their free-form description is never evaluated.
+            output = LocalSkillExecutor.execute(skill.projection, input: fixtureInput)?.rewritten
         }
-        guard let result = JapaneseWorkflowEngine().transform(fixtureInput, pack: pack) else {
+        guard let output else {
             fixtureHasRun = false
             fixtureOutput = nil
             errorMessage = "fixtureを実行できませんでした。入力を確認してください。"
             return
         }
         fixtureHasRun = true
-        fixtureOutput = result.rewritten
+        fixtureOutput = output
     }
 
     private var fixturePack: JapaneseWorkflowPack? {
@@ -427,6 +436,7 @@ private struct TriggerKeySheet: View {
                 }
                 .accessibilityLabel(conflict.map { "\(key.displayLabel)、\(registry.skill(for: $0)?.name ?? "割り当て済み")" } ?? "\(key.displayLabel)、空き")
                 .accessibilityValue(isSelected ? (conflict == nil || conflict?.id == existingBinding?.id ? "選択中" : "選択中、保存時に競合解決が必要") : (conflict == nil || conflict?.id == existingBinding?.id ? "利用可能" : "割り当て済み。選択して置き換えまたは入れ替え"))
+                .accessibilityIdentifier("trigger-key-\(key.displayLabel.lowercased())")
             }
         }
         .padding(10)

@@ -15,7 +15,7 @@
   },
   "$defs": {
     "candidate": {"type": "object", "required": ["source_commit", "artifact_digest"], "properties": {"source_commit": {"type": ["string", "null"]}, "artifact_digest": {"type": ["string", "null"]}}, "additionalProperties": false},
-    "measurement": {"type": "object", "required": ["metric_id", "platform", "device", "status", "value", "unit", "evidence"], "properties": {"metric_id": {"type": "string"}, "platform": {"enum": ["ios", "android"]}, "device": {"type": "string"}, "status": {"enum": ["not_proven", "in_progress", "passed", "failed"]}, "value": {"type": ["number", "null"]}, "unit": {"type": "string"}, "evidence": {"type": "object"}}, "additionalProperties": false}
+    "measurement": {"type": "object", "required": ["metric_id", "platform", "device", "status", "value", "unit", "evidence"], "properties": {"metric_id": {"type": "string"}, "platform": {"enum": ["ios", "android"]}, "device": {"type": "string"}, "status": {"enum": ["not_proven", "in_progress", "passed", "failed"]}, "value": {"type": ["number", "null"]}, "unit": {"type": "string"}, "evidence": {"type": "object", "properties": {"class": {"const": "protected_external"}, "environment": {"const": "protected_device"}, "source_commit": {"type": "string", "pattern": "^[a-fA-F0-9]{40}$"}, "artifact_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}, "run_id": {"type": "string", "minLength": 1}, "runner_id": {"type": "string", "minLength": 1}, "attested": {"const": true}}}}, "additionalProperties": false}
   },
   "additionalProperties": false
 }

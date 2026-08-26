@@ -9,7 +9,8 @@
     {"id": "dependency_audit", "command": "pnpm audit --prod --audit-level high", "purpose": "production dependency audit"},
     {"id": "deterministic_performance_benchmark", "command": "pnpm benchmark:performance", "purpose": "content-free local threshold regression diagnostic"},
     {"id": "shortcut_vectors_check", "command": "pnpm shortcuts:vectors:check", "purpose": "TypeScript-authoritative shortcut golden vector check"},
-    {"id": "shortcut_vectors_native_consumers", "command": "pnpm shortcuts:vectors:native-check", "purpose": "source gate requiring direct Swift and Kotlin golden-vector unit consumers"}
+    {"id": "shortcut_vectors_native_consumers", "command": "pnpm shortcuts:vectors:native-check", "purpose": "source gate requiring direct Swift and Kotlin golden-vector unit consumers"},
+    {"id": "shortcut_vertical_slice_source", "command": "node scripts/check-shortcut-vertical-slice.mjs --strict", "purpose": "Builder/Add/A-Z/native snapshot/closed IME source seams remain wired on both platforms"}
   ],
   "required_artifacts": [
     {"id": "release_readiness_report", "path": "release-readiness.json", "class": "static_ci_report"},
