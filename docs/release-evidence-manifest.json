@@ -6,13 +6,15 @@
     {"id": "ios_project_generation", "command": "xcodegen generate --spec project.yml", "purpose": "reproducible iOS project"},
     {"id": "ios_simulator_build", "command": "xcodebuild", "purpose": "iOS host and extension build"},
     {"id": "android_tests_lint_apk", "command": "./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug", "purpose": "Android unit, lint, and APK"},
-    {"id": "dependency_audit", "command": "pnpm audit --prod --audit-level high", "purpose": "production dependency audit"}
+    {"id": "dependency_audit", "command": "pnpm audit --prod --audit-level high", "purpose": "production dependency audit"},
+    {"id": "deterministic_performance_benchmark", "command": "pnpm benchmark:performance", "purpose": "content-free local threshold regression diagnostic"}
   ],
   "required_artifacts": [
     {"id": "release_readiness_report", "path": "release-readiness.json", "class": "static_ci_report"},
     {"id": "ios_archive_entitlement_privacy_report", "path": "ios-archive-entitlement-privacy.json", "class": "protected_external", "status": "not_proven"},
     {"id": "real_device_e2e_matrix", "path": "docs/release-e2e-matrix.json", "class": "protected_external", "status": "not_proven"},
-    {"id": "performance_evidence", "path": "docs/release-performance-evidence.json", "class": "protected_external", "status": "not_proven"}
+    {"id": "performance_evidence", "path": "docs/release-performance-evidence.json", "class": "protected_external", "status": "not_proven"},
+    {"id": "performance_benchmark_diagnostic", "path": "performance-benchmark.json", "class": "local_diagnostic", "status": "not_proven"}
   ],
   "qualification_rule": "A release is not qualified by local fixtures, simulator/JVM runs, or self-attested evidence. Missing protected artifacts are not_proven and fail the release gate."
 }

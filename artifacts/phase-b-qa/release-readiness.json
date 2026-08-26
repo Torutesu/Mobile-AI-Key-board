@@ -1,0 +1,152 @@
+{
+  "schema_version": "mobile-ai-keyboard.release-readiness.v1",
+  "status": "not_proven",
+  "candidate_sha": null,
+  "checks": [
+    {
+      "code": "ios.full_access.source_consistency",
+      "status": "pass",
+      "detail": "project.yml and extension Info.plist both request Full Access"
+    },
+    {
+      "code": "privacy.docs.full_access",
+      "status": "pass",
+      "detail": "store declaration documents the current true value and rationale"
+    },
+    {
+      "code": "privacy.docs.security_boundary",
+      "status": "pass",
+      "detail": "security specification explains why Full Access is requested"
+    },
+    {
+      "code": "ios.privacy_manifest.host",
+      "status": "pass",
+      "detail": "source privacy manifest is present, non-tracking, and declares no collected data"
+    },
+    {
+      "code": "ios.privacy_manifest.extension",
+      "status": "pass",
+      "detail": "source privacy manifest is present, non-tracking, and declares no collected data"
+    },
+    {
+      "code": "ios.entitlements.app_group",
+      "status": "pass",
+      "detail": "host and extension share group.com.torutesu.mobileaikeyboard"
+    },
+    {
+      "code": "fixture.disclosure.static_scan",
+      "status": "pass",
+      "detail": "host-handoff Skill is excluded from assignment and visibly marked unavailable"
+    },
+    {
+      "code": "evidence.artifact_manifest",
+      "status": "pass",
+      "detail": "required release artifacts have ids, paths, and evidence classes"
+    },
+    {
+      "code": "ci.artifact.release_readiness_report",
+      "status": "pass",
+      "detail": "release-readiness.json is represented in CI"
+    },
+    {
+      "code": "evidence.artifact.ios_archive_entitlement_privacy_report",
+      "status": "not_proven",
+      "detail": "ios-archive-entitlement-privacy.json requires protected external evidence and is not proven in this checkout"
+    },
+    {
+      "code": "evidence.artifact.real_device_e2e_matrix",
+      "status": "not_proven",
+      "detail": "docs/release-e2e-matrix.json requires protected external evidence and is not proven in this checkout"
+    },
+    {
+      "code": "evidence.artifact.performance_evidence",
+      "status": "not_proven",
+      "detail": "docs/release-performance-evidence.json requires protected external evidence and is not proven in this checkout"
+    },
+    {
+      "code": "ci.artifact.performance_benchmark_diagnostic",
+      "status": "pass",
+      "detail": "performance-benchmark.json is represented in CI"
+    },
+    {
+      "code": "ci.command.shared_check",
+      "status": "pass",
+      "detail": "pnpm check is wired in CI"
+    },
+    {
+      "code": "ci.command.ios_core_tests",
+      "status": "pass",
+      "detail": "swift test is wired in CI"
+    },
+    {
+      "code": "ci.command.ios_project_generation",
+      "status": "pass",
+      "detail": "xcodegen generate --spec project.yml is wired in CI"
+    },
+    {
+      "code": "ci.command.ios_simulator_build",
+      "status": "pass",
+      "detail": "xcodebuild is wired in CI"
+    },
+    {
+      "code": "ci.command.android_tests_lint_apk",
+      "status": "pass",
+      "detail": "./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug is wired in CI"
+    },
+    {
+      "code": "ci.command.dependency_audit",
+      "status": "pass",
+      "detail": "pnpm audit --prod --audit-level high is wired in CI"
+    },
+    {
+      "code": "ci.command.deterministic_performance_benchmark",
+      "status": "pass",
+      "detail": "pnpm benchmark:performance is wired in CI"
+    },
+    {
+      "code": "ci.artifact.release_readiness",
+      "status": "pass",
+      "detail": "CI writes and uploads a release-readiness report"
+    },
+    {
+      "code": "evidence.e2e.schema",
+      "status": "pass",
+      "detail": "E2E matrix contains both platforms and all required dimensions"
+    },
+    {
+      "code": "evidence.e2e.proof",
+      "status": "not_proven",
+      "detail": "no protected physical-device/app runs are recorded"
+    },
+    {
+      "code": "evidence.performance.schema",
+      "status": "pass",
+      "detail": "performance evidence contains all required metrics"
+    },
+    {
+      "code": "evidence.performance.proof",
+      "status": "not_proven",
+      "detail": "no protected device performance captures are recorded"
+    },
+    {
+      "code": "evidence.ios_archive.schema",
+      "status": "pass",
+      "detail": "archive report contains the required entitlement/privacy inspection fields"
+    },
+    {
+      "code": "evidence.ios_archive.proof",
+      "status": "not_proven",
+      "detail": "no protected signed archive inspection is recorded"
+    },
+    {
+      "code": "evidence.benchmark.schema",
+      "status": "pass",
+      "detail": "benchmark report contains all platform/metric bindings"
+    },
+    {
+      "code": "evidence.benchmark.proof",
+      "status": "not_proven",
+      "detail": "diagnostic result is not physical-device qualification"
+    }
+  ]
+}

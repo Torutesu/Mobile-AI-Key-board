@@ -1,5 +1,7 @@
 package com.torutesu.mobileaikeyboard.core
 
+import android.text.InputType
+import android.view.inputmethod.EditorInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -13,19 +15,60 @@ class KeyboardSettingsTest {
         assertTrue(ImeOnboardingStatus(true, "typed").complete)
         assertFalse(ImeOnboardingStatus(true, "  \n").complete)
     }
+
+    @Test
+    fun settingsV3MigrationAddsSafeSoundAndPreviewDefaults() {
+        val legacy = KeyboardSettingsState(schemaVersion = 2, haptics = HapticMode.OFF, keySound = KeySoundMode.KEY_TAP, characterPreview = false)
+        val migrated = KeyboardSettingsReducer.reduce(legacy, KeyboardSettingsEvent.MigrateLegacy(2))
+        assertEquals(3, migrated.schemaVersion)
+        assertEquals(KeySoundMode.OFF, migrated.keySound)
+        assertTrue(migrated.characterPreview)
+    }
+
+    @Test
+    fun typingModeSupportsOneShotCapsAndLayerReset() {
+        var mode = TypingModeState()
+        mode = TypingModeReducer.shiftTapped(mode)
+        assertEquals(ShiftState.ONE_SHOT, mode.shift)
+        mode = TypingModeReducer.characterCommitted(mode)
+        assertEquals(ShiftState.OFF, mode.shift)
+        mode = TypingModeReducer.shiftTapped(mode)
+        mode = TypingModeReducer.shiftTapped(mode)
+        assertEquals(ShiftState.CAPS_LOCK, mode.shift)
+        mode = TypingModeReducer.layerToggled(mode)
+        assertEquals(KeyboardLayer.SYMBOLS, mode.layer)
+        assertEquals(ShiftState.OFF, mode.shift)
+        mode = TypingModeReducer.layerToggled(mode)
+        assertEquals(TypingModeState(), mode)
+    }
+
+    @Test
+    fun returnKeyUsesEditorActionOnlyForSingleLineActionFields() {
+        assertEquals("完了", ReturnKeyModel.from(EditorInfo.IME_ACTION_DONE, InputType.TYPE_CLASS_TEXT).label)
+        assertEquals(EditorInfo.IME_ACTION_SEARCH, ReturnKeyModel.from(EditorInfo.IME_ACTION_SEARCH, InputType.TYPE_CLASS_TEXT).editorAction)
+        val multiline = ReturnKeyModel.from(EditorInfo.IME_ACTION_DONE, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE)
+        assertEquals("↵", multiline.label)
+        assertEquals(null, multiline.editorAction)
+        val noAction = ReturnKeyModel.from(EditorInfo.IME_ACTION_DONE or EditorInfo.IME_FLAG_NO_ENTER_ACTION, InputType.TYPE_CLASS_TEXT)
+        assertEquals(null, noAction.editorAction)
+    }
     @Test
     fun settingsAreVersionedImeConsumableAndResettable() {
         var state = KeyboardSettingsState()
         state = KeyboardSettingsReducer.reduce(state, KeyboardSettingsEvent.SetTheme(KeyboardTheme.DARK))
         state = KeyboardSettingsReducer.reduce(state, KeyboardSettingsEvent.SetKeySize(KeySize.LARGE))
+        state = KeyboardSettingsReducer.reduce(state, KeyboardSettingsEvent.SetKeySound(KeySoundMode.KEY_TAP))
+        state = KeyboardSettingsReducer.reduce(state, KeyboardSettingsEvent.SetCharacterPreview(false))
         state = KeyboardSettingsReducer.reduce(state, KeyboardSettingsEvent.SelectWorkflowPack(JapaneseWorkflowPack.KEY_POINTS))
         assertEquals(KeyboardTheme.DARK, KeyboardSettingsReducer.imeConfig(state).theme)
         assertEquals(JapaneseWorkflowPack.KEY_POINTS, KeyboardSettingsReducer.imeConfig(state).workflowPack)
+        assertEquals(KeySoundMode.KEY_TAP, KeyboardSettingsReducer.imeConfig(state).keySound)
+        assertEquals(false, KeyboardSettingsReducer.imeConfig(state).characterPreview)
         state = KeyboardSettingsReducer.reduce(state, KeyboardSettingsEvent.MigrateLegacy(1))
-        assertEquals(2, state.schemaVersion)
+        assertEquals(3, state.schemaVersion)
         state = KeyboardSettingsReducer.reduce(state, KeyboardSettingsEvent.Reset)
         assertEquals(KeyboardTheme.SYSTEM, state.theme)
-        assertEquals(2, state.schemaVersion)
+        assertEquals(3, state.schemaVersion)
     }
 
     @Test

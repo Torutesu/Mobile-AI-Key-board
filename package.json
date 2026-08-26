@@ -8,6 +8,7 @@
     "build": "tsc -b --pretty false",
     "test": "pnpm -r test && pnpm test:release",
     "test:release": "node --test scripts/test/*.test.mjs",
+    "benchmark:performance": "node scripts/performance-benchmark.mjs",
     "release:readiness": "node scripts/release-readiness.mjs",
     "typecheck": "tsc -b --pretty false",
     "check": "pnpm build && pnpm test"

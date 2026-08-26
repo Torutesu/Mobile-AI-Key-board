@@ -9,17 +9,20 @@
  * still records not_proven in the JSON report.
  */
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const DIGEST = /^sha256:[a-f0-9]{64}$/;
 const DEFAULTS = {
   manifest: 'docs/release-evidence-manifest.json',
   matrix: 'docs/release-e2e-matrix.json',
   performance: 'docs/release-performance-evidence.json',
   workflow: '.github/workflows/ci.yml',
   iosArchive: 'docs/ios-archive-entitlement-privacy.json',
+  benchmark: null,
 };
 
 const requiredScenarios = [
@@ -36,6 +39,14 @@ const requiredMetrics = [
   'crash_free_sessions_rate', 'android_anr_rate', 'offline_success_rate',
   'provider_timeout_recovery_rate',
 ];
+const benchmarkMetrics = {
+  key_to_commit_p50_ms: { unit: 'ms', maximum: 35 },
+  key_to_commit_p95_ms: { unit: 'ms', maximum: 50 },
+  keyboard_cold_open_p95_ms: { unit: 'ms', maximum: 400 },
+  keyboard_warm_open_p95_ms: { unit: 'ms', maximum: 150 },
+  long_press_false_activation_rate: { unit: 'ratio', maximum: 0.001 },
+  ordinary_tap_drop_rate: { unit: 'ratio', maximum: 0.001 },
+};
 
 function parseArgs(argv) {
   const args = { staticOnly: false, report: null, candidateSha: process.env.GITHUB_SHA ?? null, ...DEFAULTS };
@@ -50,6 +61,7 @@ function parseArgs(argv) {
     else if (arg === '--performance') args.performance = argv[++i];
     else if (arg === '--workflow') args.workflow = argv[++i];
     else if (arg === '--ios-archive') args.iosArchive = argv[++i];
+    else if (arg === '--benchmark') args.benchmark = argv[++i];
     else throw new Error(`unknown argument: ${arg}`);
   }
   return args;
@@ -67,6 +79,14 @@ function readJson(relativePath) {
 }
 
 function check(code, status, detail) { return { code, status, detail }; }
+
+function canonicalJson(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  return `{${Object.entries(value).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0).map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`).join(',')}}`;
+}
+
+function reportDigest(unsigned) { return `sha256:${createHash('sha256').update(canonicalJson(unsigned), 'utf8').digest('hex')}`; }
 
 function sourceChecks(args, manifest) {
   const results = [];
@@ -232,15 +252,68 @@ function validateIosArchive(archive, expectedSha = null) {
   return errors;
 }
 
+function validateBenchmark(report) {
+  const errors = [];
+  if (report.schema_version !== 'mobile-ai-keyboard.performance-benchmark.v1') errors.push('wrong schema_version');
+  if (!DIGEST.test(report.candidate_digest ?? '')) errors.push('candidate_digest is invalid');
+  if (!['fixture', 'simulator', 'protected_device'].includes(report.environment)) errors.push('environment is invalid');
+  if (!DIGEST.test(report.report_digest ?? '')) errors.push('report_digest is missing or invalid');
+  if (!['passed', 'failed'].includes(report.diagnostic_status)) errors.push('diagnostic_status is invalid');
+  if (!['passed', 'not_proven', 'failed'].includes(report.qualification_status)) errors.push('qualification_status is invalid');
+  if (!Array.isArray(report.observations) || report.observations.length !== 12) errors.push('benchmark must contain one observation for each metric and platform');
+  if (DIGEST.test(report.report_digest ?? '')) {
+    const { report_digest: _reportDigest, ...unsigned } = report;
+    if (reportDigest(unsigned) !== report.report_digest) errors.push('report_digest does not match the canonical report');
+  }
+  const expectedKeys = new Set(Object.keys(benchmarkMetrics).flatMap((metric) => ['ios', 'android'].map((platform) => `${platform}:${metric}`)));
+  const observedKeys = new Set();
+  const failedKeys = [];
+  if (!report.evidence || typeof report.evidence.test_run_id !== 'string' || report.evidence.test_run_id.length === 0) errors.push('report evidence test_run_id is required');
+  for (const observation of report.observations ?? []) {
+    const metric = benchmarkMetrics[observation.metric];
+    const key = `${observation.platform}:${observation.metric}`;
+    if (!metric) errors.push(`unknown benchmark metric ${observation.metric ?? 'missing'}`);
+    if (!['ios', 'android'].includes(observation.platform)) errors.push(`unknown benchmark platform ${observation.platform ?? 'missing'}`);
+    if (observedKeys.has(key)) errors.push(`duplicate benchmark observation ${key}`);
+    observedKeys.add(key);
+    if (metric && observation.unit !== metric.unit) errors.push(`${key} has wrong unit`);
+    if (metric && (typeof observation.value !== 'number' || !Number.isFinite(observation.value) || observation.value < 0 || observation.value > 60_000)) errors.push(`${key} has invalid value`);
+    if (metric && typeof observation.value === 'number' && observation.value > metric.maximum) failedKeys.push(key);
+    if (!Number.isInteger(observation.sample_count) || observation.sample_count <= 0 || observation.sample_count > 10_000_000) errors.push(`${key} has invalid sample_count`);
+    if (observation.candidate_digest !== report.candidate_digest) errors.push(`${key} is not bound to report candidate_digest`);
+    if (observation.environment !== report.environment) errors.push(`${key} is not bound to report environment`);
+    if (observation.evidence?.kind !== report.evidence?.kind) errors.push(`${key} is not bound to report evidence kind`);
+    if (observation.evidence?.test_run_id !== report.evidence?.test_run_id) errors.push(`${key} is not bound to report test_run_id`);
+    if (report.environment === 'protected_device' && (observation.evidence?.verifier_kind !== report.evidence?.verifier_kind || observation.evidence?.verifier_id !== report.evidence?.verifier_id || observation.evidence?.artifact_digest !== report.evidence?.artifact_digest)) errors.push(`${key} is not fully bound to protected verifier/artifact evidence`);
+  }
+  for (const key of expectedKeys) if (!observedKeys.has(key)) errors.push(`missing benchmark observation ${key}`);
+  const expectedDiagnostic = failedKeys.length === 0 && observedKeys.size === expectedKeys.size ? 'passed' : 'failed';
+  if (report.diagnostic_status !== expectedDiagnostic) errors.push(`diagnostic_status ${report.diagnostic_status ?? 'missing'} does not match observations (${expectedDiagnostic})`);
+  const expectedEvidenceKind = report.environment === 'fixture' ? 'deterministic_fixture' : report.environment === 'simulator' ? 'simulator' : 'protected_external';
+  if (report.evidence?.kind !== expectedEvidenceKind) errors.push('report evidence kind does not match environment');
+  if (report.environment === 'protected_device' && (report.evidence?.verifier_kind !== 'protected_runner' || !report.evidence?.verifier_id || !DIGEST.test(report.evidence?.artifact_digest ?? ''))) errors.push('protected benchmark evidence requires runner attestation and artifact binding');
+  if (report.environment === 'protected_device' && (report.observations ?? []).some((observation) => observation.evidence?.kind !== 'protected_external')) errors.push('protected benchmark cannot contain fixture or simulator observations');
+  if (report.qualification_status === 'passed' && (report.environment !== 'protected_device' || report.evidence?.kind !== 'protected_external' || report.evidence?.verifier_kind !== 'protected_runner' || !report.evidence?.verifier_id || !report.evidence?.artifact_digest)) errors.push('benchmark qualification pass requires protected device evidence');
+  if (report.qualification_status === 'passed' && report.observations.some((observation) => observation.evidence?.kind !== 'protected_external' || observation.environment !== 'protected_device' || observation.candidate_digest !== report.candidate_digest)) errors.push('protected benchmark observations are not bound to report evidence/environment/candidate');
+  const expectedQualification = expectedDiagnostic === 'failed' ? 'failed' : report.environment === 'protected_device' ? 'passed' : 'not_proven';
+  if (report.qualification_status !== expectedQualification) errors.push(`qualification_status ${report.qualification_status ?? 'missing'} does not match evidence (${expectedQualification})`);
+  if (report.environment !== 'protected_device' && report.qualification_status === 'passed') errors.push('fixture or simulator benchmark cannot qualify a release');
+  return errors;
+}
+
 function evidenceChecks(args) {
   const results = [];
   let matrix;
   let performance;
   let archive;
+  let benchmark;
   try { matrix = readJson(args.matrix).value; } catch (error) { results.push(check('evidence.e2e.schema', 'fail', error.message)); }
   try { performance = readJson(args.performance).value; } catch (error) { results.push(check('evidence.performance.schema', 'fail', error.message)); }
   if (args.iosArchive) {
     try { archive = readJson(args.iosArchive).value; } catch (error) { results.push(check('evidence.ios_archive.schema', 'fail', error.message)); }
+  }
+  if (args.benchmark) {
+    try { benchmark = readJson(args.benchmark).value; } catch (error) { results.push(check('evidence.benchmark.schema', 'fail', error.message)); }
   }
   if (matrix) {
     const errors = validateMatrix(matrix, args.candidateSha);
@@ -256,6 +329,11 @@ function evidenceChecks(args) {
     const errors = validateIosArchive(archive, args.candidateSha);
     results.push(check('evidence.ios_archive.schema', errors.length ? 'fail' : 'pass', errors.length ? errors.join('; ') : 'archive report contains the required entitlement/privacy inspection fields'));
     results.push(check('evidence.ios_archive.proof', errors.length ? 'fail' : (archive.status === 'passed' ? 'pass' : 'not_proven'), archive.status === 'not_proven' ? 'no protected signed archive inspection is recorded' : (errors.length ? 'archive evidence contains invalid proof' : 'protected archive inspection is bound to this candidate')));
+  }
+  if (benchmark) {
+    const errors = validateBenchmark(benchmark);
+    results.push(check('evidence.benchmark.schema', errors.length ? 'fail' : 'pass', errors.length ? errors.join('; ') : 'benchmark report contains all platform/metric bindings'));
+    results.push(check('evidence.benchmark.proof', errors.length ? 'fail' : (benchmark.qualification_status === 'passed' ? 'pass' : 'not_proven'), benchmark.qualification_status === 'failed' ? 'deterministic benchmark regression detected' : (benchmark.qualification_status === 'not_proven' ? 'diagnostic result is not physical-device qualification' : 'protected benchmark is bound to this candidate')));
   }
   return results;
 }

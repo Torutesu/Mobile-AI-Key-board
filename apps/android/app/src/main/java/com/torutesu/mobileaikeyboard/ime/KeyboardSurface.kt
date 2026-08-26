@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.graphics.Typeface
+import android.media.AudioManager
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
@@ -15,9 +16,16 @@ import android.widget.ScrollView
 import android.widget.TextView
 import com.torutesu.mobileaikeyboard.core.KeyboardMode
 import com.torutesu.mobileaikeyboard.core.KeyboardState
+import com.torutesu.mobileaikeyboard.core.ImeConsumableConfig
+import com.torutesu.mobileaikeyboard.core.KeyboardLayer
+import com.torutesu.mobileaikeyboard.core.KeySoundMode
+import com.torutesu.mobileaikeyboard.core.ReturnKeySpec
 import com.torutesu.mobileaikeyboard.core.ShortcutSnapshot
 import com.torutesu.mobileaikeyboard.core.ShortcutKeyCode
 import com.torutesu.mobileaikeyboard.core.TriggerKeyBinding
+import com.torutesu.mobileaikeyboard.core.ShiftState
+import com.torutesu.mobileaikeyboard.core.TypingModeReducer
+import com.torutesu.mobileaikeyboard.core.TypingModeState
 
 /** Small dependency-free keyboard surface; all touch targets are at least 48dp. */
 @SuppressLint("ViewConstructor") // Instantiated only by KeyboardImeService with mandatory callbacks; never inflated from XML.
@@ -40,8 +48,16 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
     )
 
     private val density = resources.displayMetrics.density
-    private var shift = false
-    private var numericMode = false
+    private var typingMode = TypingModeState()
+    private var currentConfig = ImeConsumableConfig(
+        theme = com.torutesu.mobileaikeyboard.core.KeyboardTheme.SYSTEM,
+        haptics = com.torutesu.mobileaikeyboard.core.HapticMode.KEY_TAP,
+        keySize = com.torutesu.mobileaikeyboard.core.KeySize.STANDARD,
+        oneHanded = com.torutesu.mobileaikeyboard.core.OneHandedMode.OFF,
+        workflowPack = com.torutesu.mobileaikeyboard.core.JapaneseWorkflowPack.POLITE,
+    )
+    private var currentReturnKey = ReturnKeySpec("↵")
+    private var currentKeyboardState = KeyboardState()
     private var currentShortcutSnapshot = ShortcutSnapshot.empty()
     private val root = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
@@ -54,7 +70,15 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
         addView(root)
     }
 
-    fun render(state: KeyboardState, shortcutSnapshot: ShortcutSnapshot = ShortcutSnapshot.empty()) {
+    fun render(
+        state: KeyboardState,
+        shortcutSnapshot: ShortcutSnapshot = ShortcutSnapshot.empty(),
+        config: ImeConsumableConfig = currentConfig,
+        returnKey: ReturnKeySpec = currentReturnKey,
+    ) {
+        currentConfig = config
+        currentReturnKey = returnKey
+        currentKeyboardState = state
         currentShortcutSnapshot = shortcutSnapshot
         root.removeAllViews()
         when (state.mode) {
@@ -65,12 +89,16 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
         }
     }
 
+    fun resetTypingState() {
+        typingMode = TypingModeReducer.resetForInput()
+    }
+
     private fun renderTyping(state: KeyboardState, showCommandControls: Boolean = state.mode != KeyboardMode.LOCKED, shortcutSnapshot: ShortcutSnapshot = ShortcutSnapshot.empty()) {
         val toolbar = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         toolbar.addView(label(if (state.mode == KeyboardMode.RECEIPT) "完了" else "通常入力", 14f), weight(1f))
         if (showCommandControls) toolbar.addView(actionButton("Command", "Command mode") { callbacks.onCommand() })
         root.addView(toolbar)
-        val rows = if (numericMode) listOf("1234567890", "-/:;()\$&@", ".,?!'\"")
+        val rows = if (typingMode.layer == KeyboardLayer.SYMBOLS) listOf("1234567890", "-/:;()\$&@", ".,?!'\"")
         else listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
         val activeBindings = shortcutSnapshot.bindings.filter { it.enabled }
         if (activeBindings.isNotEmpty()) {
@@ -80,26 +108,47 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
             val row = row()
             letters.forEach { letter ->
                 val keyCode = letter.uppercase()
-                row.addView(key(keyCode, letter.toString(), binding = shortcutSnapshot.bindingFor(keyCode)))
+                val display = if (typingMode.layer == KeyboardLayer.LETTERS && typingMode.lettersUppercase) letter.uppercase() else letter.toString()
+                row.addView(key(display, display, binding = shortcutSnapshot.bindingFor(keyCode)))
             }
             root.addView(row)
         }
         val controls = row()
         controls.addView(key("⇧", "Shift", weight = 1.4f).apply {
-            setOnClickListener { shift = !shift; contentDescription = if (shift) "Shift on" else "Shift off" }
+            isEnabled = typingMode.layer == KeyboardLayer.LETTERS
+            contentDescription = when (typingMode.shift) {
+                ShiftState.OFF -> "Shift off, tap for uppercase next character"
+                ShiftState.ONE_SHOT -> "Shift on for next character, tap again for caps lock"
+                ShiftState.CAPS_LOCK -> "Caps Lock on, tap to turn off"
+            }
+            setOnClickListener {
+                typingMode = TypingModeReducer.shiftTapped(typingMode)
+                playKeySound()
+                render(state, currentShortcutSnapshot, currentConfig, currentReturnKey)
+            }
         })
-        controls.addView(key(if (numericMode) "ABC" else "123", "Numbers and symbols", weight = 1.2f).apply {
-            setOnClickListener { numericMode = !numericMode; render(state, currentShortcutSnapshot) }
+        controls.addView(key(if (typingMode.layer == KeyboardLayer.SYMBOLS) "ABC" else "123", "Numbers and symbols", weight = 1.2f).apply {
+            setOnClickListener {
+                typingMode = TypingModeReducer.layerToggled(typingMode)
+                playKeySound()
+                render(state, currentShortcutSnapshot, currentConfig, currentReturnKey)
+            }
         })
-        controls.addView(key("🌐", "Switch keyboard", weight = 1.2f).apply { setOnClickListener { callbacks.onSwitchKeyboard() } })
-        controls.addView(key("space", "Space", weight = 3f).apply { setOnClickListener { callbacks.onText(" ") } })
-        controls.addView(key("⌫", "Delete", weight = 1.2f).apply { setOnClickListener { callbacks.onDelete() } })
-        controls.addView(key("↵", "Return", weight = 1.2f).apply { setOnClickListener { callbacks.onEnter() } })
+        controls.addView(key("🌐", "Switch keyboard", weight = 1.2f).apply { setOnClickListener { playKeySound(); callbacks.onSwitchKeyboard() } })
+        controls.addView(key("space", "Space", weight = 3f).apply { setOnClickListener { emitText(" ") } })
+        controls.addView(key("⌫", "Delete", weight = 1.2f).apply { setOnClickListener { playKeySound(); callbacks.onDelete() } })
+        controls.addView(key(currentReturnKey.label, "${currentReturnKey.label} action", weight = 1.2f).apply { setOnClickListener { playKeySound(); callbacks.onEnter() } })
         root.addView(controls)
         if (showCommandControls) {
-            val ai = key("AI hold", "AI command: hold to enter, or use Command button", weight = 1f)
+            val ai = key("AI hold", "AI command: hold to enter, or use Command button", weight = 1f, touchFeedback = false)
             ai.setOnClickListener { /* A tap has no capture or network meaning. */ }
-            ai.setOnLongClickListener { callbacks.onCommand(); true }
+            ai.setOnLongClickListener {
+                if (currentConfig.haptics != com.torutesu.mobileaikeyboard.core.HapticMode.OFF) {
+                    ai.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                }
+                callbacks.onCommand()
+                true
+            }
             root.addView(ai)
         }
     }
@@ -246,7 +295,13 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
         layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, dp(52))
     }
 
-    private fun key(text: String, accessibleName: String, weight: Float = 1f, binding: TriggerKeyBinding? = null) = Button(context).apply {
+    private fun key(
+        text: String,
+        accessibleName: String,
+        weight: Float = 1f,
+        binding: TriggerKeyBinding? = null,
+        touchFeedback: Boolean = true,
+    ) = Button(context).apply {
         this.text = text
         textSize = 15f
         minHeight = dp(48)
@@ -262,17 +317,66 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
         }
         layoutParams = LinearLayout.LayoutParams(0, dp(52), weight).apply { setMargins(dp(2), dp(2), dp(2), dp(2)) }
         val commitBoundCharacter = {
-            callbacks.onText(if (shift) text.uppercase() else text.lowercase())
-            shift = false
+            emitText(if (typingMode.lettersUppercase) text.uppercase() else text.lowercase())
+            typingMode = TypingModeReducer.characterCommitted(typingMode)
         }
         setOnClickListener {
             if (binding != null) {
                 commitBoundCharacter()
             } else if (text.length == 1 && text[0].isLetter()) {
-                callbacks.onText(if (shift) text.uppercase() else text.lowercase())
-                shift = false
-            } else if (text.length == 1 && !text[0].isLetterOrDigit()) {
-                callbacks.onText(text)
+                emitText(text)
+                typingMode = TypingModeReducer.characterCommitted(typingMode)
+            } else if (text.length == 1) {
+                emitText(text)
+            }
+        }
+        if (binding == null && touchFeedback) {
+            var pressed = false
+            var cancelled = false
+            var downX = 0f
+            var downY = 0f
+            setOnTouchListener { _, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        if (currentConfig.characterPreview && stateAllowsCharacterPreview() && text.length == 1) textSize = 20f
+                        pressed = true
+                        cancelled = false
+                        downX = event.x
+                        downY = event.y
+                        true
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val distance = kotlin.math.hypot((event.x - downX).toDouble(), (event.y - downY).toDouble())
+                        if (distance > 12f * density) {
+                            cancelled = true
+                            pressed = false
+                            textSize = 15f
+                        }
+                        true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        textSize = 15f
+                        val commitTap = pressed && !cancelled
+                        if (commitTap) {
+                            if (currentConfig.haptics == com.torutesu.mobileaikeyboard.core.HapticMode.KEY_TAP) {
+                                performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            }
+                            // Keep the click path accessible while owning the raw
+                            // stream, so this cannot double-commit on OEM Buttons.
+                            performClick()
+                        }
+                        pressed = false
+                        cancelled = true
+                        true
+                    }
+                    MotionEvent.ACTION_CANCEL -> {
+                        textSize = 15f
+                        pressed = false
+                        cancelled = true
+                        true
+                    }
+                    else -> true
+                }
             }
         }
         binding?.let { shortcut ->
@@ -289,7 +393,9 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
                 if (!cancelled && isDown) {
                     longPressFired = true
                     isPressed = false
-                    performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                    if (currentConfig.haptics != com.torutesu.mobileaikeyboard.core.HapticMode.OFF) {
+                        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                    }
                     callbacks.onShortcut(shortcut)
                 }
             }
@@ -302,6 +408,7 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
                         downX = event.x
                         downY = event.y
                         isPressed = true
+                        if (currentConfig.characterPreview && stateAllowsCharacterPreview()) textSize = 20f
                         postDelayed(trigger, 450L)
                         true
                     }
@@ -314,6 +421,7 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
                             isDown = false
                             removeCallbacks(trigger)
                             isPressed = false
+                            textSize = 15f
                         }
                         true
                     }
@@ -322,12 +430,17 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
                         isDown = false
                         removeCallbacks(trigger)
                         isPressed = false
+                        textSize = 15f
                         true
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         removeCallbacks(trigger)
                         val commitTap = event.actionMasked == MotionEvent.ACTION_UP && isDown && !cancelled && !longPressFired
+                        textSize = 15f
                         if (commitTap) {
+                            if (currentConfig.haptics == com.torutesu.mobileaikeyboard.core.HapticMode.KEY_TAP) {
+                                performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            }
                             // Keep the click path accessible while ensuring it is
                             // invoked once (the listener owns the raw touch stream).
                             performClick()
@@ -345,12 +458,26 @@ class KeyboardSurface(context: Context, private val callbacks: Callbacks) : Scro
                         isDown = false
                         removeCallbacks(trigger)
                         isPressed = false
+                        textSize = 15f
                         true
                     }
                 }
             }
         }
     }
+
+    private fun emitText(value: String) {
+        callbacks.onText(value)
+        playKeySound()
+    }
+
+    private fun playKeySound() {
+        if (currentConfig.keySound == KeySoundMode.KEY_TAP) {
+            (context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager)?.playSoundEffect(AudioManager.FX_KEY_CLICK)
+        }
+    }
+
+    private fun stateAllowsCharacterPreview(): Boolean = currentKeyboardState.mode != KeyboardMode.LOCKED
 
     private fun actionButton(text: String, accessibleName: String, action: () -> Unit) = Button(context).apply {
         this.text = text

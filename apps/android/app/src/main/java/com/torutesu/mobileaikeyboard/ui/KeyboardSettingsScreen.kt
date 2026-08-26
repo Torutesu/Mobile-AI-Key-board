@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.heightIn
 import com.torutesu.mobileaikeyboard.core.HostAppState
 import com.torutesu.mobileaikeyboard.core.HostEvent
 import com.torutesu.mobileaikeyboard.core.HapticMode
+import com.torutesu.mobileaikeyboard.core.KeySoundMode
 import com.torutesu.mobileaikeyboard.core.JapaneseWorkflowPack
 import com.torutesu.mobileaikeyboard.core.KeyboardSettingsEvent
 import com.torutesu.mobileaikeyboard.core.KeyboardTheme
@@ -37,9 +38,11 @@ fun KeyboardSettingsDashboard(state: HostAppState, dispatch: (HostEvent) -> Unit
     Card(modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Keyboard customization and local workflow settings" }) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Keyboard customization", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Text("端末内設定 v${settings.schemaVersion}。IME-consumable typed config modelです。runtime sync/persistenceは未証明（現在はHost memory-only）で、通常のAndroid keyboard設定・変換を置き換えません。")
+            Text("端末内設定 v${settings.schemaVersion}。HostとIMEが端末内SharedPreferencesで共有します。実機再起動・OEM差は未証明で、Android標準の変換エンジンは置き換えません。")
             ChoiceRow("Theme", settings.theme.name) { send(KeyboardSettingsEvent.SetTheme(next(settings.theme))) }
             ChoiceRow("Haptics", settings.haptics.name) { send(KeyboardSettingsEvent.SetHaptics(next(settings.haptics))) }
+            ChoiceRow("Key sound", settings.keySound.name) { send(KeyboardSettingsEvent.SetKeySound(next(settings.keySound))) }
+            ChoiceRow("Character preview", if (settings.characterPreview) "ON" else "OFF") { send(KeyboardSettingsEvent.SetCharacterPreview(!settings.characterPreview)) }
             ChoiceRow("Key size", settings.keySize.name) { send(KeyboardSettingsEvent.SetKeySize(next(settings.keySize))) }
             ChoiceRow("One-handed", settings.oneHanded.name) { send(KeyboardSettingsEvent.SetOneHanded(next(settings.oneHanded))) }
             Text("Japanese workflow packs（local fixture）", fontWeight = FontWeight.Bold)
@@ -67,6 +70,7 @@ private fun ChoiceRow(label: String, value: String, onClick: () -> Unit) {
 
 private fun next(value: KeyboardTheme) = KeyboardTheme.values()[(value.ordinal + 1) % KeyboardTheme.values().size]
 private fun next(value: HapticMode) = HapticMode.values()[(value.ordinal + 1) % HapticMode.values().size]
+private fun next(value: KeySoundMode) = KeySoundMode.values()[(value.ordinal + 1) % KeySoundMode.values().size]
 private fun next(value: KeySize) = KeySize.values()[(value.ordinal + 1) % KeySize.values().size]
 private fun next(value: OneHandedMode) = OneHandedMode.values()[(value.ordinal + 1) % OneHandedMode.values().size]
 private fun packLabel(pack: JapaneseWorkflowPack) = when (pack) {

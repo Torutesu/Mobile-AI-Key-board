@@ -9,6 +9,7 @@ import com.torutesu.mobileaikeyboard.core.CommandSessionReducer
 import com.torutesu.mobileaikeyboard.core.ContentFreeTelemetry
 import com.torutesu.mobileaikeyboard.core.ExecutableLocalSkills
 import com.torutesu.mobileaikeyboard.core.InputSource
+import com.torutesu.mobileaikeyboard.core.KeyboardSettingsStore
 import com.torutesu.mobileaikeyboard.core.LocalPoliteRewriteService
 import com.torutesu.mobileaikeyboard.core.NoOpTelemetry
 import com.torutesu.mobileaikeyboard.core.SensitiveFieldClassifier
@@ -18,6 +19,7 @@ import com.torutesu.mobileaikeyboard.core.ShortcutActivation
 import com.torutesu.mobileaikeyboard.core.ShortcutSnapshot
 import com.torutesu.mobileaikeyboard.core.ShortcutSnapshotStore
 import com.torutesu.mobileaikeyboard.core.TriggerKeyBinding
+import com.torutesu.mobileaikeyboard.core.ReturnKeyModel
 import com.torutesu.mobileaikeyboard.core.TelemetryEvent
 import com.torutesu.mobileaikeyboard.core.UndoTicket
 import com.torutesu.mobileaikeyboard.core.asKeyboardState
@@ -31,12 +33,15 @@ class KeyboardImeService : InputMethodService() {
     private var telemetry: ContentFreeTelemetry = NoOpTelemetry
     private val rewriteService = LocalPoliteRewriteService()
     private lateinit var shortcutStore: ShortcutSnapshotStore
+    private lateinit var settingsStore: KeyboardSettingsStore
+    private var currentEditorInfo: EditorInfo? = null
     private var shortcutSnapshot: ShortcutSnapshot = ShortcutSnapshot.empty()
     private var activeShortcut: ShortcutActivation? = null
 
     override fun onCreate() {
         super.onCreate()
         shortcutStore = ShortcutSnapshotStore(this)
+        settingsStore = KeyboardSettingsStore(this)
         shortcutSnapshot = shortcutStore.read()
     }
 
@@ -48,8 +53,13 @@ class KeyboardImeService : InputMethodService() {
             onText = { text -> adapter?.insertAtCursor(text) },
             onDelete = { adapter?.deleteBackward() },
             onEnter = {
-                currentInputConnection?.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_ENTER))
-                currentInputConnection?.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_ENTER))
+                currentInputConnection?.let { input ->
+                    val action = ReturnKeyModel.from(currentEditorInfo).editorAction
+                    if (action == null || !input.performEditorAction(action)) {
+                        input.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_ENTER))
+                        input.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_ENTER))
+                    }
+                }
             },
             onSwitchKeyboard = { switchToNextInputMethod(false) },
             onCapture = { command, selection, surrounding -> capture(command, selection, surrounding) },
@@ -70,18 +80,21 @@ class KeyboardImeService : InputMethodService() {
         // Re-read on every foreground/open boundary. This is the lost-notification
         // convergence path and keeps the IME independent of account/network state.
         shortcutSnapshot = shortcutStore.read()
+        settingsStore.read()
         syncSurface()
     }
 
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
         super.onStartInput(attribute, restarting)
         adapter = currentInputConnection?.let(::InputConnectionAdapter)
+        currentEditorInfo = attribute
         shortcutSnapshot = shortcutStore.read()
         // EditorInfo may change without a matching onFinishInput. Drop every
         // prior field's capture/result/undo before inspecting the new boundary.
         session = CommandSession()
         appliedEdit = null
         activeShortcut = null
+        surface?.resetTypingState()
         val classification = SensitiveFieldClassifier.classify(attribute)
         lockReason = classification.explanation.takeUnless { classification.aiCaptureAllowed }
         syncSurface()
@@ -91,6 +104,8 @@ class KeyboardImeService : InputMethodService() {
         adapter = null
         appliedEdit = null
         activeShortcut = null
+        currentEditorInfo = null
+        surface?.resetTypingState()
         session = CommandSession()
         lockReason = null
         syncSurface()
@@ -264,7 +279,16 @@ class KeyboardImeService : InputMethodService() {
 
     private fun syncSurface() {
         shortcutSnapshot = if (::shortcutStore.isInitialized) shortcutStore.read() else shortcutSnapshot
-        surface?.render(session.asKeyboardState(lockReason), shortcutSnapshot)
+        if (::settingsStore.isInitialized) {
+            surface?.render(
+                session.asKeyboardState(lockReason),
+                shortcutSnapshot,
+                settingsStore.read(),
+                ReturnKeyModel.from(currentEditorInfo),
+            )
+        } else {
+            surface?.render(session.asKeyboardState(lockReason), shortcutSnapshot)
+        }
     }
 
     private fun shortcutStillCurrent(): Boolean {

@@ -2,6 +2,7 @@ package com.torutesu.mobileaikeyboard.core
 
 enum class KeyboardTheme { SYSTEM, LIGHT, DARK, HIGH_CONTRAST }
 enum class HapticMode { OFF, KEY_TAP, COMMAND_ONLY }
+enum class KeySoundMode { OFF, KEY_TAP }
 enum class KeySize { COMPACT, STANDARD, LARGE }
 enum class OneHandedMode { OFF, LEFT, RIGHT }
 enum class JapaneseWorkflowPack { POLITE, SHORTEN, KEY_POINTS, ABSOLUTE_DATE }
@@ -11,9 +12,11 @@ data class QualificationMetrics(val coldP50Ms: Long, val coldP95Ms: Long, val wa
 }
 
 data class KeyboardSettingsState(
-    val schemaVersion: Int = 2,
+    val schemaVersion: Int = 3,
     val theme: KeyboardTheme = KeyboardTheme.SYSTEM,
     val haptics: HapticMode = HapticMode.KEY_TAP,
+    val keySound: KeySoundMode = KeySoundMode.OFF,
+    val characterPreview: Boolean = true,
     val keySize: KeySize = KeySize.STANDARD,
     val oneHanded: OneHandedMode = OneHandedMode.OFF,
     val workflowPack: JapaneseWorkflowPack = JapaneseWorkflowPack.POLITE,
@@ -25,7 +28,15 @@ data class KeyboardSettingsState(
     val qualificationMetrics: QualificationMetrics? = null,
 )
 
-data class ImeConsumableConfig(val theme: KeyboardTheme, val haptics: HapticMode, val keySize: KeySize, val oneHanded: OneHandedMode, val workflowPack: JapaneseWorkflowPack)
+data class ImeConsumableConfig(
+    val theme: KeyboardTheme,
+    val haptics: HapticMode,
+    val keySize: KeySize,
+    val oneHanded: OneHandedMode,
+    val workflowPack: JapaneseWorkflowPack,
+    val keySound: KeySoundMode = KeySoundMode.OFF,
+    val characterPreview: Boolean = true,
+)
 
 /** Setup status is deliberately derived from both Android enablement and a real test-field edit. */
 data class ImeOnboardingStatus(val imeEnabled: Boolean, val testInput: String) {
@@ -36,6 +47,8 @@ data class ImeOnboardingStatus(val imeEnabled: Boolean, val testInput: String) {
 sealed interface KeyboardSettingsEvent {
     data class SetTheme(val value: KeyboardTheme) : KeyboardSettingsEvent
     data class SetHaptics(val value: HapticMode) : KeyboardSettingsEvent
+    data class SetKeySound(val value: KeySoundMode) : KeyboardSettingsEvent
+    data class SetCharacterPreview(val value: Boolean) : KeyboardSettingsEvent
     data class SetKeySize(val value: KeySize) : KeyboardSettingsEvent
     data class SetOneHanded(val value: OneHandedMode) : KeyboardSettingsEvent
     data class SelectWorkflowPack(val value: JapaneseWorkflowPack) : KeyboardSettingsEvent
@@ -49,11 +62,13 @@ object KeyboardSettingsReducer {
     fun reduce(state: KeyboardSettingsState, event: KeyboardSettingsEvent): KeyboardSettingsState = when (event) {
         is KeyboardSettingsEvent.SetTheme -> state.copy(theme = event.value)
         is KeyboardSettingsEvent.SetHaptics -> state.copy(haptics = event.value)
+        is KeyboardSettingsEvent.SetKeySound -> state.copy(keySound = event.value)
+        is KeyboardSettingsEvent.SetCharacterPreview -> state.copy(characterPreview = event.value)
         is KeyboardSettingsEvent.SetKeySize -> state.copy(keySize = event.value)
         is KeyboardSettingsEvent.SetOneHanded -> state.copy(oneHanded = event.value)
         is KeyboardSettingsEvent.SelectWorkflowPack -> state.copy(workflowPack = event.value)
-        KeyboardSettingsEvent.Reset -> KeyboardSettingsState(schemaVersion = 2)
-        is KeyboardSettingsEvent.MigrateLegacy -> if (event.oldVersion < 2) state.copy(schemaVersion = 2, haptics = HapticMode.KEY_TAP, keySize = KeySize.STANDARD) else state
+        KeyboardSettingsEvent.Reset -> KeyboardSettingsState(schemaVersion = 3)
+        is KeyboardSettingsEvent.MigrateLegacy -> if (event.oldVersion < 3) state.copy(schemaVersion = 3, haptics = HapticMode.KEY_TAP, keySound = KeySoundMode.OFF, characterPreview = true, keySize = KeySize.STANDARD) else state
         is KeyboardSettingsEvent.RecordFixtureQualification -> {
             val m = event.metrics
             val valid = m.coldP50Ms in 0..60_000 && m.coldP95Ms in 0..60_000 && m.coldP50Ms <= m.coldP95Ms && m.warmP95Ms in 0..60_000 && m.keyP95Ms in 0..60_000 && m.sessions in 1..1_000_000 && m.crashes in 0..m.sessions
@@ -63,7 +78,7 @@ object KeyboardSettingsReducer {
         }
         KeyboardSettingsEvent.ClearQualification -> state.copy(qualificationStatus = QualificationStatus.CLEARED, qualificationMetrics = null, coldLatencyBucket = "not_proven", warmLatencyBucket = "not_proven", keyLatencyBucket = "not_proven", crashFreeBucket = "not_proven")
     }
-    fun imeConfig(state: KeyboardSettingsState) = ImeConsumableConfig(state.theme, state.haptics, state.keySize, state.oneHanded, state.workflowPack)
+    fun imeConfig(state: KeyboardSettingsState) = ImeConsumableConfig(state.theme, state.haptics, state.keySize, state.oneHanded, state.workflowPack, state.keySound, state.characterPreview)
 }
 
 data class WorkflowFixtureResult(val pack: JapaneseWorkflowPack, val preview: String, val contentPreserved: Boolean, val localOnly: Boolean = true)

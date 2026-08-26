@@ -1,0 +1,16 @@
+{
+  "schema_version": "mobile-ai-keyboard.performance-benchmark.v1",
+  "measurement_policy": "content_free",
+  "qualification_boundary": "fixture_and_simulator_results_are_not_proven",
+  "platforms": ["ios", "android"],
+  "thresholds": {
+    "key_to_commit_p50_ms": {"unit": "ms", "maximum": 35},
+    "key_to_commit_p95_ms": {"unit": "ms", "maximum": 50},
+    "keyboard_cold_open_p95_ms": {"unit": "ms", "maximum": 400},
+    "keyboard_warm_open_p95_ms": {"unit": "ms", "maximum": 150},
+    "long_press_false_activation_rate": {"unit": "ratio", "maximum": 0.001},
+    "ordinary_tap_drop_rate": {"unit": "ratio", "maximum": 0.001}
+  },
+  "required_observation_binding": ["candidate_digest", "platform", "environment", "evidence.kind", "sample_count"],
+  "protected_pass_requirements": ["environment=protected_device", "evidence.kind=protected_external", "protected_runner_attestation", "artifact_digest"]
+}

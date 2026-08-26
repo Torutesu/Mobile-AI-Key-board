@@ -40,6 +40,7 @@ import com.torutesu.mobileaikeyboard.core.LocalPoliteRewriteService
 import com.torutesu.mobileaikeyboard.core.HostEvent
 import com.torutesu.mobileaikeyboard.core.HostFixtureClient
 import com.torutesu.mobileaikeyboard.core.ImeOnboardingStatus
+import com.torutesu.mobileaikeyboard.core.KeyboardSettingsStore
 import com.torutesu.mobileaikeyboard.core.ShortcutSnapshotStore
 
 class MainActivity : ComponentActivity() {
@@ -69,7 +70,8 @@ private fun MobileAiKeyboardApp(imeEnabled: Boolean) {
     val fixtureClient = remember { HostFixtureClient }
     val context = LocalContext.current
     val shortcutStore = remember(context) { ShortcutSnapshotStore(context.applicationContext) }
-    var hostState by remember { mutableStateOf(fixtureClient.initialState()) }
+    val settingsStore = remember(context) { KeyboardSettingsStore(context.applicationContext) }
+    var hostState by remember { mutableStateOf(fixtureClient.initialState().copy(keyboardSettings = settingsStore.readState())) }
     var shortcutSnapshot by remember { mutableStateOf(shortcutStore.read()) }
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
@@ -82,7 +84,10 @@ private fun MobileAiKeyboardApp(imeEnabled: Boolean) {
                 ReadinessCard(imeEnabled)
                 HostAppDashboard(
                     state = hostState,
-                    dispatch = { event -> hostState = fixtureClient.dispatch(hostState, event) },
+                    dispatch = { event ->
+                        hostState = fixtureClient.dispatch(hostState, event)
+                        if (event is HostEvent.KeyboardSettingsAction) settingsStore.write(hostState.keyboardSettings)
+                    },
                     shortcutSnapshot = shortcutSnapshot,
                     onShortcutPublish = { candidate ->
                         val published = shortcutStore.publish(candidate)

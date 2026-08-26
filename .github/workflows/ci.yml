@@ -21,13 +21,17 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm audit --prod --audit-level high
+      - name: Run deterministic performance regression diagnostic
+        run: pnpm benchmark:performance -- --report "$RUNNER_TEMP/performance-benchmark.json"
       - name: Run release readiness static gate
-        run: pnpm release:readiness -- --static-only --report "$RUNNER_TEMP/release-readiness.json"
+        run: pnpm release:readiness -- --static-only --benchmark "$RUNNER_TEMP/performance-benchmark.json" --report "$RUNNER_TEMP/release-readiness.json"
       - name: Upload release readiness report
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-readiness-${{ github.run_id }}
-          path: ${{ runner.temp }}/release-readiness.json
+          path: |
+            ${{ runner.temp }}/release-readiness.json
+            ${{ runner.temp }}/performance-benchmark.json
           if-no-files-found: error
 
   ios:

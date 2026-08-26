@@ -186,6 +186,8 @@ Focus password and OTP fields. AI controls and capture are disabled; no content 
 
 The deterministic source/evidence gate is `pnpm release:readiness`. CI invokes `pnpm release:readiness -- --static-only --report <path>` to validate source declarations, privacy/entitlement consistency, fixture disclosure markers, required commands, and evidence schemas while preserving `not_proven` for missing protected runs. A release invocation without `--static-only` fails closed until the real-device matrix and protected performance evidence are complete. The required command/artifact contract is [`docs/release-evidence-manifest.json`](release-evidence-manifest.json).
 
+`pnpm benchmark:performance` runs the content-free deterministic diagnostic in [`scripts/performance-benchmark.mjs`](../scripts/performance-benchmark.mjs). It checks key-to-commit p50/p95 (35/50 ms), cold/warm keyboard open p95 (400/150 ms), long-press false activation (0.1%), and ordinary tap drop (0.1%) for both platforms. It is intended to catch contract regressions locally; its fixture result is never a physical-device or production performance proof, and the readiness gate keeps that evidence `not_proven`.
+
 Each candidate must bind:
 
 - source commit and clean tree;

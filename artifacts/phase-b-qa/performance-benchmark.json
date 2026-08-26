@@ -1,0 +1,170 @@
+{
+  "schema_version": "mobile-ai-keyboard.performance-benchmark.v1",
+  "candidate_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "environment": "fixture",
+  "diagnostic_status": "passed",
+  "qualification_status": "not_proven",
+  "observations": [
+    {
+      "metric": "key_to_commit_p50_ms",
+      "platform": "ios",
+      "value": 30,
+      "unit": "ms",
+      "sample_count": 8,
+      "candidate_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "environment": "fixture",
+      "evidence": {
+        "kind": "deterministic_fixture",
+        "test_run_id": "fixture_benchmark_v1"
+      }
+    },
+    {
+      "metric": "key_to_commit_p95_ms",
+      "platform": "ios",
+      "value": 49,
+      "unit": "ms",
+      "sample_count": 8,
+      "candidate_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "environment": "fixture",
+      "evidence": {
+        "kind": "deterministic_fixture",
+        "test_run_id": "fixture_benchmark_v1"
+      }
+    },
+    {
+      "metric": "keyboard_cold_open_p95_ms",
+      "platform": "ios",
+      "value": 367,
+      "unit": "ms",
+      "sample_count": 8,
+      "candidate_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "environment": "fixture",
+      "evidence": {
+        "kind": "deterministic_fixture",
+        "test_run_id": "fixture_benchmark_v1"
+      }
+    },
+    {
+      "metric": "keyboard_warm_open_p95_ms",
+      "platform": "ios",
+      "value": 132,
+      "unit": "ms",
+      "sample_count": 8,
+      "candidate_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "environment": "fixture",
+      "evidence": {
+        "kind": "deterministic_fixture",
+        "test_run_id": "fixture_benchmark_v1"
+      }
+    },
+    {
+      "metric": "long_press_false_activation_rate",
+      "platform": "ios",
+      "value": 0,
+      "unit": "ratio",
+      "sample_count": 8,
+      "candidate_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "environment": "fixture",
+      "evidence": {
+        "kind": "deterministic_fixture",
+        "test_run_id": "fixture_benchmark_v1"
+      }
+    },
+    {
+      "metric": "ordinary_tap_drop_rate",
+      "platform": "ios",
+      "value": 0,
+      "unit": "ratio",
+      "sample_count": 8,
+      "candidate_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "environment": "fixture",
+      "evidence": {
+        "kind": "deterministic_fixture",
+        "test_run_id": "fixture_benchmark_v1"
+      }
+    },
+    {
+      "metric": "key_to_commit_p50_ms",
+      "platform": "android",
+      "value": 30,
+      "unit": "ms",
+      "sample_count": 8,
+      "candidate_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "environment": "fixture",
+      "evidence": {
+        "kind": "deterministic_fixture",
+        "test_run_id": "fixture_benchmark_v1"
+      }
+    },
+    {
+      "metric": "key_to_commit_p95_ms",
+      "platform": "android",
+      "value": 49,
+      "unit": "ms",
+      "sample_count": 8,
+      "candidate_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "environment": "fixture",
+      "evidence": {
+        "kind": "deterministic_fixture",
+        "test_run_id": "fixture_benchmark_v1"
+      }
+    },
+    {
+      "metric": "keyboard_cold_open_p95_ms",
+      "platform": "android",
+      "value": 367,
+      "unit": "ms",
+      "sample_count": 8,
+      "candidate_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "environment": "fixture",
+      "evidence": {
+        "kind": "deterministic_fixture",
+        "test_run_id": "fixture_benchmark_v1"
+      }
+    },
+    {
+      "metric": "keyboard_warm_open_p95_ms",
+      "platform": "android",
+      "value": 132,
+      "unit": "ms",
+      "sample_count": 8,
+      "candidate_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "environment": "fixture",
+      "evidence": {
+        "kind": "deterministic_fixture",
+        "test_run_id": "fixture_benchmark_v1"
+      }
+    },
+    {
+      "metric": "long_press_false_activation_rate",
+      "platform": "android",
+      "value": 0,
+      "unit": "ratio",
+      "sample_count": 8,
+      "candidate_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "environment": "fixture",
+      "evidence": {
+        "kind": "deterministic_fixture",
+        "test_run_id": "fixture_benchmark_v1"
+      }
+    },
+    {
+      "metric": "ordinary_tap_drop_rate",
+      "platform": "android",
+      "value": 0,
+      "unit": "ratio",
+      "sample_count": 8,
+      "candidate_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "environment": "fixture",
+      "evidence": {
+        "kind": "deterministic_fixture",
+        "test_run_id": "fixture_benchmark_v1"
+      }
+    }
+  ],
+  "evidence": {
+    "kind": "deterministic_fixture",
+    "test_run_id": "fixture_benchmark_v1"
+  },
+  "report_digest": "sha256:65a2a9803f816d16fc0a0a2a0c0faaff0b75d00d49c2c64e2c3a3a4f264fe35c"
+}

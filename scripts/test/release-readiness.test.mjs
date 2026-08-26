@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -75,5 +76,37 @@ test('archive evidence distinguishes extension Info.plist from code-signing enti
     assert.match(result.detail, /Info\.plist/);
   } finally {
     fs.writeFileSync(file, original);
+  }
+});
+
+test('benchmark gate rejects digest tampering, duplicates, threshold/status drift, and forged protected proof', () => {
+  const benchmarkScript = path.join(root, 'scripts/performance-benchmark.mjs');
+  const generated = spawnSync(process.execPath, [benchmarkScript], { cwd: root, encoding: 'utf8' });
+  assert.equal(generated.status, 0);
+  const baseline = JSON.parse(generated.stdout);
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mobile-ai-keyboard-benchmark-'));
+  const runGate = (value) => {
+    const file = path.join(tempDir, 'benchmark.json');
+    fs.writeFileSync(file, `${JSON.stringify(value)}\n`);
+    return evaluate({ staticOnly: true, benchmark: file }).checks.find((check) => check.code === 'evidence.benchmark.schema');
+  };
+  try {
+    const digestTampered = runGate({ ...baseline, report_digest: `sha256:${'f'.repeat(64)}` });
+    assert.equal(digestTampered.status, 'fail');
+    assert.match(digestTampered.detail, /report_digest/);
+
+    const duplicate = runGate({ ...baseline, observations: [...baseline.observations, baseline.observations[0]] });
+    assert.equal(duplicate.status, 'fail');
+    assert.match(duplicate.detail, /duplicate benchmark observation/);
+
+    const statusDrift = runGate({ ...baseline, diagnostic_status: 'failed' });
+    assert.equal(statusDrift.status, 'fail');
+    assert.match(statusDrift.detail, /diagnostic_status/);
+
+    const forgedProtected = runGate({ ...baseline, environment: 'protected_device', qualification_status: 'passed', evidence: { kind: 'protected_external', test_run_id: 'protected-run', verifier_kind: 'protected_runner', verifier_id: 'runner', artifact_digest: `sha256:${'a'.repeat(64)}` } });
+    assert.equal(forgedProtected.status, 'fail');
+    assert.match(forgedProtected.detail, /environment|evidence kind|canonical report/);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });

@@ -12,9 +12,11 @@ final class KeyboardViewController: UIInputViewController {
     private let locking = EntityLocking()
     private let statusLabel = UILabel()
     private let actionButton = UIButton(type: .system)
-    private let shiftButton = UIButton(type: .system)
+    private var shiftButton = UIButton(type: .system)
     private var letterButtons: [UIButton] = []
-    private var isShifted = false
+    private var inputState = KeyboardInputState()
+    private var returnButton: UIButton?
+    private var actionButtonConfigured = false
     private var typingStack: UIStackView?
     private var commandTextView = UITextView()
     private var resultTextView = UITextView()
@@ -135,10 +137,13 @@ final class KeyboardViewController: UIInputViewController {
         actionButton.titleLabel?.adjustsFontForContentSizeCategory = true
         actionButton.accessibilityLabel = "AIコマンドを開く"
         actionButton.accessibilityHint = "文章を確認してから端末内で整えます。外部送信はありません"
-        actionButton.addTarget(self, action: #selector(invoke), for: .touchUpInside)
-        let hold = UILongPressGestureRecognizer(target: self, action: #selector(invokeLongPress(_:)))
-        hold.minimumPressDuration = 0.45
-        actionButton.addGestureRecognizer(hold)
+        if !actionButtonConfigured {
+            actionButton.addTarget(self, action: #selector(invoke), for: .touchUpInside)
+            let hold = UILongPressGestureRecognizer(target: self, action: #selector(invokeLongPress(_:)))
+            hold.minimumPressDuration = 0.45
+            actionButton.addGestureRecognizer(hold)
+            actionButtonConfigured = true
+        }
 
         let header = UIStackView(arrangedSubviews: [statusLabel, actionButton])
         header.axis = .horizontal
@@ -147,9 +152,21 @@ final class KeyboardViewController: UIInputViewController {
         header.isLayoutMarginsRelativeArrangement = true
         header.layoutMargins = UIEdgeInsets(top: 2, left: 10, bottom: 2, right: 10)
 
-        let first = makeLetterRow(OrdinaryKeyboardLayout.letterRows[0])
-        let second = makeLetterRow(OrdinaryKeyboardLayout.letterRows[1])
-        let third = makeLetterRow(OrdinaryKeyboardLayout.letterRows[2], leading: makeShiftButton(), trailing: makeDeleteButton())
+        letterButtons.removeAll()
+        letterButtonsByKey.removeAll()
+        let first: UIStackView
+        let second: UIStackView
+        let third: UIStackView
+        switch inputState.layer {
+        case .letters:
+            first = makeLetterRow(OrdinaryKeyboardLayout.letterRows[0])
+            second = makeLetterRow(OrdinaryKeyboardLayout.letterRows[1])
+            third = makeLetterRow(OrdinaryKeyboardLayout.letterRows[2], leading: makeShiftButton(), trailing: makeDeleteButton())
+        case .numbersAndSymbols:
+            first = makeLetterRow(OrdinaryKeyboardLayout.numberRows[0])
+            second = makeLetterRow(OrdinaryKeyboardLayout.numberRows[1])
+            third = makeLetterRow(OrdinaryKeyboardLayout.numberRows[2], trailing: makeDeleteButton())
+        }
         let bottom = makeBottomRow()
         let stack = UIStackView(arrangedSubviews: [header, first, second, third, bottom])
         stack.axis = .vertical
@@ -158,6 +175,8 @@ final class KeyboardViewController: UIInputViewController {
         stack.isLayoutMarginsRelativeArrangement = true
         stack.layoutMargins = UIEdgeInsets(top: 4, left: 4, bottom: 4, right: 4)
         typingStack = stack
+        updateShiftAppearance()
+        updateReturnKeyPresentation()
         install(stack, height: 252)
     }
 
@@ -166,7 +185,7 @@ final class KeyboardViewController: UIInputViewController {
         if let leading { views.append(leading) }
         for letter in letters {
             let button = makeKey(String(letter))
-            letterButtons.append(button)
+            if ShortcutKeyCode(displayLabel: String(letter)) != nil { letterButtons.append(button) }
             views.append(button)
         }
         if let trailing { views.append(trailing) }
@@ -180,20 +199,25 @@ final class KeyboardViewController: UIInputViewController {
     private func makeBottomRow() -> UIStackView {
         let globe = makeUtilityButton("globe", title: "🌐", label: "次のキーボード")
         globe.addTarget(self, action: #selector(nextKeyboard), for: .touchUpInside)
+        let layerButton = makeUtilityButton("layer", title: inputState.layer.toggleTitle, label: inputState.layer == .letters ? "数字と記号" : "英字")
+        layerButton.addTarget(self, action: #selector(toggleInputLayer), for: .touchUpInside)
         let spaceButton = makeUtilityButton("space", title: "空白", label: "スペース")
         spaceButton.addTarget(self, action: #selector(space), for: .touchUpInside)
-        let returnButton = makeUtilityButton("return", title: "改行", label: "改行")
+        let returnButton = makeUtilityButton("return", title: returnKeyDisplay().displayLabel, label: returnKeyAccessibilityLabel())
         returnButton.addTarget(self, action: #selector(returnKey), for: .touchUpInside)
-        let row = UIStackView(arrangedSubviews: [globe, spaceButton, returnButton])
+        self.returnButton = returnButton
+        let row = UIStackView(arrangedSubviews: [globe, layerButton, spaceButton, returnButton])
         row.axis = .horizontal
         row.spacing = 3
         row.distribution = .fillProportionally
-        spaceButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 132).isActive = true
+        spaceButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 110).isActive = true
         return row
     }
 
     private func makeKey(_ letter: String) -> UIButton {
-        let button = makeUtilityButton("letter-\(letter.lowercased())", title: letter, label: letter)
+        let baseLetter = letter.first.map { String($0).lowercased() } ?? letter
+        let displayLetter = inputState.displayLetter(Character(baseLetter))
+        let button = makeUtilityButton("letter-\(baseLetter)", title: String(displayLetter), label: String(displayLetter))
         if let key = ShortcutKeyCode(displayLabel: letter) {
             letterButtonsByKey[key] = button
             let hold = UILongPressGestureRecognizer(target: self, action: #selector(skillKeyLongPress(_:)))
@@ -211,9 +235,10 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func makeShiftButton() -> UIButton {
+        shiftButton = UIButton(type: .system)
         shiftButton.setTitle("⇧", for: .normal)
         shiftButton.accessibilityLabel = "シフト"
-        shiftButton.accessibilityValue = "オフ"
+        shiftButton.accessibilityValue = inputState.shift.accessibilityValue
         styleKey(shiftButton)
         shiftButton.addTarget(self, action: #selector(toggleShift), for: .touchUpInside)
         return shiftButton
@@ -252,7 +277,8 @@ final class KeyboardViewController: UIInputViewController {
             return
         }
         textDocumentProxy.insertText(title)
-        if isShifted { isShifted = false; updateShiftAppearance() }
+        inputState.commitLetter()
+        updateShiftAppearance()
     }
 
     @objc private func letterTouchEnded(_ sender: UIButton) {
@@ -261,17 +287,49 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     @objc private func toggleShift() {
-        isShifted.toggle()
+        inputState.pressShift()
         updateShiftAppearance()
+    }
+
+    @objc private func toggleInputLayer() {
+        inputState.toggleLayer()
+        buildTypingView()
     }
 
     private func updateShiftAppearance() {
         for button in letterButtons {
             guard let value = button.currentTitle?.first else { continue }
-            button.setTitle(String(isShifted ? value.uppercased() : value.lowercased()), for: .normal)
+            let base = Character(String(value).lowercased())
+            let display = inputState.displayLetter(base)
+            button.setTitle(String(display), for: .normal)
+            button.accessibilityLabel = String(display)
         }
-        shiftButton.accessibilityValue = isShifted ? "オン" : "オフ"
-        shiftButton.backgroundColor = isShifted ? .systemBlue.withAlphaComponent(0.2) : .systemBackground
+        shiftButton.accessibilityValue = inputState.shift.accessibilityValue
+        shiftButton.backgroundColor = inputState.shift == .lower ? .systemBackground : .systemBlue.withAlphaComponent(0.2)
+    }
+
+    private func returnKeyDisplay() -> KeyboardReturnAction {
+        switch textDocumentProxy.returnKeyType {
+        case .go: return .go
+        case .join: return .join
+        case .next: return .next
+        case .search: return .search
+        case .send: return .send
+        case .done: return .done
+        case .continue: return .continue
+        default: return .newline
+        }
+    }
+
+    private func returnKeyAccessibilityLabel() -> String {
+        let action = returnKeyDisplay()
+        return action == .newline ? "改行" : "\(action.displayLabel)（改行を入力）"
+    }
+
+    private func updateReturnKeyPresentation() {
+        let action = returnKeyDisplay()
+        returnButton?.setTitle(action.displayLabel, for: .normal)
+        returnButton?.accessibilityLabel = returnKeyAccessibilityLabel()
     }
 
     @objc private func space() { textDocumentProxy.insertText(" ") }
@@ -762,7 +820,7 @@ final class KeyboardViewController: UIInputViewController {
     private func transition(_ action: KeyboardAction) {
         let screen = machine.send(action)
         switch screen {
-        case .typing: statusLabel.text = "入力"; actionButton.isEnabled = true
+        case .typing: statusLabel.text = isFullAccessEnabled ? "入力" : "入力。Skill Keyはフルアクセスが必要"; actionButton.isEnabled = true
         case .command: statusLabel.text = "コマンド"; actionButton.accessibilityLabel = "コマンドをキャンセル"; actionButton.isEnabled = true
         case .captureReview: statusLabel.text = "確認"; actionButton.isEnabled = true
         case .resultReview: statusLabel.text = "結果"; actionButton.isEnabled = true
@@ -777,6 +835,7 @@ final class KeyboardViewController: UIInputViewController {
     /// A document/field transition invalidates capture, result and undo state. An Apply callback
     /// is accepted only when the resulting document identity and whole-field fingerprint match.
     func textDidChange(_ textInput: UITextInput) {
+        updateReturnKeyPresentation()
         if case .applied(let token) = machine.screen {
             let currentField = (textDocumentProxy.documentContextBeforeInput ?? "") + (textDocumentProxy.documentContextAfterInput ?? "")
             let identityMatches = token.documentIdentifier == nil || token.documentIdentifier == documentIdentifier
