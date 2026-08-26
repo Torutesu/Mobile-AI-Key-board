@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -163,7 +165,13 @@ private fun ShortcutPickerDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (editing == null) "割り当てるキーを選択" else "${editing.skillName}を再割当") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Keep the potentially long skill list and all 26 keys scrollable.
+            // Execution verification and commit controls live in the fixed
+            // footer below so they can never collapse outside the dialog.
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 if (editing == null) {
                     Text("Skill", fontWeight = FontWeight.SemiBold)
                     var query by remember { mutableStateOf("") }
@@ -215,32 +223,58 @@ private fun ShortcutPickerDialog(
                     }
                 }
                 if (selectedKey in occupiedByOther) Text("${selectedKey}は使用中です。保存時にSwapまたはReplaceを明示してください。", color = MaterialTheme.colorScheme.error)
-                if (valid) {
-                    Button(
-                        onClick = { fixtureResult = candidate?.let(ShortcutFixtureRunner::run); error = null },
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                    ) { Text("端末内fixtureをテスト") }
-                } else Text("Skillとキーを選択してください。", color = MaterialTheme.colorScheme.error)
+                if (!valid) Text("Skillとキーを選択してください。", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        confirmButton = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    enabled = valid && assigned == null,
+                    onClick = {
+                        fixtureResult = candidate?.let(ShortcutFixtureRunner::run)
+                        error = null
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .semantics { contentDescription = "端末内fixtureテスト" },
+                ) { Text("端末内fixtureをテスト") }
                 fixtureResult?.let { result ->
                     Text(result.summary, color = if (result.passed) Color(0xFF18794E) else MaterialTheme.colorScheme.error)
                     if (result.passed) Text("Preview: ${result.output}", style = MaterialTheme.typography.bodySmall)
                 }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 assigned?.let { Text("✓ $it", color = Color(0xFF18794E), fontWeight = FontWeight.Bold) }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f).heightIn(min = 48.dp).semantics {
+                            contentDescription = if (assigned != null) "Skill Key設定を完了" else "Skill Key設定をキャンセル"
+                        },
+                    ) {
+                        Text(if (assigned != null) "完了" else "キャンセル")
+                    }
+                    Button(
+                        enabled = valid && fixtureResult?.passed == true && assigned == null,
+                        onClick = {
+                            val selected = candidate ?: return@Button
+                            val occupied = current.bindings.firstOrNull { it.enabled && it.keyCode == selected.keyCode && it.bindingId != editing?.bindingId }
+                            if (occupied != null) conflictBinding = occupied else publishCandidate()
+                        },
+                        modifier = Modifier.weight(1f).heightIn(min = 48.dp).semantics {
+                            contentDescription = "Skill Keyを保存"
+                        },
+                    ) { Text("保存") }
+                }
             }
         },
-        confirmButton = {
-            Button(enabled = valid && fixtureResult?.passed == true && assigned == null, onClick = {
-                val selected = candidate ?: return@Button
-                val occupied = current.bindings.firstOrNull { it.enabled && it.keyCode == selected.keyCode && it.bindingId != editing?.bindingId }
-                if (occupied != null) conflictBinding = occupied else publishCandidate()
-            }) { Text(if (editing == null) "保存" else "保存") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) {
-                Text(if (assigned != null) "完了" else "キャンセル")
-            }
-        },
+        dismissButton = {},
     )
     conflictBinding?.let { occupied ->
         AlertDialog(

@@ -4,12 +4,17 @@ import androidx.activity.ComponentActivity
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assertHasClickAction
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.longClick
@@ -100,11 +105,17 @@ class VerticalSliceUiTest {
 
         composeRule.onNodeWithText("Skill Keyを追加").performClick()
         composeRule.onNodeWithText("${version.skillName}（端末内 v${version.version}）").performClick()
-        composeRule.onNodeWithContentDescription("Z、割り当て可能").performClick()
-        composeRule.onNodeWithText("端末内fixtureをテスト").performClick()
+        ('A'..'Z').forEach { key ->
+            composeRule.onNodeWithContentDescription("$key、割り当て可能")
+                .assertExists()
+                .assertHeightIsAtLeast(48.dp)
+                .assertHasClickAction()
+        }
+        composeRule.onNodeWithContentDescription("Z、割り当て可能").performScrollTo().assertIsDisplayed().performClick()
+        composeRule.onNodeWithContentDescription("端末内fixtureテスト").assertIsDisplayed().assertHeightIsAtLeast(48.dp).performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("端末内fixture testに成功（外部送信なし）").assertExists()
-        composeRule.onNodeWithText("保存").assertIsEnabled().performClick()
+        composeRule.onNodeWithContentDescription("Skill Keyを保存").assertHeightIsAtLeast(48.dp).assertIsEnabled().performClick()
         composeRule.runOnIdle {
             val snapshot = published
             assertNotNull(snapshot)
@@ -123,7 +134,7 @@ class VerticalSliceUiTest {
         var published: ShortcutSnapshot? = null
         val deviceDensity = composeRule.activity.resources.displayMetrics.density
         composeRule.setContent {
-            CompositionLocalProvider(LocalDensity provides Density(deviceDensity, fontScale = 1.3f)) {
+            CompositionLocalProvider(LocalDensity provides Density(deviceDensity, fontScale = 2.0f)) {
                 MaterialTheme {
                     ShortcutKeysDashboard(
                         snapshot = ShortcutSnapshot.empty(),
@@ -136,13 +147,13 @@ class VerticalSliceUiTest {
 
         composeRule.onNodeWithText("Skill Keyを追加").performClick()
         composeRule.onNodeWithText("${version.skillName}（端末内 v${version.version}）").performClick()
-        composeRule.onNodeWithContentDescription("Q、割り当て可能").performClick()
-        composeRule.onNodeWithText("端末内fixtureをテスト").performClick()
+        composeRule.onNodeWithContentDescription("M、割り当て可能").performScrollTo().assertIsDisplayed().assertHeightIsAtLeast(48.dp).performClick()
+        composeRule.onNodeWithContentDescription("端末内fixtureテスト").assertIsDisplayed().assertHeightIsAtLeast(48.dp).performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("端末内fixture testに成功（外部送信なし）").assertExists()
-        composeRule.onNodeWithText("保存").assertIsEnabled().performClick()
+        composeRule.onNodeWithContentDescription("Skill Keyを保存").assertHeightIsAtLeast(48.dp).assertIsEnabled().performClick()
         composeRule.runOnIdle {
-            assertEquals("KeyQ", published!!.bindings.single().keyCode)
+            assertEquals("KeyM", published!!.bindings.single().keyCode)
             assertTrue(ExecutableLocalSkills.isExecutable(published!!.bindings.single()))
         }
     }
