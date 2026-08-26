@@ -230,8 +230,8 @@ class VerticalSliceUiTest {
     @Test
     fun repeatedExecutorFailureDisablesOnlyExactSkillVersionAndCorruptionFailsSkillsClosed() {
         val appContext = composeRule.activity.applicationContext
-        val boundaryStore = AccountBoundaryStore(appContext)
         var now = 1_000L
+        val boundaryStore = AccountBoundaryStore(appContext) { now }
         val failureStore = NativeSkillFailureStore(appContext) { now }
         boundaryStore.resetForTesting()
         failureStore.clear()
