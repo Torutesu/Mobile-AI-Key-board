@@ -1,0 +1,64 @@
+name: MobileAIKeyboard
+options:
+  bundleIdPrefix: com.torutesu
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+packages:
+  MobileAIKeyboardCore:
+    path: .
+targets:
+  MobileAIKeyboardHost:
+    type: application
+    platform: iOS
+    sources:
+      - path: MobileAIKeyboardHost
+    dependencies:
+      - package: MobileAIKeyboardCore
+    entitlements:
+      path: MobileAIKeyboardHost/Host.entitlements
+    info:
+      path: MobileAIKeyboardHost/Info.plist
+      properties:
+        CFBundleDisplayName: Mobile AI Keyboard
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.torutesu.mobileaikeyboard
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+  MobileAIKeyboardExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: MobileAIKeyboardExtension
+    dependencies:
+      - package: MobileAIKeyboardCore
+    entitlements:
+      path: MobileAIKeyboardExtension/Extension.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.torutesu.mobileaikeyboard.keyboard
+        INFOPLIST_FILE: MobileAIKeyboardExtension/Info.plist
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+    info:
+      path: MobileAIKeyboardExtension/Info.plist
+      properties:
+        CFBundleDisplayName: Mobile AI Keyboard
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.keyboard-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
+          NSExtensionAttributes:
+            IsASCIICapable: true
+            PrefersRightToLeft: false
+            PrimaryLanguage: en-US
+            RequestsOpenAccess: false
+schemes:
+  MobileAIKeyboard:
+    build:
+      targets:
+        MobileAIKeyboardHost: all
+        MobileAIKeyboardExtension: all

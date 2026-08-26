@@ -1,0 +1,9 @@
+{
+  "name": "@mobile-ai-keyboard/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "tsc -p tsconfig.json", "typecheck": "tsc -p tsconfig.json --noEmit", "test": "pnpm build && node --test test/*.test.mjs" },
+  "dependencies": { "@mobile-ai-keyboard/contracts": "workspace:*", "@mobile-ai-keyboard/policy": "workspace:*", "@mobile-ai-keyboard/skill-runtime": "workspace:*" },
+  "devDependencies": { "@types/node": "^22.0.0", "typescript": "^5.7.0" }
+}

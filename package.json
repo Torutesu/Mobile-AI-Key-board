@@ -1,0 +1,17 @@
+{
+  "name": "mobile-ai-keyboard",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.33.2",
+  "engines": { "node": ">=20.0.0" },
+  "scripts": {
+    "build": "tsc -b --pretty false",
+    "test": "pnpm -r test",
+    "typecheck": "tsc -b --pretty false",
+    "check": "pnpm build && pnpm test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}

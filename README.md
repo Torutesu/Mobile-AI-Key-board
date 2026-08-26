@@ -26,4 +26,38 @@ Working title only. Product naming and visual identity are intentionally deferre
 
 ## Current status
 
-Specification baseline. No application code has been initialized yet.
+The first engineering milestone is implemented as a local-first foundation:
+
+- iOS host app, keyboard extension, state machine, sensitive-field lockout, local rewrite fixture, and Swift tests;
+- Android host app, IME, equivalent local safety/core behavior, and JVM tests;
+- shared TypeScript contracts, policy engine, run state machine, API skeleton, worker execution ledger, and tests;
+- content-free telemetry contracts and three-platform CI.
+
+This is not a production release. Real-device keyboard lifecycle, Japanese conversion, third-party app compatibility, signed distribution, durable infrastructure, and production identity verification remain explicit qualification gates. See [implementation status](docs/08-implementation-status.md).
+
+## Local verification
+
+Shared contracts and services:
+
+```sh
+corepack pnpm install --frozen-lockfile
+corepack pnpm check
+```
+
+iOS core and simulator build:
+
+```sh
+cd apps/ios
+swift test
+xcodegen generate --spec project.yml
+xcodebuild -project MobileAIKeyboard.xcodeproj -scheme MobileAIKeyboard \
+  -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+  CODE_SIGNING_ALLOWED=NO build
+```
+
+Android core and debug build:
+
+```sh
+cd apps/android
+./gradlew --no-daemon testDebugUnitTest assembleDebug
+```
