@@ -22,6 +22,29 @@ function protectedRunPayload(run) {
   return Buffer.from(stableJson({ schema: 'mobile-ai-keyboard.protected-run.v1', run: copy }), 'utf8');
 }
 
+function protectedReportPayload(report) {
+  const copy = structuredClone(report);
+  delete copy.attestation.signature;
+  return Buffer.from(stableJson({ schema: 'mobile-ai-keyboard.protected-report.v1', report: copy }), 'utf8');
+}
+
+function signProtectedReport(report, { privateKey, verifierId, nowMillis, nonceSuffix = 'evidence' }) {
+  report.attestation = {
+    status: 'verified',
+    verifier_kind: 'protected_runner',
+    verifier_id: verifierId,
+    verification_id: `verification-${nonceSuffix}`,
+    signature: 'pending',
+    issued_at: new Date(nowMillis - 60_000).toISOString(),
+    expires_at: new Date(nowMillis + 86_400_000).toISOString(),
+    nonce: `protected_${nonceSuffix}_nonce`,
+    report_id: report.report_id,
+    source_commit: report.candidate.source_commit,
+    artifact_digest: report.candidate.artifact_digest,
+  };
+  report.attestation.signature = signPayload(null, protectedReportPayload(report), privateKey).toString('base64');
+}
+
 test('source gate catches the historical false Full Access declaration', () => {
   const file = path.join(root, 'docs/16-store-privacy-declarations.md');
   const original = fs.readFileSync(file, 'utf8');
@@ -254,7 +277,12 @@ test('passed performance evidence binds every measurement to the candidate artif
   const performance = JSON.parse(fs.readFileSync(path.join(root, 'docs/release-performance-evidence.json'), 'utf8'));
   const sourceCommit = 'd'.repeat(40);
   const artifactDigest = `sha256:${'e'.repeat(64)}`;
+  const testNow = Date.parse('2026-08-27T05:00:00.000Z');
+  const verifierId = 'protected-performance-runner';
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  const trustedAttestationKeys = { [verifierId]: publicKey.export({ type: 'spki', format: 'pem' }) };
   performance.status = 'passed';
+  performance.report_id = 'performance-report-1';
   performance.candidate = { source_commit: sourceCommit, artifact_digest: artifactDigest };
   const successMinimumMetrics = new Set(['crash_free_sessions_rate', 'offline_success_rate', 'provider_timeout_recovery_rate']);
   performance.measurements = performance.required_metrics.flatMap((metric, metricIndex) => ['ios', 'android'].map((platform, platformIndex) => ({
@@ -272,19 +300,43 @@ test('passed performance evidence binds every measurement to the candidate artif
       artifact_digest: artifactDigest,
       run_id: `performance-${platform}-${metricIndex}`,
       runner_id: `protected-runner-${platformIndex + 1}`,
-      attested: true,
+      evidence_ref: `performance:${platform}:${metric}`,
+      evidence_digest: `sha256:${'f'.repeat(64)}`,
     },
   })));
+  signProtectedReport(performance, { privateKey, verifierId, nowMillis: testNow, nonceSuffix: 'performance' });
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mobile-ai-keyboard-performance-'));
   const file = path.join(tempDir, 'performance.json');
   try {
     fs.writeFileSync(file, `${JSON.stringify(performance)}\n`);
-    const valid = evaluate({ staticOnly: true, performance: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.performance.schema');
+    const evaluateSigned = (options = {}) => evaluate({ staticOnly: true, performance: file, candidateSha: sourceCommit, trustedAttestationKeys, nowMillis: testNow, ...options });
+    const valid = evaluateSigned().checks.find((check) => check.code === 'evidence.performance.schema');
     assert.equal(valid.status, 'pass');
+
+    const untrusted = evaluate({ staticOnly: true, performance: file, candidateSha: sourceCommit, trustedAttestationKeys: {}, nowMillis: testNow }).checks.find((check) => check.code === 'evidence.performance.schema');
+    assert.equal(untrusted.status, 'fail');
+    assert.match(untrusted.detail, /verifier is not trusted/);
+
+    const forged = structuredClone(performance);
+    forged.attestation.signature = Buffer.from('forged').toString('base64');
+    fs.writeFileSync(file, `${JSON.stringify(forged)}\n`);
+    const rejectedForgery = evaluateSigned().checks.find((check) => check.code === 'evidence.performance.schema');
+    assert.equal(rejectedForgery.status, 'fail');
+    assert.match(rejectedForgery.detail, /signature verification failed/);
+
+    const stale = structuredClone(performance);
+    stale.attestation.expires_at = new Date(testNow - 1).toISOString();
+    stale.attestation.signature = signPayload(null, protectedReportPayload(stale), privateKey).toString('base64');
+    fs.writeFileSync(file, `${JSON.stringify(stale)}\n`);
+    const rejectedStale = evaluateSigned().checks.find((check) => check.code === 'evidence.performance.schema');
+    assert.equal(rejectedStale.status, 'fail');
+    assert.match(rejectedStale.detail, /freshness window is invalid/);
+
+    fs.writeFileSync(file, `${JSON.stringify(performance)}\n`);
 
     const missingAndroid = { ...performance, measurements: performance.measurements.filter((measurement) => measurement.platform === 'ios') };
     fs.writeFileSync(file, `${JSON.stringify(missingAndroid)}\n`);
-    const rejectedPlatform = evaluate({ staticOnly: true, performance: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.performance.schema');
+    const rejectedPlatform = evaluateSigned().checks.find((check) => check.code === 'evidence.performance.schema');
     assert.equal(rejectedPlatform.status, 'fail');
     assert.match(rejectedPlatform.detail, /android:/);
 
@@ -293,7 +345,7 @@ test('passed performance evidence binds every measurement to the candidate artif
       measurements: performance.measurements.map((measurement, index) => index === 0 ? { ...measurement, value: null, sample_count: 0 } : measurement),
     };
     fs.writeFileSync(file, `${JSON.stringify(invalidMeasurement)}\n`);
-    const rejectedMeasurement = evaluate({ staticOnly: true, performance: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.performance.schema');
+    const rejectedMeasurement = evaluateSigned().checks.find((check) => check.code === 'evidence.performance.schema');
     assert.equal(rejectedMeasurement.status, 'fail');
     assert.match(rejectedMeasurement.detail, /finite value|sample_count/);
 
@@ -304,13 +356,13 @@ test('passed performance evidence binds every measurement to the candidate artif
         : measurement),
     };
     fs.writeFileSync(file, `${JSON.stringify(aboveThreshold)}\n`);
-    const rejectedThreshold = evaluate({ staticOnly: true, performance: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.performance.schema');
+    const rejectedThreshold = evaluateSigned().checks.find((check) => check.code === 'evidence.performance.schema');
     assert.equal(rejectedThreshold.status, 'fail');
     assert.match(rejectedThreshold.detail, /exceeds maximum/);
 
     const tampered = { ...performance, measurements: performance.measurements.map((measurement, index) => index === 0 ? { ...measurement, evidence: { ...measurement.evidence, artifact_digest: `sha256:${'f'.repeat(64)}` } } : measurement) };
     fs.writeFileSync(file, `${JSON.stringify(tampered)}\n`);
-    const rejected = evaluate({ staticOnly: true, performance: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.performance.schema');
+    const rejected = evaluateSigned().checks.find((check) => check.code === 'evidence.performance.schema');
     assert.equal(rejected.status, 'fail');
     assert.match(rejected.detail, /artifact_digest/);
   } finally {
@@ -339,12 +391,61 @@ test('archive evidence distinguishes extension Info.plist from code-signing enti
   }
 });
 
+test('passed iOS archive evidence requires a fresh trusted report signature', () => {
+  const sourceCommit = '1'.repeat(40);
+  const artifactDigest = `sha256:${'2'.repeat(64)}`;
+  const testNow = Date.parse('2026-08-27T05:00:00.000Z');
+  const verifierId = 'protected-ios-archive-runner';
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  const trustedAttestationKeys = { [verifierId]: publicKey.export({ type: 'spki', format: 'pem' }) };
+  const archive = JSON.parse(fs.readFileSync(path.join(root, 'docs/ios-archive-entitlement-privacy.json'), 'utf8'));
+  Object.assign(archive, {
+    status: 'passed',
+    report_id: 'ios-archive-report-1',
+    candidate: { source_commit: sourceCommit, artifact_digest: artifactDigest },
+    entitlements: { host: { app_group: 'group.com.torutesu.mobileaikeyboard' }, extension: { app_group: 'group.com.torutesu.mobileaikeyboard' } },
+    extension_info: { requests_open_access: true },
+    privacy_manifests: { host: { embedded: true, declares_no_collected_data: true }, extension: { embedded: true, declares_no_collected_data: true } },
+    evidence: {
+      class: 'protected_external', environment: 'protected_device', source_commit: sourceCommit,
+      artifact_digest: artifactDigest, run_id: 'ios-archive-run-1', runner_id: verifierId,
+      evidence_ref: 'archive:entitlements-and-privacy', evidence_digest: `sha256:${'3'.repeat(64)}`,
+    },
+    notes: 'protected signed archive inspection',
+  });
+  signProtectedReport(archive, { privateKey, verifierId, nowMillis: testNow, nonceSuffix: 'ios_archive' });
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mobile-ai-keyboard-ios-archive-'));
+  const file = path.join(tempDir, 'archive.json');
+  try {
+    fs.writeFileSync(file, `${JSON.stringify(archive)}\n`);
+    const valid = evaluate({ staticOnly: true, iosArchive: file, candidateSha: sourceCommit, trustedAttestationKeys, nowMillis: testNow }).checks.find((check) => check.code === 'evidence.ios_archive.schema');
+    assert.equal(valid.status, 'pass', valid.detail);
+
+    const untrusted = evaluate({ staticOnly: true, iosArchive: file, candidateSha: sourceCommit, trustedAttestationKeys: {}, nowMillis: testNow }).checks.find((check) => check.code === 'evidence.ios_archive.schema');
+    assert.equal(untrusted.status, 'fail');
+    assert.match(untrusted.detail, /verifier is not trusted/);
+
+    archive.attestation.signature = Buffer.from('forged').toString('base64');
+    fs.writeFileSync(file, `${JSON.stringify(archive)}\n`);
+    const forged = evaluate({ staticOnly: true, iosArchive: file, candidateSha: sourceCommit, trustedAttestationKeys, nowMillis: testNow }).checks.find((check) => check.code === 'evidence.ios_archive.schema');
+    assert.equal(forged.status, 'fail');
+    assert.match(forged.detail, /signature verification failed/);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('signed Android AAB evidence is candidate-bound and enforces the offline IME manifest', () => {
   const sourceCommit = '9'.repeat(40);
   const artifactDigest = `sha256:${'8'.repeat(64)}`;
+  const testNow = Date.parse('2026-08-27T05:00:00.000Z');
+  const verifierId = 'protected-release-1';
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  const trustedAttestationKeys = { [verifierId]: publicKey.export({ type: 'spki', format: 'pem' }) };
   const report = JSON.parse(fs.readFileSync(path.join(root, 'docs/android-aab-signing-manifest.json'), 'utf8'));
   Object.assign(report, {
     status: 'passed',
+    report_id: 'android-aab-report-1',
     candidate: { source_commit: sourceCommit, artifact_digest: artifactDigest },
     artifact: { signed: true, digest: artifactDigest, signing_certificate_sha256: `sha256:${'7'.repeat(64)}` },
     merged_manifest: {
@@ -357,24 +458,38 @@ test('signed Android AAB evidence is candidate-bound and enforces the offline IM
     },
     evidence: {
       class: 'protected_external', environment: 'protected_release_runner', source_commit: sourceCommit,
-      artifact_digest: artifactDigest, run_id: 'release-aab-1', runner_id: 'protected-release-1', attested: true,
+      artifact_digest: artifactDigest, run_id: 'release-aab-1', runner_id: verifierId,
+      evidence_ref: 'release:aab:manifest-and-signing', evidence_digest: `sha256:${'6'.repeat(64)}`,
     },
     notes: 'protected release archive inspection',
   });
+  signProtectedReport(report, { privateKey, verifierId, nowMillis: testNow, nonceSuffix: 'android_aab' });
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mobile-ai-keyboard-aab-'));
   const file = path.join(tempDir, 'aab.json');
   try {
     fs.writeFileSync(file, `${JSON.stringify(report)}\n`);
-    const valid = evaluate({ staticOnly: true, androidAab: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.android_aab.schema');
+    const evaluateSigned = () => evaluate({ staticOnly: true, androidAab: file, candidateSha: sourceCommit, trustedAttestationKeys, nowMillis: testNow });
+    const valid = evaluateSigned().checks.find((check) => check.code === 'evidence.android_aab.schema');
     assert.equal(valid.status, 'pass');
 
+    const untrusted = evaluate({ staticOnly: true, androidAab: file, candidateSha: sourceCommit, trustedAttestationKeys: {}, nowMillis: testNow }).checks.find((check) => check.code === 'evidence.android_aab.schema');
+    assert.equal(untrusted.status, 'fail');
+    assert.match(untrusted.detail, /verifier is not trusted/);
+
+    const forged = structuredClone(report);
+    forged.attestation.signature = Buffer.from('forged').toString('base64');
+    fs.writeFileSync(file, `${JSON.stringify(forged)}\n`);
+    const rejectedForgery = evaluateSigned().checks.find((check) => check.code === 'evidence.android_aab.schema');
+    assert.equal(rejectedForgery.status, 'fail');
+    assert.match(rejectedForgery.detail, /signature verification failed/);
+
     fs.writeFileSync(file, `${JSON.stringify({ ...report, merged_manifest: { ...report.merged_manifest, internet_permission: true } })}\n`);
-    const networked = evaluate({ staticOnly: true, androidAab: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.android_aab.schema');
+    const networked = evaluateSigned().checks.find((check) => check.code === 'evidence.android_aab.schema');
     assert.equal(networked.status, 'fail');
     assert.match(networked.detail, /INTERNET/);
 
     fs.writeFileSync(file, `${JSON.stringify({ ...report, artifact: { ...report.artifact, signing_certificate_sha256: null } })}\n`);
-    const unsigned = evaluate({ staticOnly: true, androidAab: file, candidateSha: sourceCommit }).checks.find((check) => check.code === 'evidence.android_aab.schema');
+    const unsigned = evaluateSigned().checks.find((check) => check.code === 'evidence.android_aab.schema');
     assert.equal(unsigned.status, 'fail');
     assert.match(unsigned.detail, /signed|certificate/);
   } finally {

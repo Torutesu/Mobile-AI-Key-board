@@ -3,19 +3,23 @@
   "$id": "https://mobile-ai-keyboard.invalid/schemas/performance-evidence-v1.json",
   "title": "Mobile AI Keyboard protected performance evidence",
   "type": "object",
-  "required": ["schema_version", "status", "evidence_class", "candidate", "required_metrics", "measurements"],
+  "required": ["schema_version", "report_id", "status", "evidence_class", "candidate", "required_metrics", "measurements", "attestation"],
   "properties": {
     "schema_version": {"const": "mobile-ai-keyboard.performance-evidence.v1"},
+    "report_id": {"type": "string", "minLength": 1},
     "status": {"enum": ["not_proven", "in_progress", "passed", "failed"]},
     "evidence_class": {"const": "protected_external"},
     "candidate": {"$ref": "#/$defs/candidate"},
     "required_metrics": {"type": "array", "minItems": 14, "items": {"type": "string"}},
     "measurements": {"type": "array", "items": {"$ref": "#/$defs/measurement"}},
+    "attestation": {"anyOf": [{"$ref": "#/$defs/attestation"}, {"type": "null"}]},
     "notes": {"type": "string"}
   },
   "$defs": {
     "candidate": {"type": "object", "required": ["source_commit", "artifact_digest"], "properties": {"source_commit": {"type": ["string", "null"]}, "artifact_digest": {"type": ["string", "null"]}}, "additionalProperties": false},
-    "measurement": {"type": "object", "required": ["metric_id", "platform", "device", "status", "value", "unit", "evidence"], "properties": {"metric_id": {"type": "string"}, "platform": {"enum": ["ios", "android"]}, "device": {"type": "string"}, "status": {"enum": ["not_proven", "in_progress", "passed", "failed"]}, "value": {"type": ["number", "null"]}, "unit": {"type": "string"}, "evidence": {"type": "object", "properties": {"class": {"const": "protected_external"}, "environment": {"const": "protected_device"}, "source_commit": {"type": "string", "pattern": "^[a-fA-F0-9]{40}$"}, "artifact_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}, "run_id": {"type": "string", "minLength": 1}, "runner_id": {"type": "string", "minLength": 1}, "attested": {"const": true}}}}, "additionalProperties": false}
+    "measurement": {"type": "object", "required": ["metric_id", "platform", "device", "status", "value", "unit", "sample_count", "evidence"], "properties": {"metric_id": {"type": "string"}, "platform": {"enum": ["ios", "android"]}, "device": {"type": "string"}, "status": {"enum": ["not_proven", "in_progress", "passed", "failed"]}, "value": {"type": ["number", "null"]}, "unit": {"type": "string"}, "sample_count": {"type": "integer", "minimum": 1}, "evidence": {"$ref": "#/$defs/evidence"}}, "additionalProperties": false},
+    "evidence": {"type": "object", "required": ["class", "environment", "source_commit", "artifact_digest", "run_id", "runner_id", "evidence_ref", "evidence_digest"], "properties": {"class": {"const": "protected_external"}, "environment": {"const": "protected_device"}, "source_commit": {"type": "string", "pattern": "^[a-fA-F0-9]{40}$"}, "artifact_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}, "run_id": {"type": "string", "minLength": 1}, "runner_id": {"type": "string", "minLength": 1}, "evidence_ref": {"type": "string", "minLength": 1}, "evidence_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}}, "additionalProperties": false},
+    "attestation": {"type": "object", "required": ["status", "verifier_kind", "verifier_id", "verification_id", "signature", "issued_at", "expires_at", "nonce", "report_id", "source_commit", "artifact_digest"], "properties": {"status": {"const": "verified"}, "verifier_kind": {"const": "protected_runner"}, "verifier_id": {"type": "string", "minLength": 1}, "verification_id": {"type": "string", "minLength": 1}, "signature": {"type": "string", "minLength": 1}, "issued_at": {"type": "string", "format": "date-time"}, "expires_at": {"type": "string", "format": "date-time"}, "nonce": {"type": "string", "pattern": "^[A-Za-z0-9_-]{16,128}$"}, "report_id": {"type": "string", "minLength": 1}, "source_commit": {"type": "string", "pattern": "^[a-fA-F0-9]{40}$"}, "artifact_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}}, "additionalProperties": false}
   },
   "additionalProperties": false
 }

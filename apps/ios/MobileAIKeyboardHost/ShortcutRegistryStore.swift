@@ -64,7 +64,7 @@ final class ShortcutRegistryStore: ObservableObject {
         ownerSubjectHash = boundary?.ownerSubjectHash
         sessionEpoch = boundary?.sessionEpoch
         snapshot = loaded ?? ShortcutSnapshotV1.empty(deviceID: ShortcutDeviceIdentity.localFixtureID, userID: "usr_local_device_0001")
-        statusMessage = loaded == nil ? "この端末だけの安全な既定値" : (storage.isUsingSharedAppGroup ? "キーボードと共有済み" : "App Group未設定のためhost内fallback")
+        statusMessage = loaded == nil ? "この端末だけの安全な既定値" : (storage.isUsingSharedAppGroup ? "キーボードと共有済み" : "App Group未確認のためSkill Key登録を停止")
         // An Add-to-Keyboard candidate is process-local until the user assigns
         // it. Assigned candidates are embedded in the validated App Group
         // snapshot and reconstructed here after a host/extension restart.
@@ -77,6 +77,7 @@ final class ShortcutRegistryStore: ObservableObject {
     var assignableSkills: [ShortcutSkillOption] { skills.filter(\.isAssignable) }
     var unavailableSkills: [ShortcutSkillOption] { skills.filter { !$0.isAssignable } }
     var assignedKeyCount: Int { activeBindings.count }
+    var canPublishToKeyboard: Bool { storage.isUsingSharedAppGroup || isUITestFallbackEnabled }
 
     func binding(for key: ShortcutKeyCode) -> ShortcutBindingV1? {
         activeBindings.first { $0.keyCode == key }
@@ -179,7 +180,7 @@ final class ShortcutRegistryStore: ObservableObject {
             !Self.fixtureSkills.contains { $0.id == candidate.id && $0.versionID == candidate.versionID } &&
             !restored.contains { $0.id == candidate.id && $0.versionID == candidate.versionID }
         }
-        statusMessage = storage.isUsingSharedAppGroup ? "キーボードと共有済み" : "App Group未設定のためhost内fallback"
+        statusMessage = storage.isUsingSharedAppGroup ? "キーボードと共有済み" : "App Group未確認のためSkill Key登録を停止"
     }
 
     /// Changes the executable authority before any new owner state is exposed.
@@ -294,6 +295,10 @@ final class ShortcutRegistryStore: ObservableObject {
 #endif
 
     private func publish(bindings: [ShortcutBindingV1], skills: [ShortcutSkillProjectionV1], revision: Int) throws {
+        guard canPublishToKeyboard else {
+            statusMessage = "App Groupを確認できないためSkill Keyは登録されませんでした"
+            throw ShortcutRegistryError.persistenceUnavailable
+        }
         try requireActiveBoundary()
         guard let ownerSubjectHash, let sessionEpoch else { throw ShortcutRegistryError.accountBoundaryUnavailable }
         let highestGeneration = max(snapshot.generation, storage.latestKnownGeneration())
@@ -315,7 +320,7 @@ final class ShortcutRegistryStore: ObservableObject {
             throw ShortcutRegistryError.persistenceUnavailable
         }
         snapshot = next
-        statusMessage = storage.isUsingSharedAppGroup ? "\(activeIDs.count)個のSkill Keyをキーボードと共有済み" : "\(activeIDs.count)個をhost内fallbackに保存。App Group同期は未証明"
+        statusMessage = "\(activeIDs.count)個のSkill Keyをキーボードと共有済み"
     }
 
     private func requireActiveBoundary() throws {
@@ -323,6 +328,18 @@ final class ShortcutRegistryStore: ObservableObject {
               let active = storage.loadActiveBoundary(),
               active.ownerSubjectHash == ownerSubjectHash,
               active.sessionEpoch == sessionEpoch else { throw ShortcutRegistryError.accountBoundaryUnavailable }
+    }
+
+    /// Simulator UI tests exercise the interaction contract without claiming
+    /// cross-process App Group qualification. This branch is compiled out of
+    /// production builds and requires an explicit test launch argument.
+    private var isUITestFallbackEnabled: Bool {
+#if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-skill-keys-qa") ||
+        ProcessInfo.processInfo.arguments.contains("-trigger-key-sheet-qa")
+#else
+        false
+#endif
     }
 
     private func skills(for bindings: [ShortcutBindingV1], adding skill: ShortcutSkillProjectionV1? = nil) -> [ShortcutSkillProjectionV1] {

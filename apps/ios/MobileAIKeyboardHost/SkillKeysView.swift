@@ -142,7 +142,7 @@ struct SkillKeysView: View {
                     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     .contentShape(Rectangle())
                 }
-                .disabled(installed)
+                .disabled(installed || !registry.canPublishToKeyboard)
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("skill-option-\(skill.id)")
                 .padding(14)
@@ -324,7 +324,7 @@ private struct TriggerKeySheet: View {
     }
 
     private var canSave: Bool {
-        guard selectedKey != nil, fixtureHasRun else { return false }
+        guard registry.canPublishToKeyboard, selectedKey != nil, fixtureHasRun else { return false }
         return true
     }
 

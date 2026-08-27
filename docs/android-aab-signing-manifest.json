@@ -1,5 +1,6 @@
 {
   "schema_version": "mobile-ai-keyboard.android-aab.v1",
+  "report_id": "android-aab-evidence-pending",
   "status": "not_proven",
   "evidence_class": "protected_external",
   "candidate": {
@@ -21,5 +22,6 @@
     "full_backup_rules_present": null
   },
   "evidence": null,
+  "attestation": null,
   "notes": "Populate only from a protected release runner inspecting the exact signed release AAB. Debug APK, unsigned bundle, local build, emulator, and self-attestation do not qualify."
 }

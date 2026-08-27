@@ -247,6 +247,57 @@ function attestationPayload(run) {
   return Buffer.from(stableJson({ schema: 'mobile-ai-keyboard.protected-run.v1', run: copy }), 'utf8');
 }
 
+function reportAttestationPayload(report) {
+  const copy = structuredClone(report);
+  if (copy.attestation) delete copy.attestation.signature;
+  return Buffer.from(stableJson({ schema: 'mobile-ai-keyboard.protected-report.v1', report: copy }), 'utf8');
+}
+
+function validateSignedAttestation({
+  attestation,
+  payload,
+  label,
+  expectedBindings,
+  trustedAttestationKeys,
+  nowMillis,
+  attestationNonces = new Set(),
+  verificationIDs = new Set(),
+}) {
+  const errors = [];
+  const value = attestation && typeof attestation === 'object' ? attestation : {};
+  if (value.status !== 'verified' || value.verifier_kind !== 'protected_runner' || !value.verifier_id || !value.verification_id || !value.signature) {
+    errors.push(`${label} is missing verified protected-runner attestation`);
+  }
+  for (const [field, expected] of Object.entries(expectedBindings)) {
+    if (value[field] !== expected) errors.push(`${label} attestation ${field} does not match evidence`);
+  }
+  const trustedKey = trustedAttestationKeys?.[value.verifier_id];
+  if (!trustedKey) errors.push(`${label} attestation verifier is not trusted by release environment`);
+  else {
+    try {
+      const publicKey = createPublicKey(trustedKey);
+      const signature = Buffer.from(value.signature ?? '', 'base64');
+      const strictBase64 = signature.toString('base64') === value.signature;
+      if (publicKey.asymmetricKeyType !== 'ed25519' || !strictBase64 || signature.length !== 64 || !verifySignature(null, payload, publicKey, signature)) {
+        errors.push(`${label} attestation signature verification failed`);
+      }
+    } catch {
+      errors.push(`${label} attestation signature verification failed`);
+    }
+  }
+  const issuedAt = Date.parse(value.issued_at ?? '');
+  const expiresAt = Date.parse(value.expires_at ?? '');
+  if (!Number.isFinite(issuedAt) || !Number.isFinite(expiresAt) || issuedAt > nowMillis + 5 * 60_000 || expiresAt < nowMillis || expiresAt <= issuedAt || expiresAt - issuedAt > 30 * 24 * 60 * 60_000) {
+    errors.push(`${label} attestation freshness window is invalid`);
+  }
+  if (typeof value.nonce !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(value.nonce)) errors.push(`${label} attestation nonce is invalid`);
+  else if (attestationNonces.has(value.nonce)) errors.push(`${label} reuses an attestation nonce`);
+  else attestationNonces.add(value.nonce);
+  if (verificationIDs.has(value.verification_id)) errors.push(`${label} reuses verification_id ${value.verification_id}`);
+  else if (value.verification_id) verificationIDs.add(value.verification_id);
+  return errors;
+}
+
 function validateMatrix(matrix, expectedSha = null, trustedAttestationKeys = {}, nowMillis = Date.now()) {
   const errors = [];
   const attestationNonces = new Set();
@@ -299,29 +350,17 @@ function validateMatrix(matrix, expectedSha = null, trustedAttestationKeys = {},
         if (!DIGEST.test(run.artifact_digest ?? '')) errors.push(`${target.platform} passed run artifact_digest is invalid`);
         if (['attested', 'scenarios', 'field_classes', 'lifecycle_events', 'apps'].some((field) => Object.prototype.hasOwnProperty.call(run, field))) errors.push(`${target.platform} passed run contains legacy label/self-attestation fields`);
         const attestation = run.attestation ?? {};
-        if (attestation.status !== 'verified' || attestation.verifier_kind !== 'protected_runner' || !attestation.verifier_id || !attestation.verification_id || !attestation.signature) errors.push(`${target.platform} passed run is missing verified protected-runner attestation`);
         if (attestation.verifier_id !== run.runner_id) errors.push(`${target.platform} passed run attestation verifier_id does not match runner_id`);
-        for (const [field, expected] of [['run_id', run.run_id], ['device_id', run.device_id], ['source_commit', run.source_commit], ['artifact_digest', run.artifact_digest]]) if (attestation[field] !== expected) errors.push(`${target.platform} passed run attestation ${field} does not match run`);
-        const trustedKey = trustedAttestationKeys?.[attestation.verifier_id];
-        if (!trustedKey) errors.push(`${target.platform} passed run attestation verifier is not trusted by release environment`);
-        else {
-          try {
-            const publicKey = createPublicKey(trustedKey);
-            const signature = Buffer.from(attestation.signature ?? '', 'base64');
-            const strictBase64 = signature.toString('base64') === attestation.signature;
-            if (publicKey.asymmetricKeyType !== 'ed25519' || !strictBase64 || signature.length !== 64 || !verifySignature(null, attestationPayload(run), publicKey, signature)) errors.push(`${target.platform} passed run attestation signature verification failed`);
-          } catch {
-            errors.push(`${target.platform} passed run attestation signature verification failed`);
-          }
-        }
-        const issuedAt = Date.parse(attestation.issued_at ?? '');
-        const expiresAt = Date.parse(attestation.expires_at ?? '');
-        if (!Number.isFinite(issuedAt) || !Number.isFinite(expiresAt) || issuedAt > nowMillis + 5 * 60_000 || expiresAt < nowMillis || expiresAt <= issuedAt || expiresAt - issuedAt > 30 * 24 * 60 * 60_000) errors.push(`${target.platform} passed run attestation freshness window is invalid`);
-        if (typeof attestation.nonce !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(attestation.nonce)) errors.push(`${target.platform} passed run attestation nonce is invalid`);
-        else if (attestationNonces.has(attestation.nonce)) errors.push(`${target.platform} passed evidence reuses an attestation nonce`);
-        else attestationNonces.add(attestation.nonce);
-        if (verificationIDs.has(attestation.verification_id)) errors.push(`${target.platform} passed evidence reuses verification_id ${attestation.verification_id}`);
-        else if (attestation.verification_id) verificationIDs.add(attestation.verification_id);
+        errors.push(...validateSignedAttestation({
+          attestation,
+          payload: attestationPayload(run),
+          label: `${target.platform} passed run`,
+          expectedBindings: { run_id: run.run_id, device_id: run.device_id, source_commit: run.source_commit, artifact_digest: run.artifact_digest },
+          trustedAttestationKeys,
+          nowMillis,
+          attestationNonces,
+          verificationIDs,
+        }));
         const validateResults = (results, key, required, label) => {
           if (!Array.isArray(results) || results.length !== required.length) {
             errors.push(`${target.platform} passed run is missing exact ${label} results`);
@@ -365,7 +404,7 @@ function validateMatrix(matrix, expectedSha = null, trustedAttestationKeys = {},
   return errors;
 }
 
-function validatePerformance(performance, expectedSha = null) {
+function validatePerformance(performance, expectedSha = null, trustedAttestationKeys = {}, nowMillis = Date.now()) {
   const errors = [];
   if (performance.schema_version !== 'mobile-ai-keyboard.performance-evidence.v1') errors.push('wrong schema_version');
   if (performance.evidence_class !== 'protected_external') errors.push('evidence_class must be protected_external');
@@ -392,7 +431,8 @@ function validatePerformance(performance, expectedSha = null) {
       }
       if (!Number.isInteger(measurement.sample_count) || measurement.sample_count <= 0) errors.push(`${measurement.metric_id} passed measurement has an invalid sample_count`);
       const evidence = measurement.evidence ?? {};
-      if (evidence.class !== 'protected_external' || !evidence.run_id || !evidence.runner_id || evidence.attested !== true || !evidence.artifact_digest) errors.push(`${measurement.metric_id} passed without protected evidence binding`);
+      if (Object.prototype.hasOwnProperty.call(evidence, 'attested')) errors.push(`${measurement.metric_id} contains legacy self-attestation`);
+      if (evidence.class !== 'protected_external' || !evidence.run_id || !evidence.runner_id || !evidence.artifact_digest || !evidence.evidence_ref || !evidenceDigest.test(evidence.evidence_digest ?? '')) errors.push(`${measurement.metric_id} passed without protected evidence binding`);
       if (evidence.environment !== 'protected_device') errors.push(`${measurement.metric_id} passed measurement is not explicitly classified as protected_device`);
       if (evidence.source_commit !== performance.candidate?.source_commit) errors.push(`${measurement.metric_id} source_commit does not match performance candidate`);
       if (evidence.artifact_digest !== performance.candidate?.artifact_digest) errors.push(`${measurement.metric_id} artifact_digest does not match performance candidate`);
@@ -407,23 +447,34 @@ function validatePerformance(performance, expectedSha = null) {
         if (!performance.measurements?.some((m) => m.metric_id === metric && m.platform === platform && m.status === 'passed')) errors.push(`performance status passed but ${platform}:${metric} is not passed`);
       }
     }
+    if (typeof performance.report_id !== 'string' || performance.report_id.trim() === '') errors.push('performance passed without report_id');
+    errors.push(...validateSignedAttestation({
+      attestation: performance.attestation,
+      payload: reportAttestationPayload(performance),
+      label: 'performance report',
+      expectedBindings: { report_id: performance.report_id, source_commit: performance.candidate?.source_commit, artifact_digest: performance.candidate?.artifact_digest },
+      trustedAttestationKeys,
+      nowMillis,
+    }));
   }
   const candidateError = validateCandidate(performance.candidate, performance.status, 'Performance evidence', expectedSha);
   if (candidateError) errors.push(candidateError);
   return errors;
 }
 
-function validateIosArchive(archive, expectedSha = null) {
+function validateIosArchive(archive, expectedSha = null, trustedAttestationKeys = {}, nowMillis = Date.now()) {
   const errors = [];
   if (archive.schema_version !== 'mobile-ai-keyboard.ios-archive.v1') errors.push('wrong schema_version');
   if (archive.evidence_class !== 'protected_external') errors.push('evidence_class must be protected_external');
   if (!VALID_STATUSES.has(archive.status)) errors.push(`invalid iOS archive status ${archive.status ?? 'missing'}`);
   if (archive.status === 'passed') {
     const evidence = archive.evidence ?? {};
-    if (evidence.class !== 'protected_external' || !evidence.run_id || !evidence.runner_id || evidence.attested !== true || !evidence.artifact_digest) errors.push('archive passed without protected evidence binding');
+    if (Object.prototype.hasOwnProperty.call(evidence, 'attested')) errors.push('archive contains legacy self-attestation');
+    if (evidence.class !== 'protected_external' || !evidence.run_id || !evidence.runner_id || !evidence.artifact_digest || !evidence.evidence_ref || !evidenceDigest.test(evidence.evidence_digest ?? '')) errors.push('archive passed without protected evidence binding');
     if (evidence.environment !== 'protected_device') errors.push('archive passed evidence is not explicitly classified as protected_device');
     if (evidence.source_commit !== archive.candidate?.source_commit) errors.push('archive evidence source_commit does not match candidate');
     if (evidence.artifact_digest !== archive.candidate?.artifact_digest) errors.push('archive evidence artifact_digest does not match candidate');
+    if (archive.attestation?.verifier_id !== evidence.runner_id) errors.push('iOS archive report signer does not match evidence runner');
     if (!DIGEST.test(evidence.artifact_digest ?? '')) errors.push('archive evidence artifact_digest is invalid');
     if (/(fixture|simulator|emulator|jvm|ui[-_ ]?test|local|self[-_ ]?attest)/i.test(JSON.stringify(archive))) errors.push('archive passed evidence contains a fixture/simulator/emulator/UI-test/local marker');
     if (!archive.entitlements?.host?.app_group || archive.entitlements.host.app_group !== archive.entitlements?.extension?.app_group) errors.push('archived host and extension must contain the same App Group entitlement');
@@ -432,21 +483,32 @@ function validateIosArchive(archive, expectedSha = null) {
       const manifest = archive.privacy_manifests?.[component];
       if (manifest?.embedded !== true || manifest?.declares_no_collected_data !== true) errors.push(`archived ${component} privacy manifest must explicitly confirm embedded and no collected data`);
     }
+    if (typeof archive.report_id !== 'string' || archive.report_id.trim() === '') errors.push('archive passed without report_id');
+    errors.push(...validateSignedAttestation({
+      attestation: archive.attestation,
+      payload: reportAttestationPayload(archive),
+      label: 'iOS archive report',
+      expectedBindings: { report_id: archive.report_id, source_commit: archive.candidate?.source_commit, artifact_digest: archive.candidate?.artifact_digest },
+      trustedAttestationKeys,
+      nowMillis,
+    }));
   }
   const candidateError = validateCandidate(archive.candidate, archive.status, 'iOS archive evidence', expectedSha);
   if (candidateError) errors.push(candidateError);
   return errors;
 }
 
-function validateAndroidAab(report, expectedSha = null) {
+function validateAndroidAab(report, expectedSha = null, trustedAttestationKeys = {}, nowMillis = Date.now()) {
   const errors = [];
   if (report.schema_version !== 'mobile-ai-keyboard.android-aab.v1') errors.push('wrong schema_version');
   if (report.evidence_class !== 'protected_external') errors.push('evidence_class must be protected_external');
   if (!VALID_STATUSES.has(report.status)) errors.push(`invalid Android AAB status ${report.status ?? 'missing'}`);
   if (report.status === 'passed') {
     const evidence = report.evidence ?? {};
-    if (evidence.class !== 'protected_external' || evidence.environment !== 'protected_release_runner' || !evidence.run_id || !evidence.runner_id || evidence.attested !== true) errors.push('Android AAB passed without protected release-runner attestation');
+    if (Object.prototype.hasOwnProperty.call(evidence, 'attested')) errors.push('Android AAB contains legacy self-attestation');
+    if (evidence.class !== 'protected_external' || evidence.environment !== 'protected_release_runner' || !evidence.run_id || !evidence.runner_id || !evidence.evidence_ref || !evidenceDigest.test(evidence.evidence_digest ?? '')) errors.push('Android AAB passed without protected release-runner evidence');
     if (evidence.source_commit !== report.candidate?.source_commit || evidence.artifact_digest !== report.candidate?.artifact_digest) errors.push('Android AAB evidence is not bound to the candidate');
+    if (report.attestation?.verifier_id !== evidence.runner_id) errors.push('Android AAB report signer does not match evidence runner');
     if (!DIGEST.test(evidence.artifact_digest ?? '')) errors.push('Android AAB evidence artifact_digest is invalid');
     if (report.package_id !== 'com.torutesu.mobileaikeyboard') errors.push('Android AAB package_id is invalid');
     if (report.artifact?.signed !== true || !DIGEST.test(report.artifact?.digest ?? '') || !DIGEST.test(report.artifact?.signing_certificate_sha256 ?? '')) errors.push('Android AAB must be signed and bind artifact/certificate SHA-256 digests');
@@ -456,6 +518,15 @@ function validateAndroidAab(report, expectedSha = null) {
     if (manifest.ime_service_permission !== 'android.permission.BIND_INPUT_METHOD' || manifest.ime_service_exported !== true) errors.push('Android AAB merged manifest has an invalid IME service boundary');
     if (manifest.allow_backup !== false || manifest.data_extraction_rules_present !== true || manifest.full_backup_rules_present !== true) errors.push('Android AAB merged manifest must disable backup and embed extraction/backup rules');
     if (/(fixture|simulator|emulator|jvm|ui[-_ ]?test|local|self[-_ ]?attest|debug)/i.test(JSON.stringify(report))) errors.push('Android AAB passed evidence contains a debug/fixture/local marker');
+    if (typeof report.report_id !== 'string' || report.report_id.trim() === '') errors.push('Android AAB passed without report_id');
+    errors.push(...validateSignedAttestation({
+      attestation: report.attestation,
+      payload: reportAttestationPayload(report),
+      label: 'Android AAB report',
+      expectedBindings: { report_id: report.report_id, source_commit: report.candidate?.source_commit, artifact_digest: report.candidate?.artifact_digest },
+      trustedAttestationKeys,
+      nowMillis,
+    }));
   }
   const candidateError = validateCandidate(report.candidate, report.status, 'Android AAB evidence', expectedSha);
   if (candidateError) errors.push(candidateError);
@@ -545,17 +616,17 @@ function evidenceChecks(args) {
     results.push(check('evidence.e2e.proof', errors.length ? 'fail' : (matrix.status === 'passed' ? 'pass' : 'not_proven'), matrix.status === 'not_proven' ? 'no protected physical-device/app runs are recorded' : (errors.length ? 'matrix contains invalid proof' : 'protected physical-device/app runs are bound to this candidate')));
   }
   if (performance) {
-    const errors = validatePerformance(performance, args.candidateSha);
+    const errors = validatePerformance(performance, args.candidateSha, args.trustedAttestationKeys, args.nowMillis);
     results.push(check('evidence.performance.schema', errors.length ? 'fail' : 'pass', errors.length ? errors.join('; ') : 'performance evidence contains all required metrics'));
     results.push(check('evidence.performance.proof', errors.length ? 'fail' : (performance.status === 'passed' ? 'pass' : 'not_proven'), performance.status === 'not_proven' ? 'no protected device performance captures are recorded' : (errors.length ? 'performance evidence contains invalid proof' : 'protected device performance captures are bound to this candidate')));
   }
   if (archive) {
-    const errors = validateIosArchive(archive, args.candidateSha);
+    const errors = validateIosArchive(archive, args.candidateSha, args.trustedAttestationKeys, args.nowMillis);
     results.push(check('evidence.ios_archive.schema', errors.length ? 'fail' : 'pass', errors.length ? errors.join('; ') : 'archive report contains the required entitlement/privacy inspection fields'));
     results.push(check('evidence.ios_archive.proof', errors.length ? 'fail' : (archive.status === 'passed' ? 'pass' : 'not_proven'), archive.status === 'not_proven' ? 'no protected signed archive inspection is recorded' : (errors.length ? 'archive evidence contains invalid proof' : 'protected archive inspection is bound to this candidate')));
   }
   if (androidAab) {
-    const errors = validateAndroidAab(androidAab, args.candidateSha);
+    const errors = validateAndroidAab(androidAab, args.candidateSha, args.trustedAttestationKeys, args.nowMillis);
     results.push(check('evidence.android_aab.schema', errors.length ? 'fail' : 'pass', errors.length ? errors.join('; ') : 'Android AAB report contains signing and merged-manifest inspection fields'));
     results.push(check('evidence.android_aab.proof', errors.length ? 'fail' : (androidAab.status === 'passed' ? 'pass' : 'not_proven'), androidAab.status === 'not_proven' ? 'no protected signed Android AAB inspection is recorded' : (errors.length ? 'Android AAB evidence contains invalid proof' : 'protected signed Android AAB is bound to this candidate')));
   }

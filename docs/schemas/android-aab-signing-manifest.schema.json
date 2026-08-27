@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-ai-keyboard.invalid/schemas/android-aab-signing-manifest-v1.json",
+  "title": "Protected Android AAB signing and merged-manifest inspection",
+  "type": "object",
+  "required": ["schema_version", "report_id", "status", "evidence_class", "candidate", "package_id", "artifact", "merged_manifest", "evidence", "attestation"],
+  "properties": {
+    "schema_version": {"const": "mobile-ai-keyboard.android-aab.v1"},
+    "report_id": {"type": "string", "minLength": 1},
+    "status": {"enum": ["not_proven", "in_progress", "passed", "failed"]},
+    "evidence_class": {"const": "protected_external"},
+    "candidate": {"type": "object", "required": ["source_commit", "artifact_digest"], "properties": {"source_commit": {"type": ["string", "null"]}, "artifact_digest": {"type": ["string", "null"]}}, "additionalProperties": false},
+    "package_id": {"const": "com.torutesu.mobileaikeyboard"},
+    "artifact": {"type": "object", "required": ["signed", "digest", "signing_certificate_sha256"], "properties": {"signed": {"type": ["boolean", "null"]}, "digest": {"type": ["string", "null"]}, "signing_certificate_sha256": {"type": ["string", "null"]}}, "additionalProperties": false},
+    "merged_manifest": {"type": "object", "required": ["internet_permission", "ime_service_permission", "ime_service_exported", "allow_backup", "data_extraction_rules_present", "full_backup_rules_present"], "properties": {"internet_permission": {"type": ["boolean", "null"]}, "ime_service_permission": {"type": ["string", "null"]}, "ime_service_exported": {"type": ["boolean", "null"]}, "allow_backup": {"type": ["boolean", "null"]}, "data_extraction_rules_present": {"type": ["boolean", "null"]}, "full_backup_rules_present": {"type": ["boolean", "null"]}}, "additionalProperties": false},
+    "evidence": {"anyOf": [{"$ref": "#/$defs/evidence"}, {"type": "null"}]},
+    "attestation": {"anyOf": [{"$ref": "#/$defs/attestation"}, {"type": "null"}]},
+    "notes": {"type": "string"}
+  },
+  "$defs": {
+    "evidence": {"type": "object", "required": ["class", "environment", "source_commit", "artifact_digest", "run_id", "runner_id", "evidence_ref", "evidence_digest"], "properties": {"class": {"const": "protected_external"}, "environment": {"const": "protected_release_runner"}, "source_commit": {"type": "string", "pattern": "^[a-fA-F0-9]{40}$"}, "artifact_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}, "run_id": {"type": "string", "minLength": 1}, "runner_id": {"type": "string", "minLength": 1}, "evidence_ref": {"type": "string", "minLength": 1}, "evidence_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}}, "additionalProperties": false},
+    "attestation": {"type": "object", "required": ["status", "verifier_kind", "verifier_id", "verification_id", "signature", "issued_at", "expires_at", "nonce", "report_id", "source_commit", "artifact_digest"], "properties": {"status": {"const": "verified"}, "verifier_kind": {"const": "protected_runner"}, "verifier_id": {"type": "string", "minLength": 1}, "verification_id": {"type": "string", "minLength": 1}, "signature": {"type": "string", "minLength": 1}, "issued_at": {"type": "string", "format": "date-time"}, "expires_at": {"type": "string", "format": "date-time"}, "nonce": {"type": "string", "pattern": "^[A-Za-z0-9_-]{16,128}$"}, "report_id": {"type": "string", "minLength": 1}, "source_commit": {"type": "string", "pattern": "^[a-fA-F0-9]{40}$"}, "artifact_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}}, "additionalProperties": false}
+  },
+  "additionalProperties": false
+}

@@ -1,5 +1,6 @@
 {
   "schema_version": "mobile-ai-keyboard.ios-archive.v1",
+  "report_id": "ios-archive-evidence-pending",
   "status": "not_proven",
   "evidence_class": "protected_external",
   "candidate": {
@@ -16,5 +17,6 @@
     "extension": {"embedded": null, "declares_no_collected_data": null}
   },
   "evidence": null,
+  "attestation": null,
   "notes": "Populate only from a protected signed iOS archive inspection. Source manifests and simulator builds do not qualify as archive evidence."
 }

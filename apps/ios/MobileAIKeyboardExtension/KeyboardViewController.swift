@@ -1011,7 +1011,22 @@ final class KeyboardViewController: UIInputViewController {
         postScreenChange(statusLabel)
     }
 
-    @objc private func cancelAction() { transition(.cancel); captureDraft = nil; captureAcknowledged = false; hasSelectionCapture = false; pendingShortcutSkill = nil; pendingShortcutActivation = nil; showTyping() }
+    @objc private func cancelAction() {
+        transition(.cancel)
+        clearEphemeralState(showTypingView: true)
+    }
+
+    /// Command and result editors can contain user text that is not present in
+    /// the host document. Every terminal/invalidation path must erase it, drop
+    /// the selection, and release first responder ownership.
+    private func wipeEditorBuffers() {
+        commandTextView.resignFirstResponder()
+        resultTextView.resignFirstResponder()
+        commandTextView.selectedRange = NSRange(location: 0, length: 0)
+        resultTextView.selectedRange = NSRange(location: 0, length: 0)
+        commandTextView.text = nil
+        resultTextView.text = nil
+    }
 
     private func clearEphemeralState(showTypingView: Bool) {
         let existingLock: LockReason?
@@ -1025,8 +1040,7 @@ final class KeyboardViewController: UIInputViewController {
         consumedLongPressKey = nil
         longPressBeganKey = nil
         isSkillPaletteVisible = false
-        commandTextView.text = nil
-        resultTextView.text = nil
+        wipeEditorBuffers()
         if showTypingView { showTyping() }
         if let existingLock {
             transition(.lock(existingLock))
@@ -1110,7 +1124,7 @@ final class KeyboardViewController: UIInputViewController {
         }
         if case .typing = machine.screen { return }
         if case .locked = machine.screen { return }
-        machine = KeyboardStateMachine(); captureDraft = nil; captureAcknowledged = false; hasSelectionCapture = false; pendingShortcutSkill = nil; pendingShortcutActivation = nil; showTyping()
+        clearEphemeralState(showTypingView: true)
     }
 
     /// Host/adapter integrations call this with OS input traits before showing AI controls.

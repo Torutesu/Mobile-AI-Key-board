@@ -65,6 +65,7 @@ class KeyboardFoundationTest {
             hintText = "one-time-code"
         }
         assertFalse(SensitiveFieldClassifier.classify(null).aiCaptureAllowed)
+        assertFalse(SensitiveFieldClassifier.classify(EditorInfo().apply { inputType = InputType.TYPE_NULL }).aiCaptureAllowed)
         assertFalse(SensitiveFieldClassifier.classify(password).aiCaptureAllowed)
         assertFalse(SensitiveFieldClassifier.classify(otp).aiCaptureAllowed)
         assertFalse(SensitiveFieldClassifier.classify(hintedOtp).aiCaptureAllowed)

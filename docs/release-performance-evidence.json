@@ -1,5 +1,6 @@
 {
   "schema_version": "mobile-ai-keyboard.performance-evidence.v1",
+  "report_id": "performance-evidence-pending",
   "status": "not_proven",
   "evidence_class": "protected_external",
   "candidate": {
@@ -23,5 +24,6 @@
     "provider_timeout_recovery_rate"
   ],
   "measurements": [],
+  "attestation": null,
   "notes": "A local fixture, simulator, JVM, or self-attested measurement must not be added as production performance evidence. Populate measurements only with protected runner/device captures bound to the candidate source and artifact."
 }

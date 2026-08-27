@@ -139,7 +139,7 @@ struct OnboardingView: View {
 
     private var accessStatusRow: some View {
         let fresh = accessStatus?.isFresh() == true
-        let fullAccessConfirmed = fresh && accessStatus?.fullAccessEnabled == true
+        let fullAccessConfirmed = fresh && accessStatus?.fullAccessEnabled == true && accessStatus?.appGroupAvailable == true
         return HStack(alignment: .top, spacing: 10) {
             Image(systemName: fullAccessConfirmed ? "checkmark.circle.fill" : "questionmark.circle")
                 .foregroundStyle(fullAccessConfirmed ? .green : .secondary)
@@ -148,10 +148,10 @@ struct OnboardingView: View {
                     .font(.subheadline.weight(.semibold))
                 Text(fullAccessConfirmed
                      ? "App Groupのキー設定を共有できます。入力内容はこの状態レコードに保存しません。"
-                     : "設定後にキーボードを一度表示すると状態を確認できます。未確認でも通常入力は利用できます。")
+                     : "フルアクセスとApp Group共有の両方を確認するとSkill Keyを登録できます。未確認でも通常入力は利用できます。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                Text(accessStatus?.appGroupAvailable == true ? "App Group: 共有可能" : "App Group: 未確認（共有できない場合はHost内fallback）")
+                Text(accessStatus?.appGroupAvailable == true ? "App Group: 共有可能" : "App Group: 未確認（Skill Key登録は停止）")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 if let checkedAt = accessStatus?.checkedAt {

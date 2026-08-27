@@ -90,6 +90,8 @@ A feature is done only when:
 
 The executable matrix is maintained in [`docs/release-e2e-matrix.json`](release-e2e-matrix.json). Its checked-in baseline is intentionally `not_proven`; every `passed` row must be bound to a protected runner, real device, real app, candidate source, and artifact digest. The performance record and metric contract are in [`docs/release-performance-evidence.json`](release-performance-evidence.json) and [`docs/schemas/release-performance-evidence.schema.json`](schemas/release-performance-evidence.schema.json). Local fixture, simulator, JVM, and self-attested runs cannot satisfy either record.
 
+Every `passed` protected report—physical E2E, performance, iOS signed-archive inspection, and Android signed-AAB inspection—must carry a fresh Ed25519 signature from an out-of-band trusted protected runner. The canonical signed payload includes the full report plus its `report_id`, exact source commit, and artifact digest; the release environment supplies the trusted public-key map. A JSON boolean such as `attested: true`, an arbitrary runner label, an expired signature, or a signature from an untrusted key is rejected. The iOS archive and Android AAB report signer must also be the runner named by the evidence record.
+
 Minimum beta matrix:
 
 - iPhone baseline device on iOS 17.

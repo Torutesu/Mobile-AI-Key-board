@@ -22,9 +22,12 @@ This is a strong beta foundation, not yet a world-leading keyboard. The largest 
 - Android process-death recovery through a bounded durable owner lease; expiry, corruption, sign-out, revocation floor, and account switch fail closed.
 - Visible-keyboard convergence for same-owner generation updates and initial empty-to-active transitions.
 - Immutable Skill id/version/digest and exact binding revalidation before execution, Apply, Copy, and Undo.
+- Android revalidates the exact editor/session/version authority again at Copy and Undo, refreshes its `InputConnection` on every visible input-view attachment, and automatically destroys result/Undo state when the activation TTL expires.
 - Selection revision locks include bounded before/after context, preventing duplicate-text Apply/Undo from targeting another occurrence.
 - Password, OTP, phone pad, number pad, decimal pad, and unsupported field transitions clear ephemeral state and suppress Skill actions while preserving ordinary typing.
 - Dismissal, editor change, window hide, process teardown, and stale activation expiry clear capture/result/action state.
+- iOS cancel, editor change, secure transition, dismissal, and snapshot invalidation also resign and erase the custom command/result editors; captured text is not left in detached `UITextView` buffers.
+- iOS refuses to publish or present a successful Skill Key assignment when the shared App Group container is unavailable. The Host fallback remains a recovery/test store, not executable keyboard authority, and onboarding requires fresh Full Access plus App Group availability.
 - Content-free snapshot boundary: prompt, editor text, result, token, credential, and receipt are not persisted in the Skill Key snapshot.
 - Native owner/session/exact-version circuit breakers on both platforms: three consecutive executor failures within ten minutes suppress only that Skill version and decoration; ordinary typing remains available, corruption fails Skill execution closed, and success clears the failure window.
 - Android onboarding now requires enabled + currently selected IME + a content-free activation probe from this exact `InputMethodService` + nonblank test input, preventing another keyboard from completing setup.
@@ -32,7 +35,7 @@ This is a strong beta foundation, not yet a world-leading keyboard. The largest 
 - A visible non-hold Skill palette on both keyboards routes each item through the same exact-version Capture Review path as its bound key; iOS moves accessibility focus on review transitions and Android emits content-free mode announcements.
 - Android ordinary-input hardening now respects sound/haptic-off configuration, uses locale-stable letter mapping, invalidates stale review authority on IME view recreation, and reports delete/return mutation failure.
 - Android now consumes persisted theme, key-size, and left/right one-handed layout settings in the real IME; rejected character insertion no longer consumes one-shot Shift, and empty-field backspace is a successful no-op rather than an error.
-- Protected evidence schemas now bind the exact seven-app/device-class matrix, metric units and fixed pass thresholds, candidate artifact, and a signed Android AAB/certificate/merged-manifest inspection. Physical run records require an Ed25519 signature over the complete canonical run from an out-of-band trusted verifier key; fake app lists, arbitrary coverage labels, self-attestation fields, and over-budget measurements cannot self-report `passed`.
+- Protected evidence schemas now bind the exact seven-app/device-class matrix, metric units and fixed pass thresholds, candidate artifact, and signed iOS archive/Android AAB inspections. Every passed E2E run, performance report, archive report, and AAB report requires a fresh Ed25519 signature over the complete canonical evidence from an out-of-band trusted verifier key; fake app lists, arbitrary coverage labels, boolean self-attestation, untrusted/expired/forged signatures, and over-budget measurements cannot self-report `passed`.
 
 ## P0 — required before an external beta claim
 
@@ -112,6 +115,8 @@ Qualify VoiceOver and TalkBack, Switch Control, Dynamic Type/font scale, reduced
 | Onboarding proves this Android IME was used | Implemented with selected-IME + content-free activation handshake; physical OEM matrix `not_proven` |
 | Settings survive authorized Android process death | Implemented with integrity-bound lease; physical memory-pressure run `not_proven` |
 | Secure/unsupported fields suppress Skill execution | Implemented and unit-tested; representative third-party-device proof `not_proven` |
+| App Group unavailable can still create a working iOS key | Rejected in production; UI-test fallback is debug-only and explicitly non-qualifying |
+| Stale Android result can Copy/Undo after expiry or editor reattachment | Rejected and automatically cleared locally; physical OEM lifecycle proof `not_proven` |
 | Cross-platform canonical contracts | Native golden-vector consumers pass; full runtime wire interoperability `not_proven` |
 | Connected tools perform real actions safely | `not_proven`; fixtures/contracts only |
 | App Store / Play release ready | `not_proven`; signed archive/AAB and protected evidence missing |

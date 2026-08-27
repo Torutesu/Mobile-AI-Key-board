@@ -16,6 +16,9 @@ object SensitiveFieldClassifier {
     fun classify(editorInfo: EditorInfo?): FieldClassification {
         if (editorInfo == null) return blocked(FieldSensitivity.UNKNOWN, "入力欄を確認できないためAI機能を利用できません")
         val inputType = editorInfo.inputType
+        if (inputType == InputType.TYPE_NULL) {
+            return blocked(FieldSensitivity.UNKNOWN, "入力欄の種類を確認できないためAI機能を利用できません")
+        }
         val variation = inputType and InputType.TYPE_MASK_VARIATION
         val klass = inputType and InputType.TYPE_MASK_CLASS
         val privateOptions = editorInfo.privateImeOptions.orEmpty().lowercase()

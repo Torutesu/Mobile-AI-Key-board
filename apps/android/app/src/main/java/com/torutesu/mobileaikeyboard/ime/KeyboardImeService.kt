@@ -150,6 +150,24 @@ class KeyboardImeService : InputMethodService() {
         syncSurface()
     }
 
+    override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
+        super.onStartInputView(info, restarting)
+        // Some editors/OEMs replace InputConnection or EditorInfo while the
+        // IME window stays alive. Treat each visible input-view attachment as
+        // a new capability and never reuse the cached adapter or result.
+        editorSessionId += 1L
+        adapter = currentInputConnection?.let(::InputConnectionAdapter)
+        currentEditorInfo = info
+        session = CommandSession()
+        appliedEdit = null
+        activeShortcut = null
+        surface?.resetTypingState()
+        val classification = SensitiveFieldClassifier.classify(info)
+        lockReason = classification.explanation.takeUnless { classification.aiCaptureAllowed }
+        shortcutSnapshot = shortcutStore.read()
+        syncSurface()
+    }
+
     override fun onFinishInput() {
         editorSessionId += 1L
         adapter = null
@@ -244,6 +262,7 @@ class KeyboardImeService : InputMethodService() {
             requestedAtElapsedMillis = android.os.SystemClock.elapsedRealtime(),
             expiresAtElapsedMillis = android.os.SystemClock.elapsedRealtime() + SHORTCUT_ACTIVATION_TTL_MILLIS,
         )
+        scheduleActiveShortcutExpiry(activeShortcut!!)
         session = CommandSessionReducer.reduce(session, SessionEvent.BeginCommand)
         // The skill label is metadata only. Actual editor text is captured below
         // and remains ephemeral until the existing Capture Review acknowledges it.
@@ -377,6 +396,13 @@ class KeyboardImeService : InputMethodService() {
 
     private fun undoResult() {
         val edit = appliedEdit ?: return
+        if (activeShortcut != null && !shortcutStillCurrent()) {
+            session = CommandSessionReducer.reduce(session, SessionEvent.UndoRejected("Skill Keyの有効期限または設定が変わったため、元に戻せませんでした"))
+            appliedEdit = null
+            activeShortcut = null
+            syncSurface()
+            return
+        }
         if (adapter?.undo(edit) == true) {
             session = CommandSessionReducer.reduce(session, SessionEvent.Undone)
             appliedEdit = null
@@ -387,6 +413,13 @@ class KeyboardImeService : InputMethodService() {
     }
 
     private fun copyResult(result: String) {
+        if (activeShortcut != null && !shortcutStillCurrent()) {
+            session = CommandSessionReducer.reduce(session, SessionEvent.Failed("Skill Keyの有効期限または設定が変わったため、コピーを停止しました"))
+            appliedEdit = null
+            activeShortcut = null
+            syncSurface()
+            return
+        }
         session = CommandSessionReducer.reduce(session, SessionEvent.EditResult(result))
         if (session.phase == SessionPhase.RESULT_REVIEW && session.error != null) {
             syncSurface()
@@ -456,6 +489,20 @@ class KeyboardImeService : InputMethodService() {
         return current.generation == activation.snapshotGeneration &&
             current.layoutId == activation.layoutId &&
             nativeSkillFailureStore.decision(binding, boundary) == NativeSkillExecutionDecision.ALLOWED
+    }
+
+    private fun scheduleActiveShortcutExpiry(expected: ShortcutActivation) {
+        val delay = (expected.expiresAtElapsedMillis - android.os.SystemClock.elapsedRealtime()).coerceAtLeast(0L) + 1L
+        mainHandler.postDelayed({
+            if (activeShortcut != expected || shortcutStillCurrent()) return@postDelayed
+            // Result text and Undo are editor capabilities too. Expiry removes
+            // both automatically even when the user leaves the review open.
+            activeShortcut = null
+            appliedEdit = null
+            session = CommandSession()
+            surface?.resetTypingState()
+            syncSurface()
+        }, delay)
     }
 
     private fun bindingForActiveSkill(): Pair<ActiveAccountBoundary, TriggerKeyBinding>? {
