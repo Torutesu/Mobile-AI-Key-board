@@ -335,6 +335,7 @@ final class ShortcutRegistryStore: ObservableObject {
     /// production builds and requires an explicit test launch argument.
     private var isUITestFallbackEnabled: Bool {
 #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-skill-builder-qa") ||
         ProcessInfo.processInfo.arguments.contains("-skill-keys-qa") ||
         ProcessInfo.processInfo.arguments.contains("-trigger-key-sheet-qa")
 #else
