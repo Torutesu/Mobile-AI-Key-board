@@ -428,6 +428,12 @@ public final class AppGroupKeyboardAccessStatusStore: @unchecked Sendable {
         defaults.set(data, forKey: Self.storageKey)
     }
 
+    /// A Settings round-trip may revoke Full Access. Remove the old heartbeat
+    /// before leaving the host so the UI cannot display a stale ready state.
+    public func invalidate() {
+        defaults?.removeObject(forKey: Self.storageKey)
+    }
+
     private static let storageKey = "keyboard-access-status-v1"
     private static let encoder = JSONEncoder()
     private static let decoder = JSONDecoder()

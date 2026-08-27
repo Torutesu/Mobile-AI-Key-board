@@ -30,6 +30,7 @@ targets:
         CFBundleDisplayName: Mobile AI Keyboard
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        MIKSourceCommit: $(MIK_SOURCE_COMMIT)
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: true
         UILaunchStoryboardName: LaunchScreen
@@ -41,6 +42,7 @@ targets:
         SWIFT_VERSION: "6.0"
         MARKETING_VERSION: "0.2.0"
         CURRENT_PROJECT_VERSION: "2026082701"
+        MIK_SOURCE_COMMIT: unbound
         TARGETED_DEVICE_FAMILY: "1,2"
   MobileAIKeyboardExtension:
     type: app-extension
@@ -63,6 +65,7 @@ targets:
         SWIFT_VERSION: "6.0"
         MARKETING_VERSION: "0.2.0"
         CURRENT_PROJECT_VERSION: "2026082701"
+        MIK_SOURCE_COMMIT: unbound
         TARGETED_DEVICE_FAMILY: "1,2"
     info:
       path: MobileAIKeyboardExtension/Info.plist
@@ -70,6 +73,7 @@ targets:
         CFBundleDisplayName: Mobile AI Keyboard
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        MIKSourceCommit: $(MIK_SOURCE_COMMIT)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.keyboard-service
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController

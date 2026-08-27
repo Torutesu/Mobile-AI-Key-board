@@ -5,7 +5,7 @@ import MobileAIKeyboardCore
 struct OnboardingView: View {
     private enum Stage: Int, CaseIterable { case welcome, tryIt, access }
 
-    @State private var stage: Stage = .welcome
+    @State private var stage: Stage
     @State private var accessStatus: KeyboardAccessStatus?
     @State private var showAccessDetails = false
     @State private var sample = "明日の会議、よろしく"
@@ -15,12 +15,19 @@ struct OnboardingView: View {
     @FocusState private var verificationFocused: Bool
     @AppStorage("mobileAIKeyboard.onboardingComplete") private var onboardingComplete = false
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var accountStore: AccountActivityStore
     @EnvironmentObject private var shortcutRegistry: ShortcutRegistryStore
     private let accessStatusStore = AppGroupKeyboardAccessStatusStore()
+    private let startsAtAccess: Bool
+
+    init(startsAtAccess: Bool = false) {
+        self.startsAtAccess = startsAtAccess
+        _stage = State(initialValue: startsAtAccess ? .access : .welcome)
+    }
 
     private var forcesOnboarding: Bool {
-        ProcessInfo.processInfo.arguments.contains("-onboarding-qa") ||
+        startsAtAccess || ProcessInfo.processInfo.arguments.contains("-onboarding-qa") ||
         ProcessInfo.processInfo.arguments.contains("-onboarding-access-qa")
     }
 
@@ -242,9 +249,9 @@ struct OnboardingView: View {
                 }
                 .padding(.top, 24)
                 VStack(spacing: 0) {
-                    AccessStepRow(number: 1, title: "設定を開く", detail: "下のボタンからMobile AI Keyboardの設定へ", isComplete: settingsWasOpened || accessIsReady)
+                    AccessStepRow(number: 1, title: "iOS設定を開く", detail: "設定 → 一般 → キーボード → キーボードへ進む", isComplete: settingsWasOpened || accessIsReady)
                     Divider().padding(.leading, 64)
-                    AccessStepRow(number: 2, title: "キーボードを許可", detail: "「キーボード」を開き、Mobile AI Keyboardとフルアクセスをオン", isComplete: accessIsReady)
+                    AccessStepRow(number: 2, title: "キーボードを追加", detail: "新しいキーボードを追加 → Mobile AI Keyboard → フルアクセスをオン", isComplete: accessIsReady)
                     Divider().padding(.leading, 64)
                     AccessStepRow(number: 3, title: "この画面で試す", detail: "入力欄をタップし、地球儀からMobile AI Keyboardを選択", isComplete: accessIsReady)
                 }
@@ -280,7 +287,7 @@ struct OnboardingView: View {
                         PrimaryOnboardingButton(title: "Skill Keysをはじめる", systemImage: "sparkles") { completeOnboarding() }
                             .accessibilityIdentifier("onboarding-finish")
                     } else {
-                        PrimaryOnboardingButton(title: settingsWasOpened ? "設定をもう一度開く" : "設定を開く", systemImage: "arrow.up.forward.app") { openSettings() }
+                        PrimaryOnboardingButton(title: settingsWasOpened ? "iOS設定をもう一度開く" : "iOS設定を開く", systemImage: "arrow.up.forward.app") { openSettings() }
                             .accessibilityIdentifier("onboarding-open-settings")
                         Button("設定できたか確認") { refreshAccessStatus() }
                             .font(.subheadline.weight(.semibold)).foregroundStyle(.primary).frame(minHeight: 44)
@@ -303,18 +310,20 @@ struct OnboardingView: View {
     private func openSettings() {
         settingsWasOpened = true
         verificationFocused = false
+        accessStatusStore.invalidate()
+        accessStatus = nil
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         UIApplication.shared.open(url)
     }
 
     private func refreshAccessStatus() { accessStatus = accessStatusStore.load() }
-    private func completeOnboarding() { onboardingComplete = true }
+    private func completeOnboarding() {
+        if startsAtAccess { dismiss() }
+        else { onboardingComplete = true }
+    }
 
     private func refine(_ value: String) -> String {
-        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "、よろしく", with: "、よろしくお願いします")
-        guard !normalized.isEmpty else { return "文章を入力してください。" }
-        return normalized.hasSuffix("。") ? normalized : normalized + "。"
+        LocalRewriteEngine().politeRewrite(value)?.rewritten ?? "文章を入力してください。"
     }
 }
 
@@ -329,7 +338,11 @@ private struct PrimaryOnboardingButton: View {
     let action: () -> Void
     var body: some View {
         Button(action: action) {
-            Label(title, systemImage: systemImage).font(.headline).frame(maxWidth: .infinity).frame(height: 58)
+            Label(title, systemImage: systemImage)
+                .font(.headline)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity, minHeight: 58)
+                .padding(.vertical, 4)
         }
         .buttonStyle(.plain).foregroundStyle(.white)
         .background(Color.primary, in: Capsule()).contentShape(Capsule())

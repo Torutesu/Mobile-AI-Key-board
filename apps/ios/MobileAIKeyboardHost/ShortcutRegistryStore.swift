@@ -2,7 +2,7 @@ import Combine
 import Foundation
 import MobileAIKeyboardCore
 
-struct ShortcutSkillOption: Identifiable, Equatable {
+struct ShortcutSkillOption: Identifiable, Equatable, Codable {
     let id: String
     let versionID: String
     let version: Int
@@ -49,6 +49,8 @@ final class ShortcutRegistryStore: ObservableObject {
     @Published private(set) var statusMessage: String
     @Published private(set) var skills: [ShortcutSkillOption]
     private let storage: AppGroupShortcutSnapshotStore
+    private let candidateDefaults: UserDefaults
+    private static let candidateStorageKey = "mobile-ai-keyboard.private-skill-candidates.v1"
     // Opaque IDs follow the shared contract shape; they contain no email or
     // account credential and remain device-local until authenticated sync is
     // implemented.
@@ -57,19 +59,20 @@ final class ShortcutRegistryStore: ObservableObject {
     private var ownerSubjectHash: String?
     private var sessionEpoch: Int?
 
-    init(storage: AppGroupShortcutSnapshotStore = AppGroupShortcutSnapshotStore()) {
+    init(storage: AppGroupShortcutSnapshotStore = AppGroupShortcutSnapshotStore(), candidateDefaults: UserDefaults = .standard) {
         self.storage = storage
+        self.candidateDefaults = candidateDefaults
         let boundary = storage.loadActiveBoundary()
         let loaded = storage.loadLastKnownGood()
         ownerSubjectHash = boundary?.ownerSubjectHash
         sessionEpoch = boundary?.sessionEpoch
         snapshot = loaded ?? ShortcutSnapshotV1.empty(deviceID: ShortcutDeviceIdentity.localFixtureID, userID: "usr_local_device_0001")
         statusMessage = loaded == nil ? "この端末だけの安全な既定値" : (storage.isUsingSharedAppGroup ? "キーボードと共有済み" : "App Group未確認のためSkill Key登録を停止")
-        // An Add-to-Keyboard candidate is process-local until the user assigns
-        // it. Assigned candidates are embedded in the validated App Group
-        // snapshot and reconstructed here after a host/extension restart.
+        // Unassigned candidates persist as host-only metadata and digest. Only
+        // an assigned projection enters the extension's validated snapshot.
         let persisted = loaded?.skills.compactMap(Self.skillOption(from:)) ?? []
-        skills = Self.fixtureSkills + persisted.filter { option in !Self.fixtureSkills.contains { $0.id == option.id && $0.versionID == option.versionID } }
+        let candidates = Self.loadPrivateCandidates(from: candidateDefaults)
+        skills = Self.fixtureSkills + Self.mergingPrivateSkills(persisted + candidates)
     }
 
     var activeBindings: [ShortcutBindingV1] { snapshot.bindings.filter(\.enabled) }
@@ -162,13 +165,12 @@ final class ShortcutRegistryStore: ObservableObject {
             ownerSubjectHash = storage.loadActiveBoundary()?.ownerSubjectHash
             sessionEpoch = storage.loadActiveBoundary()?.sessionEpoch
             snapshot = ShortcutSnapshotV1.empty(deviceID: deviceID, userID: userID)
-            skills = Self.fixtureSkills
+            skills = Self.fixtureSkills + Self.loadPrivateCandidates(from: candidateDefaults)
             statusMessage = "有効なSkill Key境界がありません。登録状態を閉じました"
             return
         }
-        // Keep candidates added during this process until the user assigns
-        // them. They are intentionally not persisted before assignment, but
-        // navigating between host screens must not discard the candidate.
+        // Keep host-persisted candidates until the user assigns them. They do
+        // not enter the extension's executable snapshot before assignment.
         let unassignedCandidates = skills.filter { candidate in
             candidate.id.hasPrefix("skill_private_") &&
             !loaded.skills.contains { $0.id == candidate.id && $0.versionID == candidate.versionID }
@@ -180,6 +182,7 @@ final class ShortcutRegistryStore: ObservableObject {
             !Self.fixtureSkills.contains { $0.id == candidate.id && $0.versionID == candidate.versionID } &&
             !restored.contains { $0.id == candidate.id && $0.versionID == candidate.versionID }
         }
+        persistPrivateCandidates()
         statusMessage = storage.isUsingSharedAppGroup ? "キーボードと共有済み" : "App Group未確認のためSkill Key登録を停止"
     }
 
@@ -211,6 +214,7 @@ final class ShortcutRegistryStore: ObservableObject {
             policyEpoch: boundary.sessionEpoch
         ).withComputedDigest()
         skills = Self.fixtureSkills
+        persistPrivateCandidates()
         statusMessage = "新しいアカウント境界でSkill Keysを開始しました"
     }
 
@@ -226,6 +230,7 @@ final class ShortcutRegistryStore: ObservableObject {
         sessionEpoch = nil
         snapshot = ShortcutSnapshotV1.empty(deviceID: deviceID, userID: userID)
         skills = Self.fixtureSkills
+        persistPrivateCandidates()
         statusMessage = "Skill Keyの実行権限を解除しました"
         if closureErrors.count == 2 { throw closureErrors[0] }
     }
@@ -234,6 +239,7 @@ final class ShortcutRegistryStore: ObservableObject {
     /// an immutable, closed local executor candidate; the next step still asks
     /// the user to select an A–Z trigger in Skill Keys.
     func addPrivateSkill(_ version: PrivateSkillVersion) throws {
+        try requireActiveBoundary()
         guard version.versionNumber > 0,
               version.digest.hasPrefix("sha256:"),
               version.digest.count == 71,
@@ -260,6 +266,7 @@ final class ShortcutRegistryStore: ObservableObject {
             return
         }
         skills.append(option)
+        persistPrivateCandidates()
         statusMessage = "「\(option.name)」をキーボード候補に追加しました。A–Zキーを割り当ててください"
     }
 
@@ -276,6 +283,7 @@ final class ShortcutRegistryStore: ObservableObject {
         skills = Self.fixtureSkills + restored.filter { option in
             !Self.fixtureSkills.contains { $0.id == option.id && $0.versionID == option.versionID }
         }
+        persistPrivateCandidates()
         statusMessage = "アカウント境界の変更によりPrivate Skill Keysを削除しました"
     }
 
@@ -285,6 +293,7 @@ final class ShortcutRegistryStore: ObservableObject {
     func resetForUITest() {
         try? publish(bindings: [], skills: [], revision: snapshot.layout.revision + 1)
         skills = Self.fixtureSkills
+        persistPrivateCandidates()
     }
 
     func seedQAStateIfNeeded() {
@@ -365,6 +374,29 @@ final class ShortcutRegistryStore: ObservableObject {
             return .skillUnavailable
         case .keyIsAvailable, .bindingIDAlreadyExists:
             return .invalidSnapshot("この競合解決は現在の割り当てと一致しません")
+        }
+    }
+
+    private func persistPrivateCandidates() {
+        let privateSkills = skills.filter { $0.id.hasPrefix("skill_private_") }
+        guard let data = try? JSONEncoder().encode(privateSkills) else { return }
+        candidateDefaults.set(data, forKey: Self.candidateStorageKey)
+    }
+
+    private static func loadPrivateCandidates(from defaults: UserDefaults) -> [ShortcutSkillOption] {
+        guard let data = defaults.data(forKey: candidateStorageKey),
+              let decoded = try? JSONDecoder().decode([ShortcutSkillOption].self, from: data) else { return [] }
+        return decoded.filter { option in
+            option.id.hasPrefix("skill_private_") && option.version > 0 &&
+            option.digest.hasPrefix("sha256:") && option.digest.count == 71 && option.route == .keyboardLocal
+        }
+    }
+
+    private static func mergingPrivateSkills(_ values: [ShortcutSkillOption]) -> [ShortcutSkillOption] {
+        var seen = Set<String>()
+        return values.filter { option in
+            guard !fixtureSkills.contains(where: { $0.id == option.id && $0.versionID == option.versionID }) else { return false }
+            return seen.insert("\(option.id)|\(option.versionID)").inserted
         }
     }
 

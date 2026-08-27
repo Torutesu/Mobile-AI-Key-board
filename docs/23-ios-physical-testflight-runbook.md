@@ -18,7 +18,9 @@ IOS_DEVELOPMENT_TEAM=<team-id> ./scripts/archive-testflight.sh
 IOS_DEVELOPMENT_TEAM=<team-id> UPLOAD_TO_TESTFLIGHT=1 ./scripts/archive-testflight.sh
 ```
 
-Record the source commit, archive SHA-256, bundle versions, signing team, embedded App Group entitlement, privacy-manifest presence, upload request ID, and TestFlight build number. Do not invite testers until App Store Connect reports that exact build as processed.
+The archive script embeds the exact 40-character source commit in both the host and extension, rejects a dirty worktree, validates signed App Group entitlements and privacy manifests, and writes a candidate-scoped `candidate-evidence.json` beside the archive/export directories with executable and aggregate candidate digests. CI derives a unique numeric build number and candidate directory from the GitHub run. Before signing, it verifies that both supplied profiles match the exact bundle ID, team, non-expired lifetime, and App Group. Upload mode then waits for App Store Connect to finish processing that exact version/build and stores `TestFlight/processing-status.json`. Preserve both files with the archive evidence. These are signed-archive and App Store processing evidence, not physical-device qualification.
+
+The workflow additionally requires the numeric App Store Connect application ID in `ASC_APPLE_ID`; this is distinct from the bundle ID and API key ID.
 
 ## Clean-install permission journey
 

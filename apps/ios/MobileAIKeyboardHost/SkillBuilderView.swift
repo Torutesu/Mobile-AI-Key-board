@@ -16,7 +16,7 @@ struct SkillBuilderView: View {
     @State private var selectedSkill: ShortcutSkillOption?
     @State private var errorMessage: String?
     @State private var isWorking = false
-    @State private var createdSkillName: String?
+    @State private var createdSkill: ShortcutSkillOption?
     @FocusState private var requestFocused: Bool
 
     private let background = Color(red: 0.94, green: 0.96, blue: 0.98)
@@ -28,7 +28,7 @@ struct SkillBuilderView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     header
-                    if let createdSkillName { completion(name: createdSkillName) }
+                    if let createdSkill { completion(name: createdSkill.name) }
                     else if previewOutput != nil { preview }
                     else { requestComposer }
                 }
@@ -38,7 +38,7 @@ struct SkillBuilderView: View {
             .scrollDismissesKeyboard(.interactively)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if createdSkillName == nil {
+            if createdSkill == nil {
                 VStack(spacing: 8) {
                     if previewOutput == nil {
                         primaryButton(title: isWorking ? "作成中…" : "Skillを作る", icon: "sparkles", enabled: canCreate && !isWorking) { createPreview() }
@@ -52,9 +52,8 @@ struct SkillBuilderView: View {
                 }
                 .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 8)
                 .background(.ultraThinMaterial)
-            } else if let name = createdSkillName,
-                      let skill = shortcutRegistry.skills.first(where: { $0.name == name }) {
-                primaryButton(title: "キーを選ぶ", icon: "keyboard", enabled: true) { selectedSkill = skill }
+            } else if let createdSkill {
+                primaryButton(title: "キーを選ぶ", icon: "keyboard", enabled: true) { selectedSkill = createdSkill }
                     .accessibilityIdentifier("assign-created-skill")
                     .padding(.horizontal, 20).padding(.vertical, 12)
                     .background(.ultraThinMaterial)
@@ -258,7 +257,7 @@ struct SkillBuilderView: View {
         do {
             try shortcutRegistry.addPrivateSkill(version)
             store.send(.installBinding(versionID: version.id, digest: version.digest, bindingIdentifier: version.draft.bindingIdentifier, now: Date()))
-            createdSkillName = version.draft.name
+            createdSkill = shortcutRegistry.skills.first { $0.id == version.skillID && $0.versionID == version.id }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } catch { errorMessage = error.localizedDescription }
         isWorking = false
@@ -278,13 +277,19 @@ struct SkillBuilderView: View {
 
     private var intentIsSupported: Bool {
         let value = request.lowercased()
-        let supported = ["整え", "読みやす", "空白", "改行", "句読点", "normalize", "format"]
         let unsupported = ["要約", "翻訳", "英語", "送信", "保存", "notion", "slack", "gmail", "予定", "検索"]
-        return supported.contains(where: value.contains) && !unsupported.contains(where: value.contains)
+        return !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !unsupported.contains(where: value.contains)
     }
 
     private func primaryButton(title: String, icon: String, enabled: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Label(title, systemImage: icon).font(.headline).frame(maxWidth: .infinity).frame(height: 58) }
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.headline)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity, minHeight: 58)
+                .padding(.vertical, 4)
+        }
             .buttonStyle(.plain).foregroundStyle(.white).background(enabled ? Color.primary : Color.gray, in: Capsule())
             .contentShape(Capsule()).disabled(!enabled)
     }

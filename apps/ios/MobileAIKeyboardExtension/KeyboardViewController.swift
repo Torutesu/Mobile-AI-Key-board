@@ -341,7 +341,7 @@ final class KeyboardViewController: UIInputViewController {
         layerButton.addTarget(self, action: #selector(toggleInputLayer), for: .touchUpInside)
         let spaceButton = makeUtilityButton("space", title: "空白", label: "スペース")
         spaceButton.addTarget(self, action: #selector(space), for: .touchUpInside)
-        let returnButton = makeUtilityButton("return", title: returnKeyDisplay().displayLabel, label: returnKeyAccessibilityLabel())
+        let returnButton = makeUtilityButton("return", title: KeyboardReturnAction.newline.displayLabel, label: "改行")
         returnButton.addTarget(self, action: #selector(returnKey), for: .touchUpInside)
         self.returnButton = returnButton
         let row = UIStackView(arrangedSubviews: [globe, layerButton, spaceButton, returnButton])
@@ -464,15 +464,12 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
-    private func returnKeyAccessibilityLabel() -> String {
-        let action = returnKeyDisplay()
-        return action == .newline ? "改行" : "\(action.displayLabel)（改行を入力）"
-    }
-
     private func updateReturnKeyPresentation() {
-        let action = returnKeyDisplay()
-        returnButton?.setTitle(action.displayLabel, for: .normal)
-        returnButton?.accessibilityLabel = returnKeyAccessibilityLabel()
+        // UIInputViewController can reliably insert a newline, but it cannot
+        // promise that a host app will perform Send/Search/Done. Label the
+        // behavior we actually provide instead of presenting a false action.
+        returnButton?.setTitle(KeyboardReturnAction.newline.displayLabel, for: .normal)
+        returnButton?.accessibilityLabel = "改行"
     }
 
     @objc private func space() { textDocumentProxy.insertText(" "); performKeyHaptic() }

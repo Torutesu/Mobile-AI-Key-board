@@ -14,7 +14,7 @@ struct MobileAIKeyboardHostApp: App {
                     .environment(\.dynamicTypeSize, ProcessInfo.processInfo.arguments.contains("-accessibility-text-size-qa") ? .accessibility3 : .large)
                     .onAppear {
                         do {
-                            try shortcutRegistry.activateOwner(subject: "ui-test-local-owner")
+                            try shortcutRegistry.activateOwner(subject: "fixture-user:UI Test")
                         } catch {
                             fatalError("Skill Keys QA authority setup failed: \(error.localizedDescription)")
                         }

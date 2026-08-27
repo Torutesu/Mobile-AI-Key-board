@@ -12,6 +12,27 @@ struct KeyboardSettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 boundaryCard
+                NavigationLink {
+                    OnboardingView(startsAtAccess: true)
+                        .environmentObject(store)
+                        .environmentObject(shortcutRegistry)
+                } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("キーボードを有効にする").font(.headline)
+                            Text("追加・フルアクセス・動作確認をもう一度案内").font(.footnote).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                    } icon: {
+                        Image(systemName: "checklist").foregroundStyle(.cyan)
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .background(.white, in: RoundedRectangle(cornerRadius: 16))
+                .accessibilityIdentifier("reopen-keyboard-setup")
                 if let settingsSyncError = store.settingsSyncError {
                     Label(settingsSyncError, systemImage: "exclamationmark.triangle.fill")
                         .font(.footnote.weight(.medium))
