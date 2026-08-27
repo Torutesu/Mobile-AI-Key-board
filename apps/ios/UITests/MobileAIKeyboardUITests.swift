@@ -2,6 +2,43 @@ import XCTest
 
 @MainActor
 final class MobileAIKeyboardUITests: XCTestCase {
+    func testOnboardingDeliversValueBeforeRequestingKeyboardAccess() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-onboarding-qa"]
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["どこで書いていても、\nAIを一打で。"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["試すだけなら、アクセス許可は不要です"].exists)
+        app.buttons["onboarding-start"].tap()
+
+        XCTAssertTrue(app.staticTexts["許可の前に、体験する"].waitForExistence(timeout: 3))
+        app.buttons["onboarding-refine"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["onboarding-refined-result"].waitForExistence(timeout: 3))
+        app.buttons["onboarding-continue-to-access"].tap()
+
+        XCTAssertTrue(app.staticTexts["キーボードを有効にする"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["onboarding-open-settings"].isHittable)
+        XCTAssertTrue(app.buttons["onboarding-access-details"].isHittable)
+    }
+
+    func testFullAccessExplanationIsPlainLanguageAndReversible() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-onboarding-access-qa"]
+        app.launch()
+
+        let details = app.buttons["onboarding-access-details"]
+        XCTAssertTrue(details.waitForExistence(timeout: 5))
+        details.tap()
+
+        XCTAssertTrue(app.navigationBars["フルアクセスについて"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["勝手に送信しません"].exists)
+        XCTAssertTrue(app.staticTexts["パスワード欄では停止"].exists)
+        XCTAssertTrue(app.staticTexts["いつでも解除できます"].exists)
+        XCTAssertTrue(app.buttons["閉じる"].isHittable)
+    }
+
     func testTriggerKeySheetAtAccessibilityTextSizeKeepsAllKeysAndSafetyActionsReachable() {
         continueAfterFailure = false
         let app = XCUIApplication()
