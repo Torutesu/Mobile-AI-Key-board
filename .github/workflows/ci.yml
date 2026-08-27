@@ -117,7 +117,10 @@ jobs:
           set -euo pipefail
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
+          # ubuntu-latest can return 1 here even when the pre-existing KVM
+          # device is healthy. The capability checks below remain fail-closed.
+          sudo udevadm trigger --name-match=kvm || true
+          sudo chmod a+rw /dev/kvm
           test -r /dev/kvm
           test -w /dev/kvm
       - run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'emulator' 'system-images;android-35;google_apis;x86_64'
