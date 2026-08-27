@@ -241,14 +241,16 @@ public struct SkillDryRunResult: Equatable, Sendable {
     public let checkedContracts: [String]
     public let warnings: [String]
     public let validatedExamples: [SkillTestExample]
+    public let actualOutputs: [String]
 
-    public init(status: SkillDryRunStatus, createdAt: Date, safeSummary: String, checkedContracts: [String], warnings: [String] = [], validatedExamples: [SkillTestExample] = []) {
+    public init(status: SkillDryRunStatus, createdAt: Date, safeSummary: String, checkedContracts: [String], warnings: [String] = [], validatedExamples: [SkillTestExample] = [], actualOutputs: [String] = []) {
         self.status = status
         self.createdAt = createdAt
         self.safeSummary = safeSummary
         self.checkedContracts = checkedContracts
         self.warnings = warnings
         self.validatedExamples = validatedExamples
+        self.actualOutputs = actualOutputs
     }
 }
 
@@ -433,8 +435,20 @@ public struct SkillBuilderReducer: Sendable {
             guard hasCapability(next), next.status == .testing, let draft = next.draft else { return next }
             next.quotaReserved = max(0, next.quotaReserved - 1)
             next.quotaUsed += 1
-            next.dryRun = SkillDryRunResult(status: .passed, createdAt: now, safeSummary: "fixture入力だけで契約を確認しました。外部サービスは呼び出していません。", checkedContracts: ["typed manifest", "schema", "private policy", "static injection", "binding safety", "no public publish"], warnings: [], validatedExamples: draft.manifest.testExamples)
-            next.status = .tested
+            let actualOutputs = draft.manifest.testExamples.compactMap {
+                LocalRewriteEngine().punctuationRewrite($0.input)?.rewritten
+            }
+            let executionPassed = actualOutputs.count == draft.manifest.testExamples.count
+            next.dryRun = SkillDryRunResult(
+                status: executionPassed ? .passed : .failed,
+                createdAt: now,
+                safeSummary: executionPassed ? "端末内エンジンで実際の出力を確認しました。外部サービスは呼び出していません。" : "端末内エンジンで出力を作成できませんでした。",
+                checkedContracts: ["typed manifest", "schema", "private policy", "static injection", "binding safety", "local executor", "no public publish"],
+                warnings: executionPassed ? [] : ["local executor failed"],
+                validatedExamples: draft.manifest.testExamples,
+                actualOutputs: actualOutputs
+            )
+            next.status = executionPassed ? .tested : .readyForTest
         case .runDryRun(let now):
             let reserved = reduce(next, .beginDryRun(now: now))
             next = reduce(reserved, .finishDryRun(now: now))

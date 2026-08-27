@@ -12,6 +12,15 @@ struct KeyboardSettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 boundaryCard
+                if let settingsSyncError = store.settingsSyncError {
+                    Label(settingsSyncError, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(.orange)
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 16))
+                        .accessibilityIdentifier("keyboard-settings-sync-error")
+                }
                 NavigationLink {
                     SkillKeysView()
                         .environmentObject(shortcutRegistry)
@@ -43,6 +52,7 @@ struct KeyboardSettingsView: View {
             }
             .padding()
         }
+        .background(Color(red: 0.94, green: 0.96, blue: 0.98).ignoresSafeArea())
         .navigationTitle("キーボード設定")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { selectedPack = store.settings.enabledJapanesePacks.first ?? .polite }
@@ -51,9 +61,9 @@ struct KeyboardSettingsView: View {
     private var boundaryCard: some View {
         Label {
             VStack(alignment: .leading, spacing: 4) {
-                Text("拡張機能で消費可能な設定モデル")
+                Text("キーボードに反映")
                     .font(.headline)
-                Text("schema v\(store.settings.schemaVersion)。現在はmemory-onlyで、拡張機能とのruntime同期はnot_provenです。通常入力とlocal workflowはネットワーク接続しません。Skill KeyのApp Group共有にはFull Accessが必要です。通常入力用の設定は境界後も保持します。")
+                Text("変更はMobile AI Keyboardを次に開いたとき反映されます。入力内容は設定に保存しません。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -63,9 +73,9 @@ struct KeyboardSettingsView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+        .background(.white, in: RoundedRectangle(cornerRadius: 18))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("拡張機能で消費可能な設定モデル。memory-only。runtime同期は未証明。schemaバージョン\(store.settings.schemaVersion)。通常入力とlocal workflowはネットワーク接続しません。Skill KeyのApp Group共有にはFull Accessが必要です")
+        .accessibilityLabel("キーボードに反映。変更は次にキーボードを開いたとき反映されます。入力内容は保存しません")
     }
 
     private var appearanceSection: some View {
@@ -101,11 +111,11 @@ struct KeyboardSettingsView: View {
 
     private var workflowSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Workflow packs")
+            Text("文章アシスト")
                 .font(.title3.weight(.semibold))
-            Toggle("English workflow pack (local baseline)", isOn: Binding(get: { store.settings.englishWorkflowPackEnabled }, set: { store.send(.setEnglishWorkflowEnabled($0)) }))
+            Toggle("英語の文章アシスト", isOn: Binding(get: { store.settings.englishWorkflowPackEnabled }, set: { store.send(.setEnglishWorkflowEnabled($0)) }))
                 .frame(minHeight: 44)
-            Text("Japanese workflow packs")
+            Text("日本語")
                 .font(.headline)
             ForEach(JapaneseWorkflowPack.allCases, id: \.self) { pack in
                 Toggle(isOn: Binding(get: { store.settings.isEnabled(pack) }, set: { store.send(.setPackEnabled(pack, $0)) })) {
@@ -113,7 +123,7 @@ struct KeyboardSettingsView: View {
                 }
                 .frame(minHeight: 44)
             }
-            Text("各packは端末内の型付きfixtureです。IME変換、LLM、外部送信は実装していません。高信頼entityは変換前後で保護します。")
+            Text("文章の変換は端末内で行います。入力した文章を外部へ送りません。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -122,18 +132,18 @@ struct KeyboardSettingsView: View {
 
     private var previewSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("ローカルpreview")
+            Text("プレビュー")
                 .font(.title3.weight(.semibold))
             TextField("入力例", text: $previewText, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(3...6)
-                .accessibilityLabel("workflow preview入力")
-            Picker("pack", selection: $selectedPack) {
+                .accessibilityLabel("プレビュー入力")
+            Picker("アシスト", selection: $selectedPack) {
                 ForEach(JapaneseWorkflowPack.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.menu)
             .frame(minHeight: 44)
-            Button("previewを実行") {
+            Button("試してみる") {
                 preview = JapaneseWorkflowEngine().transform(previewText, pack: selectedPack)
             }
             .buttonStyle(.borderedProminent)

@@ -16,6 +16,7 @@ final class AccountActivityStore: ObservableObject {
     @Published private(set) var teamPolicy: TeamPolicyState
     @Published private(set) var r4Gate: R4ConnectorGateState
     @Published private(set) var shortcutBoundaryError: String?
+    @Published private(set) var settingsSyncError: String?
     private var qualificationOwnerSubject: String?
     private var qualificationSessionExpiresAt: Date?
     private let reducer = AccountActivityReducer()
@@ -24,6 +25,7 @@ final class AccountActivityStore: ObservableObject {
     private let calendarWriteReducer = CalendarWriteReducer()
     private let skillBuilderReducer = SkillBuilderReducer()
     private let settingsReducer = KeyboardSettingsReducer()
+    private let settingsStore = AppGroupKeyboardSettingsStore()
     private let qualificationReducer = QualificationReducer()
     private let suggestionsReducer = ContextualSuggestionReducer()
     private let teamPolicyReducer = TeamPolicyReducer()
@@ -35,13 +37,14 @@ final class AccountActivityStore: ObservableObject {
         connections = ConnectionsFixtureClient().initialState()
         calendarWrite = CalendarWriteFixtureClient().initialState()
         skillBuilder = SkillBuilderFixtureClient().initialState()
-        settings = .defaultFixture
+        settings = settingsStore.load()
         qualification = QualificationState()
         suggestions = ContextualSuggestionState()
         trustCatalog = [CommunitySkillCatalogFixture.metadata]
         teamPolicy = TeamPolicyState()
         r4Gate = R4ConnectorGateState()
         shortcutBoundaryError = nil
+        settingsSyncError = nil
         qualificationOwnerSubject = nil
         qualificationSessionExpiresAt = nil
     }
@@ -173,6 +176,7 @@ final class AccountActivityStore: ObservableObject {
 
     func send(_ action: KeyboardSettingsAction) {
         settings = settingsReducer.reduce(settings, action)
+        settingsSyncError = settingsStore.publish(settings) ? nil : "設定をキーボードと共有できません。Mobile AI Keyboardとフルアクセスを有効にしてください。"
     }
 
     func send(_ action: QualificationAction) {

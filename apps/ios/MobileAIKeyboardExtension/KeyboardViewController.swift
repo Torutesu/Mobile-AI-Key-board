@@ -31,6 +31,8 @@ final class KeyboardViewController: UIInputViewController {
     private let shortcutStore = AppGroupShortcutSnapshotStore()
     private let nativeSkillFailureStore = AppGroupNativeSkillFailureStore()
     private let accessStatusStore = AppGroupKeyboardAccessStatusStore()
+    private let settingsStore = AppGroupKeyboardSettingsStore()
+    private var keyboardSettings = KeyboardSettingsState.defaultFixture
     private var shortcutSnapshot: ShortcutSnapshotV1?
     private var shortcutBindings: [ShortcutKeyCode: ShortcutBindingV1] = [:]
     private var shortcutSkills: [String: ShortcutSkillProjectionV1] = [:]
@@ -42,11 +44,12 @@ final class KeyboardViewController: UIInputViewController {
     private var pendingShortcutSkill: ShortcutSkillProjectionV1?
     private var pendingShortcutActivation: ShortcutActivationV1?
     private var boundaryRefreshTimer: Timer?
+    private var deleteRepeatTimer: Timer?
     private var documentIdentifier: String { textDocumentProxy.documentIdentifier.uuidString }
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .secondarySystemBackground
+        reloadKeyboardSettings()
         buildTypingView()
         refreshFieldSecurityFromProxy()
         updateFullAccessState()
@@ -58,6 +61,9 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        let previousSettings = keyboardSettings
+        reloadKeyboardSettings()
+        if previousSettings != keyboardSettings { buildTypingView() }
         refreshFieldSecurityFromProxy()
         updateFullAccessState()
         consumedLongPressKey = nil
@@ -73,6 +79,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        stopDeleteRepeat()
         boundaryRefreshTimer?.invalidate()
         boundaryRefreshTimer = nil
         clearEphemeralState(showTypingView: false)
@@ -241,11 +248,15 @@ final class KeyboardViewController: UIInputViewController {
         stack.spacing = 4
         stack.distribution = .fillEqually
         stack.isLayoutMarginsRelativeArrangement = true
-        stack.layoutMargins = UIEdgeInsets(top: 4, left: 4, bottom: 4, right: 4)
+        switch keyboardSettings.oneHandedMode {
+        case .off: stack.layoutMargins = UIEdgeInsets(top: 4, left: 4, bottom: 4, right: 4)
+        case .left: stack.layoutMargins = UIEdgeInsets(top: 4, left: 4, bottom: 4, right: 52)
+        case .right: stack.layoutMargins = UIEdgeInsets(top: 4, left: 52, bottom: 4, right: 4)
+        }
         typingStack = stack
         updateShiftAppearance()
         updateReturnKeyPresentation()
-        install(stack, height: 252)
+        install(stack, height: keyboardHeight)
         updateBoundKeyPresentation()
     }
 
@@ -373,7 +384,8 @@ final class KeyboardViewController: UIInputViewController {
 
     private func makeDeleteButton() -> UIButton {
         let button = makeUtilityButton("delete", title: "⌫", label: "削除")
-        button.addTarget(self, action: #selector(deleteBackward), for: .touchUpInside)
+        button.addTarget(self, action: #selector(startDeleteRepeat), for: .touchDown)
+        button.addTarget(self, action: #selector(stopDeleteRepeat), for: [.touchUpInside, .touchUpOutside, .touchCancel, .touchDragExit])
         return button
     }
 
@@ -394,7 +406,7 @@ final class KeyboardViewController: UIInputViewController {
         button.layer.borderWidth = 0.5
         button.layer.borderColor = UIColor.separator.cgColor
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        button.heightAnchor.constraint(greaterThanOrEqualToConstant: keyMinimumHeight).isActive = true
     }
 
     @objc private func letterPressed(_ sender: UIButton) {
@@ -404,6 +416,7 @@ final class KeyboardViewController: UIInputViewController {
             return
         }
         textDocumentProxy.insertText(title)
+        performKeyHaptic()
         inputState.commitLetter()
         updateShiftAppearance()
     }
@@ -415,11 +428,13 @@ final class KeyboardViewController: UIInputViewController {
 
     @objc private func toggleShift() {
         inputState.pressShift()
+        performKeyHaptic()
         updateShiftAppearance()
     }
 
     @objc private func toggleInputLayer() {
         inputState.toggleLayer()
+        performKeyHaptic()
         buildTypingView()
     }
 
@@ -460,9 +475,26 @@ final class KeyboardViewController: UIInputViewController {
         returnButton?.accessibilityLabel = returnKeyAccessibilityLabel()
     }
 
-    @objc private func space() { textDocumentProxy.insertText(" ") }
-    @objc private func returnKey() { textDocumentProxy.insertText("\n") }
-    @objc private func deleteBackward() { textDocumentProxy.deleteBackward() }
+    @objc private func space() { textDocumentProxy.insertText(" "); performKeyHaptic() }
+    @objc private func returnKey() { textDocumentProxy.insertText("\n"); performKeyHaptic() }
+    @objc private func startDeleteRepeat() {
+        stopDeleteRepeat()
+        textDocumentProxy.deleteBackward()
+        performKeyHaptic()
+        let timer = Timer(timeInterval: 0.08, target: self, selector: #selector(repeatDeleteBackward), userInfo: nil, repeats: true)
+        deleteRepeatTimer = timer
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) { [weak self, weak timer] in
+            guard let self, self.deleteRepeatTimer === timer, let timer else { return }
+            RunLoop.main.add(timer, forMode: .common)
+        }
+    }
+
+    @objc private func stopDeleteRepeat() {
+        deleteRepeatTimer?.invalidate()
+        deleteRepeatTimer = nil
+    }
+
+    @objc private func repeatDeleteBackward() { textDocumentProxy.deleteBackward() }
     @objc private func nextKeyboard() { advanceToNextInputMode() }
 
     @objc private func skillKeyLongPress(_ gesture: UILongPressGestureRecognizer) {
@@ -479,8 +511,10 @@ final class KeyboardViewController: UIInputViewController {
             }
             longPressBeganKey = key
             consumedLongPressKey = key
-            longPressFeedback.prepare()
-            longPressFeedback.impactOccurred()
+            if keyboardSettings.hapticsEnabled {
+                longPressFeedback.prepare()
+                longPressFeedback.impactOccurred()
+            }
             statusLabel.text = "長押し: \(skill.name)"
             statusLabel.accessibilityValue = "\(skill.name)を実行します"
             invokeShortcut(skill, binding: binding)
@@ -735,6 +769,10 @@ final class KeyboardViewController: UIInputViewController {
             refreshShortcutSnapshot()
             return
         }
+        guard local.rewritten.count <= LocalTextLimits.resultCharacters else {
+            presentRecoverableError(.resultTooLarge)
+            return
+        }
         recordNativeSkillSuccessIfNeeded()
         guard shortcutActivationStillCurrent() else { presentRecoverableError(.staleField); return }
         let result = RewriteResult(original: local.original, rewritten: local.rewritten, preservedEntities: local.preservedEntities, fieldFingerprint: draft.fieldFingerprint, documentIdentifier: draft.documentIdentifier)
@@ -773,6 +811,10 @@ final class KeyboardViewController: UIInputViewController {
         guard let regenerated else {
             recordNativeSkillFailureIfNeeded()
             refreshShortcutSnapshot()
+            return
+        }
+        guard regenerated.rewritten.count <= LocalTextLimits.resultCharacters else {
+            presentRecoverableError(.resultTooLarge)
             return
         }
         recordNativeSkillSuccessIfNeeded()
@@ -1159,6 +1201,37 @@ final class KeyboardViewController: UIInputViewController {
             textContentType: textDocumentProxy.textContentType?.rawValue,
             keyboardType: keyboardType
         ))
+    }
+
+    private var keyMinimumHeight: CGFloat {
+        switch keyboardSettings.keySize {
+        case .compact: return 44
+        case .standard: return 48
+        case .large: return 52
+        }
+    }
+
+    private var keyboardHeight: CGFloat {
+        switch keyboardSettings.keySize {
+        case .compact: return 240
+        case .standard: return 260
+        case .large: return 284
+        }
+    }
+
+    private func reloadKeyboardSettings() {
+        keyboardSettings = settingsStore.load()
+        switch keyboardSettings.theme {
+        case .system: overrideUserInterfaceStyle = .unspecified
+        case .light: overrideUserInterfaceStyle = .light
+        case .dark: overrideUserInterfaceStyle = .dark
+        }
+        view.backgroundColor = .secondarySystemBackground
+    }
+
+    private func performKeyHaptic() {
+        guard keyboardSettings.hapticsEnabled else { return }
+        UISelectionFeedbackGenerator().selectionChanged()
     }
 }
 

@@ -1,24 +1,24 @@
 import Foundation
 
-public enum KeyboardThemePreference: String, CaseIterable, Equatable, Sendable {
+public enum KeyboardThemePreference: String, CaseIterable, Codable, Equatable, Sendable {
     case system
     case light
     case dark
 }
 
-public enum KeyboardKeySize: String, CaseIterable, Equatable, Sendable {
+public enum KeyboardKeySize: String, CaseIterable, Codable, Equatable, Sendable {
     case compact
     case standard
     case large
 }
 
-public enum KeyboardHandedness: String, CaseIterable, Equatable, Sendable {
+public enum KeyboardHandedness: String, CaseIterable, Codable, Equatable, Sendable {
     case off
     case left
     case right
 }
 
-public enum JapaneseWorkflowPack: String, CaseIterable, Equatable, Sendable {
+public enum JapaneseWorkflowPack: String, CaseIterable, Codable, Equatable, Sendable {
     case polite = "丁寧化"
     case concise = "短縮"
     case keyPoints = "要点"
@@ -34,7 +34,7 @@ public enum JapaneseWorkflowPack: String, CaseIterable, Equatable, Sendable {
     }
 }
 
-public struct KeyboardSettingsState: Equatable, Sendable {
+public struct KeyboardSettingsState: Codable, Equatable, Sendable {
     public static let currentSchemaVersion = 2
     public var schemaVersion: Int
     public var theme: KeyboardThemePreference
@@ -99,6 +99,42 @@ public struct KeyboardSettingsReducer: Sendable {
         }
         next.schemaVersion = KeyboardSettingsState.currentSchemaVersion
         return next
+    }
+}
+
+/// Content-free keyboard preferences shared by the host and extension. This
+/// deliberately excludes typed text, prompts, account data and Skill payloads.
+public final class AppGroupKeyboardSettingsStore: @unchecked Sendable {
+    public static let appGroupIdentifier = AppGroupShortcutSnapshotStore.appGroupIdentifier
+    private static let storageKey = "keyboard-settings-v2"
+    private let defaults: UserDefaults?
+
+    public init(userDefaults: UserDefaults? = nil) {
+        if let userDefaults {
+            defaults = userDefaults
+        } else if FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupIdentifier) != nil {
+            defaults = UserDefaults(suiteName: Self.appGroupIdentifier)
+        } else {
+            defaults = nil
+        }
+    }
+
+    public var isUsingSharedAppGroup: Bool { defaults != nil }
+
+    public func load() -> KeyboardSettingsState {
+        guard let data = defaults?.data(forKey: Self.storageKey),
+              var state = try? JSONDecoder().decode(KeyboardSettingsState.self, from: data) else {
+            return .defaultFixture
+        }
+        state = KeyboardSettingsReducer().reduce(state, .migrate(fromSchemaVersion: state.schemaVersion))
+        return state
+    }
+
+    @discardableResult
+    public func publish(_ state: KeyboardSettingsState) -> Bool {
+        guard let defaults, let data = try? JSONEncoder().encode(state) else { return false }
+        defaults.set(data, forKey: Self.storageKey)
+        return true
     }
 }
 

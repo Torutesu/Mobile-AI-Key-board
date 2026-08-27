@@ -28,6 +28,8 @@ targets:
       path: MobileAIKeyboardHost/Info.plist
       properties:
         CFBundleDisplayName: Mobile AI Keyboard
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: true
         UILaunchStoryboardName: LaunchScreen
@@ -37,6 +39,8 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
         SWIFT_VERSION: "6.0"
+        MARKETING_VERSION: "0.2.0"
+        CURRENT_PROJECT_VERSION: "2026082701"
         TARGETED_DEVICE_FAMILY: "1,2"
   MobileAIKeyboardExtension:
     type: app-extension
@@ -57,11 +61,15 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.torutesu.mobileaikeyboard.keyboard
         INFOPLIST_FILE: MobileAIKeyboardExtension/Info.plist
         SWIFT_VERSION: "6.0"
+        MARKETING_VERSION: "0.2.0"
+        CURRENT_PROJECT_VERSION: "2026082701"
         TARGETED_DEVICE_FAMILY: "1,2"
     info:
       path: MobileAIKeyboardExtension/Info.plist
       properties:
         CFBundleDisplayName: Mobile AI Keyboard
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.keyboard-service
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController

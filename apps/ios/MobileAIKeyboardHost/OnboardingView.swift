@@ -11,6 +11,8 @@ struct OnboardingView: View {
     @State private var sample = "明日の会議、よろしく"
     @State private var refinedSample: String?
     @State private var settingsWasOpened = false
+    @State private var verificationText = ""
+    @FocusState private var verificationFocused: Bool
     @AppStorage("mobileAIKeyboard.onboardingComplete") private var onboardingComplete = false
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var accountStore: AccountActivityStore
@@ -25,7 +27,9 @@ struct OnboardingView: View {
     var body: some View {
         Group {
             if onboardingComplete && !forcesOnboarding {
-                NavigationStack { SkillKeysView() }
+                AppShellView()
+                    .environmentObject(accountStore)
+                    .environmentObject(shortcutRegistry)
             } else {
                 onboardingFlow
             }
@@ -240,9 +244,9 @@ struct OnboardingView: View {
                 VStack(spacing: 0) {
                     AccessStepRow(number: 1, title: "設定を開く", detail: "下のボタンからMobile AI Keyboardの設定へ", isComplete: settingsWasOpened || accessIsReady)
                     Divider().padding(.leading, 64)
-                    AccessStepRow(number: 2, title: "キーボードを追加", detail: "キーボード一覧でMobile AI Keyboardをオン", isComplete: accessIsReady)
+                    AccessStepRow(number: 2, title: "キーボードを許可", detail: "「キーボード」を開き、Mobile AI Keyboardとフルアクセスをオン", isComplete: accessIsReady)
                     Divider().padding(.leading, 64)
-                    AccessStepRow(number: 3, title: "フルアクセスを許可", detail: "Skill Keyの設定をキーボードと共有するために使用", isComplete: accessIsReady)
+                    AccessStepRow(number: 3, title: "この画面で試す", detail: "入力欄をタップし、地球儀からMobile AI Keyboardを選択", isComplete: accessIsReady)
                 }
                 .padding(.vertical, 6)
                 .background(.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 28))
@@ -254,6 +258,23 @@ struct OnboardingView: View {
                 }
                 .foregroundStyle(.primary).frame(minHeight: 44)
                 .accessibilityIdentifier("onboarding-access-details")
+                if settingsWasOpened && !accessIsReady {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("設定から戻ったら、ここで確認", systemImage: "keyboard")
+                            .font(.headline)
+                        TextField("ここをタップして、地球儀から切り替える", text: $verificationText)
+                            .focused($verificationFocused)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(minHeight: 48)
+                            .accessibilityIdentifier("onboarding-keyboard-verification")
+                            .onChange(of: verificationText) { _ in refreshAccessStatus() }
+                        Text("Mobile AI Keyboardが表示されたら、設定は完了です。文字を1つ入力すると自動で確認します。")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    .padding(16)
+                    .background(.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 20))
+                    .padding(.horizontal, 20)
+                }
                 VStack(spacing: 12) {
                     if accessIsReady {
                         PrimaryOnboardingButton(title: "Skill Keysをはじめる", systemImage: "sparkles") { completeOnboarding() }
@@ -281,6 +302,7 @@ struct OnboardingView: View {
 
     private func openSettings() {
         settingsWasOpened = true
+        verificationFocused = false
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         UIApplication.shared.open(url)
     }

@@ -25,6 +25,17 @@ final class LaunchSettingsTests: XCTestCase {
         XCTAssertEqual(state, .defaultFixture)
     }
 
+    func testKeyboardSettingsRoundTripAcrossHostAndExtensionStore() {
+        let suite = "MobileAIKeyboard.settings.\(UUID().uuidString)"
+        let defaults = try! XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = AppGroupKeyboardSettingsStore(userDefaults: defaults)
+        let expected = KeyboardSettingsState(theme: .dark, hapticsEnabled: false, keySize: .large, oneHandedMode: .right, englishWorkflowPackEnabled: false, enabledJapanesePacks: [.concise, .keyPoints])
+
+        XCTAssertTrue(store.publish(expected))
+        XCTAssertEqual(store.load(), expected)
+    }
+
     func testWorkflowPacksUseLocalDisclosureAndPreserveEntities() {
         let engine = JapaneseWorkflowEngine()
         let input = "田中さんへ https://example.com/path よろしく。金額 123 です。"

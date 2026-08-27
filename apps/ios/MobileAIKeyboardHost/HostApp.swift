@@ -33,6 +33,10 @@ struct MobileAIKeyboardHostApp: App {
                             shortcutRegistry.resetForUITest()
                         }
                     }
+            } else if ProcessInfo.processInfo.arguments.contains("-app-shell-qa") {
+                AppShellView()
+                    .environmentObject(accountStore)
+                    .environmentObject(shortcutRegistry)
             } else {
                 OnboardingView()
                     .environmentObject(accountStore)

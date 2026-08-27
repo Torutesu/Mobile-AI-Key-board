@@ -210,7 +210,7 @@ struct SkillKeysView: View {
     }
 }
 
-private struct TriggerKeySheet: View {
+struct TriggerKeySheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var registry: ShortcutRegistryStore
     let skill: ShortcutSkillOption
@@ -229,7 +229,7 @@ private struct TriggerKeySheet: View {
         _selectedKey = State(initialValue: existingBinding?.keyCode)
     }
 
-    private let keys = Array("qwertyuiopasdfghjklzxcvbnm")
+    private let keyRows = [Array("qwertyuiop"), Array("asdfghjkl"), Array("zxcvbnm")]
 
     var body: some View {
         NavigationStack {
@@ -426,25 +426,32 @@ private struct TriggerKeySheet: View {
     }
 
     private var keyGrid: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 44), spacing: 8)], spacing: 8) {
-            ForEach(keys, id: \.self) { character in
-                let key = ShortcutKeyCode(displayLabel: String(character))!
-                let conflict = registry.binding(for: key)
-                let isSelected = selectedKey == key
-                Button { selectedKey = key } label: {
-                    Text(key.displayLabel)
-                        .font(.headline)
-                        .frame(minWidth: 44, minHeight: 52)
-                        .frame(maxWidth: .infinity)
-                        .background(isSelected ? Color.cyan.opacity(0.26) : Color.white, in: RoundedRectangle(cornerRadius: 9))
-                        .overlay(RoundedRectangle(cornerRadius: 9).stroke(isSelected ? Color.cyan : Color.clear, lineWidth: 2))
+        VStack(spacing: 8) {
+            ForEach(Array(keyRows.enumerated()), id: \.offset) { rowIndex, row in
+                HStack(spacing: 5) {
+                    ForEach(row, id: \.self) { character in keyButton(character) }
                 }
-                .accessibilityLabel(conflict.map { "\(key.displayLabel)、\(registry.skill(for: $0)?.name ?? "割り当て済み")" } ?? "\(key.displayLabel)、空き")
-                .accessibilityValue(isSelected ? (conflict == nil || conflict?.id == existingBinding?.id ? "選択中" : "選択中、保存時に競合解決が必要") : (conflict == nil || conflict?.id == existingBinding?.id ? "利用可能" : "割り当て済み。選択して置き換えまたは入れ替え"))
-                .accessibilityIdentifier("trigger-key-\(key.displayLabel.lowercased())")
+                .padding(.horizontal, rowIndex == 0 ? 0 : (rowIndex == 1 ? 16 : 38))
             }
         }
         .padding(10)
         .background(Color.black.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func keyButton(_ character: Character) -> some View {
+        let key = ShortcutKeyCode(displayLabel: String(character))!
+        let conflict = registry.binding(for: key)
+        let isSelected = selectedKey == key
+        return Button { selectedKey = key } label: {
+            Text(key.displayLabel)
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity, minHeight: 52)
+                .background(isSelected ? Color.cyan.opacity(0.26) : Color.white, in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).stroke(isSelected ? Color.cyan : Color.clear, lineWidth: 2))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(conflict.map { "\(key.displayLabel)、\(registry.skill(for: $0)?.name ?? "割り当て済み")" } ?? "\(key.displayLabel)、空き")
+        .accessibilityValue(isSelected ? (conflict == nil || conflict?.id == existingBinding?.id ? "選択中" : "選択中、保存時に競合解決が必要") : (conflict == nil || conflict?.id == existingBinding?.id ? "利用可能" : "割り当て済み。選択して置き換えまたは入れ替え"))
+        .accessibilityIdentifier("trigger-key-\(key.displayLabel.lowercased())")
     }
 }

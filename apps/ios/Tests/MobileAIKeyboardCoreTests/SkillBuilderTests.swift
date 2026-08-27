@@ -47,6 +47,8 @@ final class SkillBuilderTests: XCTestCase {
         XCTAssertEqual(state.publicPublishDisabled, true)
         XCTAssertEqual(state.fixtureCostDisclosure, "0 credits（端末内fixture）")
         XCTAssertEqual(state.dryRun?.validatedExamples, state.draft?.manifest.testExamples)
+        XCTAssertEqual(state.dryRun?.actualOutputs.count, 1)
+        XCTAssertEqual(state.dryRun?.actualOutputs.first, "fixture input。")
     }
 
     func testMissingSchemaPolicyAndStaticInjectionFailClosed() {
