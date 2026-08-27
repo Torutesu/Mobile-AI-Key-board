@@ -79,6 +79,12 @@ struct OnboardingView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
+        // The reference onboarding is a deliberately light, cool-grey visual
+        // system. Several cards use fixed white surfaces, so allowing only the
+        // semantic foreground colors to flip in Dark Mode makes the entire
+        // first-run experience appear blank. Keep this flow internally
+        // consistent; the keyboard itself still follows the user's theme.
+        .preferredColorScheme(.light)
     }
 
     private var onboardingHeader: some View {

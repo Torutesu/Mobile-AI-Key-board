@@ -28,6 +28,7 @@ final class KeyboardViewController: UIInputViewController {
     private var hasSelectionCapture = false
     private var sourceButtons: [CaptureSource: UIButton] = [:]
     private var keyboardHeightConstraint: NSLayoutConstraint?
+    private var installedSurfaceUsesKeyboardMetrics = false
     private let shortcutStore = AppGroupShortcutSnapshotStore()
     private let nativeSkillFailureStore = AppGroupNativeSkillFailureStore()
     private let accessStatusStore = AppGroupKeyboardAccessStatusStore()
@@ -50,6 +51,7 @@ final class KeyboardViewController: UIInputViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         reloadKeyboardSettings()
+        synchronizeAutocapitalization()
         buildTypingView()
         refreshFieldSecurityFromProxy()
         updateFullAccessState()
@@ -63,7 +65,12 @@ final class KeyboardViewController: UIInputViewController {
         super.viewWillAppear(animated)
         let previousSettings = keyboardSettings
         reloadKeyboardSettings()
-        if previousSettings != keyboardSettings { buildTypingView() }
+        synchronizeAutocapitalization()
+        if previousSettings != keyboardSettings {
+            buildTypingView()
+        } else {
+            updateShiftAppearance()
+        }
         refreshFieldSecurityFromProxy()
         updateFullAccessState()
         consumedLongPressKey = nil
@@ -83,6 +90,26 @@ final class KeyboardViewController: UIInputViewController {
         boundaryRefreshTimer?.invalidate()
         boundaryRefreshTimer = nil
         clearEphemeralState(showTypingView: false)
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        updateInstalledKeyboardHeightIfNeeded()
+    }
+
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        coordinator.animate(alongsideTransition: nil) { [weak self] _ in
+            self?.updateInstalledKeyboardHeightIfNeeded()
+        }
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory ||
+                previousTraitCollection?.verticalSizeClass != traitCollection.verticalSizeClass ||
+                previousTraitCollection?.userInterfaceIdiom != traitCollection.userInterfaceIdiom else { return }
+        updateInstalledKeyboardHeightIfNeeded()
     }
 
     private func refreshVisibleShortcutAuthority() {
@@ -256,7 +283,7 @@ final class KeyboardViewController: UIInputViewController {
         typingStack = stack
         updateShiftAppearance()
         updateReturnKeyPresentation()
-        install(stack, height: keyboardHeight)
+        install(stack, height: keyboardHeight, usesKeyboardMetrics: true)
         updateBoundKeyPresentation()
     }
 
@@ -418,6 +445,7 @@ final class KeyboardViewController: UIInputViewController {
         textDocumentProxy.insertText(title)
         performKeyHaptic()
         inputState.commitLetter()
+        synchronizeAutocapitalization()
         updateShiftAppearance()
     }
 
@@ -1012,7 +1040,7 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
-    private func install(_ content: UIView, height: CGFloat) {
+    private func install(_ content: UIView, height: CGFloat, usesKeyboardMetrics: Bool = false) {
         view.subviews.forEach { $0.removeFromSuperview() }
         let scrollView = UIScrollView()
         scrollView.alwaysBounceVertical = false
@@ -1025,6 +1053,7 @@ final class KeyboardViewController: UIInputViewController {
         let heightConstraint = view.heightAnchor.constraint(equalToConstant: height)
         heightConstraint.priority = .required
         keyboardHeightConstraint = heightConstraint
+        installedSurfaceUsesKeyboardMetrics = usesKeyboardMetrics
         NSLayoutConstraint.activate([
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -1046,7 +1075,7 @@ final class KeyboardViewController: UIInputViewController {
         statusLabel.accessibilityValue = statusLabel.text
         actionButton.accessibilityLabel = "AIコマンドを開く（端末内）"
         actionButton.isEnabled = true
-        install(typingStack, height: 252)
+        install(typingStack, height: keyboardHeight, usesKeyboardMetrics: true)
         postScreenChange(statusLabel)
     }
 
@@ -1152,6 +1181,7 @@ final class KeyboardViewController: UIInputViewController {
         consumedLongPressKey = nil
         longPressBeganKey = nil
         updateReturnKeyPresentation()
+        synchronizeAutocapitalization()
         refreshFieldSecurityFromProxy()
         if isSkillPaletteVisible {
             showTyping()
@@ -1209,11 +1239,37 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private var keyboardHeight: CGFloat {
-        switch keyboardSettings.keySize {
-        case .compact: return 240
-        case .standard: return 260
-        case .large: return 284
+        let isPad = traitCollection.userInterfaceIdiom == .pad
+        let isLandscape = !isPad && (traitCollection.verticalSizeClass == .compact || view.bounds.width > view.bounds.height)
+        let environment = KeyboardSurfaceEnvironment(
+            isPad: isPad,
+            isLandscape: isLandscape,
+            usesAccessibilityTextSize: traitCollection.preferredContentSizeCategory.isAccessibilityCategory
+        )
+        return CGFloat(KeyboardSurfaceMetrics.height(keySize: keyboardSettings.keySize, environment: environment))
+    }
+
+    private func updateInstalledKeyboardHeightIfNeeded() {
+        guard installedSurfaceUsesKeyboardMetrics, let keyboardHeightConstraint else { return }
+        let nextHeight = keyboardHeight
+        guard abs(keyboardHeightConstraint.constant - nextHeight) > 0.5 else { return }
+        keyboardHeightConstraint.constant = nextHeight
+    }
+
+    private func synchronizeAutocapitalization() {
+        let mode: KeyboardAutocapitalizationMode
+        switch textDocumentProxy.autocapitalizationType {
+        case .words: mode = .words
+        case .sentences: mode = .sentences
+        case .allCharacters: mode = .allCharacters
+        default: mode = .none
         }
+        inputState.synchronizeAutomaticShift(
+            KeyboardAutocapitalizationPolicy.shouldShift(
+                mode: mode,
+                contextBeforeInput: textDocumentProxy.documentContextBeforeInput
+            )
+        )
     }
 
     private func reloadKeyboardSettings() {

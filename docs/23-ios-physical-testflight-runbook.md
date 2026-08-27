@@ -34,14 +34,17 @@ Capture screenshots or video for every step, with device model, iOS build, local
 
 ## Core physical matrix
 
-Run on the oldest supported iPhone available and one current iPhone, in Japanese and English, light and dark appearance, default and accessibility text sizes.
+Run on the oldest supported iPhone available and one current iPhone, in Japanese and English locale, light and dark appearance, default and accessibility text sizes.
+
+The v1 extension is explicitly an English/ASCII QWERTY input surface (`en-US`) with local Skill execution. It can transform an explicitly selected Japanese passage, but it does not provide kana composition or Japanese conversion candidates. For Japanese text entry, switch with the globe key to the iOS Japanese keyboard, select the passage, then return to Mobile AI Keyboard to run a Skill. Do not describe this build as a Japanese IME until a composition/candidate pipeline is implemented and physically qualified.
 
 - Create a Skill from natural-language intent, preview it, add it, assign `H`, run the local fixture, and save.
 - Assign a second Skill to `M`; verify both appear in the host and keyboard.
 - Tap `H` and `M` 100 times each: every short tap must type the character and must never invoke a Skill.
 - Long-press each assigned key at and around the threshold; one deliberate hold must invoke exactly once.
 - Move the finger outside the key, cancel the touch, rotate, background/foreground, switch apps, kill the host, kill the extension through memory pressure, and reboot. Assignments must either restore exactly or fail closed without breaking ordinary typing.
-- Verify Q–P, A–L, Z–M, Shift, Delete repeat, Space, Return variants, number/symbol layer, globe switching, autocapitalization, and Dynamic Type.
+- Verify Q–P, A–L, Z–M, Shift, Delete repeat, Space, truthful newline Return, number/symbol layer, globe switching, host-field autocapitalization (`none`, `words`, `sentences`, `allCharacters`), and Dynamic Type.
+- Rotate portrait → landscape → portrait and repeat on iPad/Split View when available. Record keyboard height, missing/clipped keys, Auto Layout warnings, and whether the host input remains visible; simulator layout coverage is not physical proof.
 - Verify Notes, Messages, Mail, Safari, Slack, Gmail, Notion, and one web view. Test selected text, cursor-only text, empty fields, long text, emoji, URLs, Japanese text, and mixed scripts.
 - Verify password, one-time-code, payment, phone, number, and secure fields. AI/Skill surfaces must be unavailable and no content-bearing state may remain after transition.
 - With VoiceOver and Switch Control, create and assign a Skill, open the visible Skill list, run, review, cancel, copy, and apply where the editor boundary allows it.

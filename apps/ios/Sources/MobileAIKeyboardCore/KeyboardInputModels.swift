@@ -59,12 +59,94 @@ public struct KeyboardInputState: Equatable, Sendable {
         if shift == .shifted { shift = .lower }
     }
 
+    /// Mirrors the host field's automatic-capitalization request without
+    /// overriding a deliberate Caps Lock choice.
+    public mutating func synchronizeAutomaticShift(_ shouldShift: Bool) {
+        switch (shift, shouldShift) {
+        case (.capsLock, _): break
+        case (_, true): shift = .shifted
+        case (.shifted, false): shift = .lower
+        case (.lower, false): break
+        }
+    }
+
     public func displayLetter(_ letter: Character) -> Character {
         guard layer == .letters else { return letter }
         switch shift {
         case .lower: return Character(String(letter).lowercased())
         case .shifted, .capsLock: return Character(String(letter).uppercased())
         }
+    }
+}
+
+public enum KeyboardAutocapitalizationMode: Equatable, Sendable {
+    case none
+    case words
+    case sentences
+    case allCharacters
+}
+
+public enum KeyboardAutocapitalizationPolicy {
+    public static func shouldShift(mode: KeyboardAutocapitalizationMode, contextBeforeInput: String?) -> Bool {
+        switch mode {
+        case .none:
+            return false
+        case .allCharacters:
+            return true
+        case .words:
+            guard let contextBeforeInput, let last = contextBeforeInput.last else { return true }
+            return last.isWhitespace
+        case .sentences:
+            guard let contextBeforeInput, !contextBeforeInput.isEmpty else { return true }
+            guard let last = contextBeforeInput.last else { return true }
+            if last == "\n" || last == "\r" { return true }
+            guard last.isWhitespace else { return false }
+            guard let boundary = contextBeforeInput.reversed().first(where: { !$0.isWhitespace }) else { return true }
+            return ".!?。！？".contains(boundary)
+        }
+    }
+}
+
+public struct KeyboardSurfaceEnvironment: Equatable, Sendable {
+    public var isPad: Bool
+    public var isLandscape: Bool
+    public var usesAccessibilityTextSize: Bool
+
+    public init(isPad: Bool, isLandscape: Bool, usesAccessibilityTextSize: Bool) {
+        self.isPad = isPad
+        self.isLandscape = isLandscape
+        self.usesAccessibilityTextSize = usesAccessibilityTextSize
+    }
+}
+
+public enum KeyboardSurfaceMetrics {
+    /// A deterministic starting height for the ordinary typing surface. The
+    /// content remains scrollable while the container adapts to device class,
+    /// orientation, and accessibility text size.
+    public static func height(keySize: KeyboardKeySize, environment: KeyboardSurfaceEnvironment) -> Double {
+        let base: Double
+        if environment.isPad {
+            switch keySize {
+            case .compact: base = 252
+            case .standard: base = 276
+            case .large: base = 300
+            }
+        } else if environment.isLandscape {
+            switch keySize {
+            case .compact: base = 244
+            case .standard: base = 260
+            case .large: base = 276
+            }
+        } else {
+            switch keySize {
+            case .compact: base = 244
+            case .standard: base = 260
+            case .large: base = 284
+            }
+        }
+
+        guard environment.usesAccessibilityTextSize else { return base }
+        return base + (environment.isPad ? 32 : environment.isLandscape ? 16 : 28)
     }
 }
 
