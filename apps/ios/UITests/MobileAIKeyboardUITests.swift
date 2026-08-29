@@ -164,12 +164,32 @@ final class MobileAIKeyboardUITests: XCTestCase {
         app.launchArguments = ["-app-shell-qa"]
         app.launch()
 
-        app.tabBars.buttons["設定"].tap()
+        app.buttons["app-tab-プロフィール"].tap()
+        let keyboardSettings = app.buttons["profile-link-キーボード設定"]
+        XCTAssertTrue(keyboardSettings.waitForExistence(timeout: 5))
+        keyboardSettings.tap()
         let setup = app.buttons["reopen-keyboard-setup"]
         XCTAssertTrue(setup.waitForExistence(timeout: 5))
         setup.tap()
         XCTAssertTrue(app.staticTexts["キーボードを有効にする"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["設定 → 一般 → キーボード → キーボードへ進む"].exists)
+    }
+
+    func testFloatingCreateActionExplainsPrivateBeforeOpeningBuilder() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-app-shell-qa"]
+        app.launch()
+
+        let create = app.buttons["open-skill-builder"]
+        XCTAssertTrue(create.waitForExistence(timeout: 5))
+        create.tap()
+        XCTAssertTrue(app.staticTexts["Skillの種類"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["公開・共有Skillは準備中"].exists)
+        let privateSkill = app.buttons["choose-private-skill"]
+        XCTAssertTrue(privateSkill.isHittable)
+        privateSkill.tap()
+        XCTAssertTrue(app.textViews["skill-request"].waitForExistence(timeout: 3))
     }
 
     private func fill(_ element: XCUIElement, with value: String, file: StaticString = #filePath, line: UInt = #line) throws {

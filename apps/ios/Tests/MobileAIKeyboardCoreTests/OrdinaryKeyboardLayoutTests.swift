@@ -63,6 +63,25 @@ final class OrdinaryKeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(state.shift, .capsLock)
     }
 
+    func testTappingAutomaticallyShiftedKeyReturnsToLowercase() {
+        var state = KeyboardInputState()
+        state.synchronizeAutomaticShift(true)
+        XCTAssertTrue(state.automaticShiftActive)
+        state.pressShift()
+        XCTAssertEqual(state.shift, .lower)
+        XCTAssertFalse(state.automaticShiftActive)
+    }
+
+    func testProxyRefreshDoesNotEraseManualOneShotShift() {
+        var state = KeyboardInputState()
+        state.pressShift()
+        XCTAssertFalse(state.automaticShiftActive)
+        state.synchronizeAutomaticShift(false)
+        XCTAssertEqual(state.shift, .shifted)
+        state.commitLetter()
+        XCTAssertEqual(state.shift, .lower)
+    }
+
     func testKeyboardSurfaceHeightRespondsToDeviceOrientationAndTextSize() {
         let phonePortrait = KeyboardSurfaceEnvironment(isPad: false, isLandscape: false, usesAccessibilityTextSize: false)
         let phoneLandscape = KeyboardSurfaceEnvironment(isPad: false, isLandscape: true, usesAccessibilityTextSize: false)

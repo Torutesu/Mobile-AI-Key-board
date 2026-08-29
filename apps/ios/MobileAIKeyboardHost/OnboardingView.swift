@@ -11,6 +11,7 @@ struct OnboardingView: View {
     @State private var sample = "明日の会議、よろしく"
     @State private var refinedSample: String?
     @State private var settingsWasOpened = false
+    @State private var settingsOpenError: String?
     @State private var verificationText = ""
     @FocusState private var verificationFocused: Bool
     @AppStorage("mobileAIKeyboard.onboardingComplete") private var onboardingComplete = false
@@ -138,7 +139,7 @@ struct OnboardingView: View {
                     }
                     VStack(spacing: 10) {
                         Text("どこで書いていても、\nAIを一打で。")
-                            .font(.system(size: 38, weight: .bold, design: .rounded))
+                            .font(.largeTitle.weight(.bold))
                             .multilineTextAlignment(.center)
                             .minimumScaleFactor(0.8)
                         Text("いつものキーボードに、あなたのSkillを。\n長押しするだけで、文章を整えられます。")
@@ -170,7 +171,7 @@ struct OnboardingView: View {
             VStack(spacing: 24) {
                 VStack(spacing: 8) {
                     Text("許可の前に、体験する")
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .font(.largeTitle.weight(.bold))
                     Text("このデモは端末内だけで動きます。")
                         .foregroundStyle(.secondary)
                 }
@@ -247,8 +248,8 @@ struct OnboardingView: View {
                     }
                     .foregroundStyle(accessIsReady ? .green : .primary)
                     Text(accessIsReady ? "準備できました" : "キーボードを有効にする")
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
-                    Text(accessIsReady ? "Skill Keyをどのアプリでも使えます。" : "iOSの設定で一度だけ有効にします。\n入力内容を勝手に送信することはありません。")
+                        .font(.largeTitle.weight(.bold))
+                    Text(accessIsReady ? "対応する入力欄でSkill Keyを使えます。\nパスワードなど安全な入力欄では自動で停止します。" : "iOSの設定で一度だけ有効にします。\n入力内容を勝手に送信することはありません。")
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .lineSpacing(3)
@@ -271,6 +272,11 @@ struct OnboardingView: View {
                 }
                 .foregroundStyle(.primary).frame(minHeight: 44)
                 .accessibilityIdentifier("onboarding-access-details")
+                if let settingsOpenError {
+                    Label(settingsOpenError, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote.weight(.medium)).foregroundStyle(.orange)
+                        .padding(.horizontal, 24)
+                }
                 if settingsWasOpened && !accessIsReady {
                     VStack(alignment: .leading, spacing: 10) {
                         Label("設定から戻ったら、ここで確認", systemImage: "keyboard")
@@ -314,12 +320,20 @@ struct OnboardingView: View {
     }
 
     private func openSettings() {
-        settingsWasOpened = true
         verificationFocused = false
         accessStatusStore.invalidate()
         accessStatus = nil
-        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-        UIApplication.shared.open(url)
+        settingsOpenError = nil
+        guard let url = URL(string: UIApplication.openSettingsURLString) else {
+            settingsOpenError = "iOS設定を開けませんでした。もう一度お試しください。"
+            return
+        }
+        UIApplication.shared.open(url, options: [:]) { opened in
+            DispatchQueue.main.async {
+                settingsWasOpened = opened
+                if !opened { settingsOpenError = "iOS設定を開けませんでした。もう一度お試しください。" }
+            }
+        }
     }
 
     private func refreshAccessStatus() { accessStatus = accessStatusStore.load() }

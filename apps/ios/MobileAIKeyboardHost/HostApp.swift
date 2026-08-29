@@ -8,7 +8,15 @@ struct MobileAIKeyboardHostApp: App {
     var body: some Scene {
         WindowGroup {
 #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-skill-keys-qa") || ProcessInfo.processInfo.arguments.contains("-trigger-key-sheet-qa") {
+            if ProcessInfo.processInfo.arguments.contains("-skill-type-qa") {
+                CreateSkillFlowView()
+                    .environmentObject(accountStore)
+                    .environmentObject(shortcutRegistry)
+                    .onAppear {
+                        accountStore.bindShortcutRegistry(shortcutRegistry)
+                        accountStore.send(.signInFixture(label: "UI Test"))
+                    }
+            } else if ProcessInfo.processInfo.arguments.contains("-skill-keys-qa") || ProcessInfo.processInfo.arguments.contains("-trigger-key-sheet-qa") {
                 NavigationStack { SkillKeysView() }
                     .environmentObject(shortcutRegistry)
                     .environment(\.dynamicTypeSize, ProcessInfo.processInfo.arguments.contains("-accessibility-text-size-qa") ? .accessibility3 : .large)

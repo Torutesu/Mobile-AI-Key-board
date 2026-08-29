@@ -33,40 +33,68 @@ public enum KeyboardShiftState: String, CaseIterable, Equatable, Sendable {
 public struct KeyboardInputState: Equatable, Sendable {
     public private(set) var layer: KeyboardInputLayer
     public private(set) var shift: KeyboardShiftState
+    public private(set) var automaticShiftActive: Bool
 
     public init(layer: KeyboardInputLayer = .letters, shift: KeyboardShiftState = .lower) {
         self.layer = layer
         self.shift = shift
+        self.automaticShiftActive = false
     }
 
     public mutating func toggleLayer() {
         layer = layer == .letters ? .numbersAndSymbols : .letters
         // Shift has no meaning on the number/symbol layer and must not leak
         // into the next return to letters.
-        if layer == .numbersAndSymbols { shift = .lower }
+        if layer == .numbersAndSymbols {
+            shift = .lower
+            automaticShiftActive = false
+        }
     }
 
     public mutating func pressShift() {
         guard layer == .letters else { return }
         switch shift {
-        case .lower: shift = .shifted
-        case .shifted: shift = .capsLock
-        case .capsLock: shift = .lower
+        case .lower:
+            shift = .shifted
+            automaticShiftActive = false
+        case .shifted where automaticShiftActive:
+            // Tapping Shift while iOS is offering automatic capitalization
+            // means "type lowercase", not "enable Caps Lock".
+            shift = .lower
+            automaticShiftActive = false
+        case .shifted:
+            shift = .capsLock
+            automaticShiftActive = false
+        case .capsLock:
+            shift = .lower
+            automaticShiftActive = false
         }
     }
 
     public mutating func commitLetter() {
-        if shift == .shifted { shift = .lower }
+        if shift == .shifted {
+            shift = .lower
+            automaticShiftActive = false
+        }
     }
 
     /// Mirrors the host field's automatic-capitalization request without
     /// overriding a deliberate Caps Lock choice.
     public mutating func synchronizeAutomaticShift(_ shouldShift: Bool) {
-        switch (shift, shouldShift) {
-        case (.capsLock, _): break
-        case (_, true): shift = .shifted
-        case (.shifted, false): shift = .lower
-        case (.lower, false): break
+        switch (shift, shouldShift, automaticShiftActive) {
+        case (.capsLock, _, _):
+            break
+        case (.lower, true, _):
+            shift = .shifted
+            automaticShiftActive = true
+        case (.shifted, false, true):
+            shift = .lower
+            automaticShiftActive = false
+        case (.shifted, true, _), (.shifted, false, false):
+            // A manual one-shot Shift must survive a proxy refresh.
+            break
+        case (.lower, false, _):
+            automaticShiftActive = false
         }
     }
 

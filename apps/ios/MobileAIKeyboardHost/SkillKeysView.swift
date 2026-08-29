@@ -4,6 +4,7 @@ import MobileAIKeyboardCore
 
 struct SkillKeysView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var registry: ShortcutRegistryStore
     @State private var selectedSkill: ShortcutSkillOption?
     @State private var editingBinding: ShortcutBindingV1?
@@ -48,8 +49,7 @@ struct SkillKeysView: View {
             Button("閉じる", role: .cancel) { errorMessage = nil }
         } message: { Text(errorMessage ?? "") }
         .onAppear {
-            registry.refresh()
-            keyboardAccessStatus = keyboardAccessStore.load()
+            refreshKeyboardState()
 #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-skill-keys-qa") || ProcessInfo.processInfo.arguments.contains("-trigger-key-sheet-qa") {
                 registry.seedQAStateIfNeeded()
@@ -59,6 +59,14 @@ struct SkillKeysView: View {
             }
 #endif
         }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active { refreshKeyboardState() }
+        }
+    }
+
+    private func refreshKeyboardState() {
+        registry.refresh()
+        keyboardAccessStatus = keyboardAccessStore.load()
     }
 
     private var triggerKeyDetents: Set<PresentationDetent> {
