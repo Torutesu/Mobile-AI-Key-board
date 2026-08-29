@@ -9,6 +9,8 @@ struct SkillKeysView: View {
     @State private var editingBinding: ShortcutBindingV1?
     @State private var errorMessage: String?
     @State private var searchText = ""
+    @State private var keyboardAccessStatus: KeyboardAccessStatus?
+    private let keyboardAccessStore = AppGroupKeyboardAccessStatusStore()
 
     private let background = Color(red: 0.945, green: 0.961, blue: 0.984)
 
@@ -47,6 +49,7 @@ struct SkillKeysView: View {
         } message: { Text(errorMessage ?? "") }
         .onAppear {
             registry.refresh()
+            keyboardAccessStatus = keyboardAccessStore.load()
 #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-skill-keys-qa") || ProcessInfo.processInfo.arguments.contains("-trigger-key-sheet-qa") {
                 registry.seedQAStateIfNeeded()
@@ -208,7 +211,7 @@ struct SkillKeysView: View {
         Label {
             VStack(alignment: .leading, spacing: 4) {
                 Text("安全な同期境界").font(.headline)
-                Text("\(registry.statusMessage)。iOSではSkill Keysの共有にフルアクセスが必要ですが、通常入力には不要です。共有するのはキー、Skillのversion/digest、表示名だけで、入力内容・prompt・token・資格情報は保存しません。")
+                Text("\(registry.statusMessage)。\(keyboardExecutionGuidance) 共有するのはキー、Skillのversion/digest、表示名だけで、入力内容・prompt・token・資格情報は保存しません。")
                     .font(.footnote).foregroundStyle(.secondary)
             }
         } icon: {
@@ -218,6 +221,16 @@ struct SkillKeysView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.cyan.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
         .accessibilityElement(children: .combine)
+    }
+
+    private var keyboardExecutionGuidance: String {
+        guard let status = keyboardAccessStatus, status.isFresh() else {
+            return "割り当ては保存できます。キーボードを一度開くと、フルアクセスと実行可否をここで確認できます。通常入力にはフルアクセスは不要です。"
+        }
+        if status.fullAccessEnabled && status.appGroupAvailable {
+            return "キーボード側でフルアクセスを確認済み。Skill Keyを実行できます。通常入力にはフルアクセスは不要です。"
+        }
+        return "割り当ては保存済みです。フルアクセスをオンにするまでSkill Keyは実行せず、通常入力だけが動きます。"
     }
 }
 
@@ -348,7 +361,7 @@ struct TriggerKeySheet: View {
     }
 
     private var saveGuidance: String {
-        if !registry.canPublishToKeyboard { return "フルアクセスを有効にすると保存できます" }
+        if !registry.canPublishToKeyboard { return "キーボード共有を準備すると保存できます" }
         if selectedKey == nil { return "呼び出す文字キーを1つ選んでください" }
         let action = existingBinding == nil ? "Add" : "再割り当て"
         return fixtureHasRun ? "端末内テスト済み。\(action)で保存できます" : "\(action)ですぐ保存できます。テスト実行は任意です"

@@ -3,6 +3,7 @@ set -euo pipefail
 
 script_dir=${0:A:h}
 ios_dir=${script_dir:h}
+repo_root=${ios_dir:h:h}
 team_id=${IOS_DEVELOPMENT_TEAM:-}
 source_commit=${IOS_SOURCE_COMMIT:-$(git -C "$ios_dir" rev-parse HEAD)}
 candidate_id=${IOS_CANDIDATE_ID:-${source_commit[1,12]}-local}
@@ -45,6 +46,18 @@ fi
 if [[ -n ${GITHUB_SHA:-} && "$source_commit" != "$GITHUB_SHA" ]]; then
   print -u2 "Candidate source commit does not match GITHUB_SHA."
   exit 65
+fi
+
+if [[ -e "$candidate_root" ]]; then
+  if [[ ! -d "$candidate_root" ]]; then
+    print -u2 "Candidate root exists and is not a directory: $candidate_root"
+    exit 65
+  fi
+  candidate_entries=("$candidate_root"/*(DN))
+  if (( ${#candidate_entries[@]} > 0 )); then
+    print -u2 "Refusing to reuse a non-empty candidate root: $candidate_root"
+    exit 65
+  fi
 fi
 
 if [[ ${UPLOAD_TO_TESTFLIGHT:-0} == 1 && ${ALLOW_DIRTY_ARCHIVE:-0} == 1 ]]; then
@@ -132,19 +145,32 @@ security cms -D -i "$host_profile" >"$host_profile_plist"
 security cms -D -i "$extension_profile" >"$extension_profile_plist"
 host_profile_uuid=$(plutil -extract UUID raw "$host_profile_plist")
 extension_profile_uuid=$(plutil -extract UUID raw "$extension_profile_plist")
+if [[ -n ${IOS_EXPECTED_HOST_PROFILE_UUID:-} && "$host_profile_uuid" != "$IOS_EXPECTED_HOST_PROFILE_UUID" ]]; then
+  print -u2 "Archived host provisioning profile UUID does not match the validated input profile."
+  exit 65
+fi
+if [[ -n ${IOS_EXPECTED_EXTENSION_PROFILE_UUID:-} && "$extension_profile_uuid" != "$IOS_EXPECTED_EXTENSION_PROFILE_UUID" ]]; then
+  print -u2 "Archived extension provisioning profile UUID does not match the validated input profile."
+  exit 65
+fi
 marketing_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$host_app/Info.plist")
 build_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$host_app/Info.plist")
 host_executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$host_app/Info.plist")
 extension_executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$extension_app/Info.plist")
 host_digest=$(shasum -a 256 "$host_app/$host_executable" | awk '{print $1}')
 extension_digest=$(shasum -a 256 "$extension_app/$extension_executable" | awk '{print $1}')
-archive_digest=$(
+archive_manifest="${candidate_root}/archive-sha256-manifest.txt"
+(
   cd "$archive_path"
   find . -type f -print | LC_ALL=C sort | while IFS= read -r file; do
-    shasum -a 256 "$file"
-  done | shasum -a 256 | awk '{print $1}'
-)
-artifact_digest=$(printf '%s\n%s\n%s\n%s\n%s\n' "$source_commit" "$archive_digest" "$host_digest" "$extension_digest" "$build_version" | shasum -a 256 | awk '{print $1}')
+    file_digest=$(shasum -a 256 "$file" | awk '{print $1}')
+    file_size=$(stat -f '%z' "$file")
+    printf '%s  %s  %s\n' "$file_digest" "$file_size" "$file"
+  done
+) >"$archive_manifest"
+archive_manifest_digest=$(shasum -a 256 "$archive_manifest" | awk '{print $1}')
+archive_digest=$(awk '{print $1}' "$archive_manifest" | shasum -a 256 | awk '{print $1}')
+artifact_digest=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n' "$source_commit" "$archive_digest" "$archive_manifest_digest" "$host_digest" "$extension_digest" "$build_version" | shasum -a 256 | awk '{print $1}')
 
 mkdir -p "${evidence_path:h}"
 evidence_plist=$(mktemp "${candidate_root}/CandidateEvidence.XXXXXX.plist")
@@ -155,7 +181,10 @@ plutil -create xml1 "$evidence_plist"
 /usr/libexec/PlistBuddy -c "Add :candidate_id string $candidate_id" "$evidence_plist"
 /usr/libexec/PlistBuddy -c "Add :source_commit string $source_commit" "$evidence_plist"
 /usr/libexec/PlistBuddy -c "Add :artifact_digest string sha256:$artifact_digest" "$evidence_plist"
+/usr/libexec/PlistBuddy -c "Add :archive_artifact_digest string sha256:$artifact_digest" "$evidence_plist"
 /usr/libexec/PlistBuddy -c "Add :archive_digest string sha256:$archive_digest" "$evidence_plist"
+/usr/libexec/PlistBuddy -c "Add :archive_manifest_digest string sha256:$archive_manifest_digest" "$evidence_plist"
+/usr/libexec/PlistBuddy -c 'Add :archive_manifest_path string archive-sha256-manifest.txt' "$evidence_plist"
 /usr/libexec/PlistBuddy -c "Add :host_executable_digest string sha256:$host_digest" "$evidence_plist"
 /usr/libexec/PlistBuddy -c "Add :extension_executable_digest string sha256:$extension_digest" "$evidence_plist"
 /usr/libexec/PlistBuddy -c "Add :host_bundle_id string $host_bundle_id" "$evidence_plist"
@@ -183,10 +212,16 @@ if [[ ${UPLOAD_TO_TESTFLIGHT:-0} == 1 ]]; then
     -allowProvisioningUpdates \
     "${auth_args[@]}"
   cp "$export_options" "$export_dir/ExportOptions.plist"
-  ipa_path=$(find "$export_dir" -maxdepth 1 -type f -name '*.ipa' -print | head -1)
-  [[ -n "$ipa_path" ]]
+  ipa_paths=("$export_dir"/*.ipa(N))
+  if (( ${#ipa_paths[@]} != 1 )); then
+    print -u2 "Expected exactly one exported IPA, found ${#ipa_paths[@]}."
+    exit 65
+  fi
+  ipa_path=${ipa_paths[1]}
   ipa_digest=$(shasum -a 256 "$ipa_path" | awk '{print $1}')
   /usr/libexec/PlistBuddy -c "Add :ipa_digest string sha256:$ipa_digest" "$evidence_plist"
+  distribution_artifact_digest=$(printf '%s\n%s\n' "$artifact_digest" "$ipa_digest" | shasum -a 256 | awk '{print $1}')
+  /usr/libexec/PlistBuddy -c "Set :artifact_digest sha256:$distribution_artifact_digest" "$evidence_plist"
   exported_root=$(mktemp -d "${candidate_root}/ExportedIPA.XXXXXX")
   ditto -x -k "$ipa_path" "$exported_root"
   exported_host="$exported_root/Payload/MobileAIKeyboardHost.app"
@@ -212,6 +247,18 @@ if [[ ${UPLOAD_TO_TESTFLIGHT:-0} == 1 ]]; then
   [[ "$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionAttributes:RequestsOpenAccess' "$exported_extension/Info.plist")" == true ]]
   "$script_dir/validate-provisioning-profile.sh" "$exported_host/embedded.mobileprovision" "$host_bundle_id" "$team_id" group.com.torutesu.mobileaikeyboard
   "$script_dir/validate-provisioning-profile.sh" "$exported_extension/embedded.mobileprovision" "$extension_bundle_id" "$team_id" group.com.torutesu.mobileaikeyboard
+  exported_host_profile_plist="${candidate_root}/exported-host-profile.plist"
+  exported_extension_profile_plist="${candidate_root}/exported-extension-profile.plist"
+  security cms -D -i "$exported_host/embedded.mobileprovision" >"$exported_host_profile_plist"
+  security cms -D -i "$exported_extension/embedded.mobileprovision" >"$exported_extension_profile_plist"
+  exported_host_profile_uuid=$(plutil -extract UUID raw "$exported_host_profile_plist")
+  exported_extension_profile_uuid=$(plutil -extract UUID raw "$exported_extension_profile_plist")
+  if [[ "$exported_host_profile_uuid" != "$host_profile_uuid" || "$exported_extension_profile_uuid" != "$extension_profile_uuid" ]]; then
+    print -u2 "Exported IPA provisioning profiles do not match the archived profiles."
+    exit 65
+  fi
+  /usr/libexec/PlistBuddy -c "Add :exported_host_profile_uuid string $exported_host_profile_uuid" "$evidence_plist"
+  /usr/libexec/PlistBuddy -c "Add :exported_extension_profile_uuid string $exported_extension_profile_uuid" "$evidence_plist"
   processing_status="$export_dir/processing-status.json"
   API_PRIVATE_KEYS_DIR="${ASC_KEY_PATH:h}" xcrun altool --build-status \
     --apple-id "$ASC_APPLE_ID" \
@@ -222,7 +269,11 @@ if [[ ${UPLOAD_TO_TESTFLIGHT:-0} == 1 ]]; then
     --api-issuer "$ASC_ISSUER_ID" \
     --wait \
     --output-format json >"$processing_status"
-  plutil -lint "$processing_status" >/dev/null 2>&1 || jq -e . "$processing_status" >/dev/null
+  node "$repo_root/scripts/validate-app-store-processing.mjs" \
+    --input "$processing_status" \
+    --apple-id "$ASC_APPLE_ID" \
+    --marketing-version "$marketing_version" \
+    --build-version "$build_version"
   processing_status_digest=$(shasum -a 256 "$processing_status" | awk '{print $1}')
   /usr/libexec/PlistBuddy -c "Add :processing_status_digest string sha256:$processing_status_digest" "$evidence_plist"
   print "Upload and App Store Connect processing passed for $marketing_version ($build_version)."

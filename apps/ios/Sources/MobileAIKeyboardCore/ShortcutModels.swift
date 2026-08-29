@@ -515,6 +515,40 @@ public struct ShortcutAccountBoundaryV1: Codable, Equatable, Sendable {
     }
 }
 
+/// Rejects an out-of-order App Group snapshot without treating a lease-only
+/// renewal as a new authority epoch. Expiry and digest changes must not reopen
+/// an older generation for the same owner/session.
+public struct ShortcutGenerationGate: Sendable {
+    public struct AuthorityScope: Equatable, Sendable {
+        public let ownerSubjectHash: String?
+        public let sessionEpoch: Int
+
+        public init(boundary: ShortcutAccountBoundaryV1) {
+            ownerSubjectHash = boundary.ownerSubjectHash
+            sessionEpoch = boundary.sessionEpoch
+        }
+    }
+
+    public private(set) var scope: AuthorityScope?
+    public private(set) var floor: Int
+
+    public init(scope: AuthorityScope? = nil, floor: Int = -1) {
+        self.scope = scope
+        self.floor = floor
+    }
+
+    public mutating func accepts(generation: Int, boundary: ShortcutAccountBoundaryV1) -> Bool {
+        let nextScope = AuthorityScope(boundary: boundary)
+        if scope != nextScope {
+            scope = nextScope
+            floor = -1
+        }
+        guard generation >= floor else { return false }
+        floor = max(floor, generation)
+        return true
+    }
+}
+
 /// A content-free, atomic App Group repository. When provisioning is absent,
 /// it falls back to an app-private directory; the fallback is intentionally
 /// not shared between the host and extension and therefore cannot leak data.

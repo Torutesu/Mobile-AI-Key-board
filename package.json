@@ -13,6 +13,7 @@
     "shortcuts:vectors:check": "pnpm build && node scripts/generate-shortcut-vectors.mjs --check",
     "shortcuts:vectors:native-check": "node scripts/check-native-shortcut-consumers.mjs",
     "release:readiness": "node scripts/release-readiness.mjs",
+    "ios:physical-qa": "node scripts/ios-physical-qa.mjs",
     "typecheck": "tsc -b --pretty false",
     "check": "pnpm build && pnpm test"
   },

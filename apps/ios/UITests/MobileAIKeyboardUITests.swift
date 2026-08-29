@@ -115,6 +115,26 @@ final class MobileAIKeyboardUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any)["skill-preview-result"].exists)
     }
 
+    func testBuilderAtAccessibilityTextSizeKeepsCreationPathReachable() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-skill-builder-qa", "-ui-test-reset", "-accessibility-text-size-qa"]
+        app.launch()
+
+        let request = app.textViews["skill-request"]
+        XCTAssertTrue(request.waitForExistence(timeout: 5))
+        request.tap()
+        request.typeText("文章を自然に整える")
+        let create = app.buttons["create-skill-preview"]
+        for _ in 0..<6 where !create.isHittable { app.swipeUp() }
+        XCTAssertTrue(create.isHittable)
+        create.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["skill-preview-result"].waitForExistence(timeout: 3))
+        let install = app.buttons["install-created-skill"]
+        for _ in 0..<6 where !install.isHittable { app.swipeUp() }
+        XCTAssertTrue(install.isHittable)
+    }
+
     func testUnassignedPrivateSkillSurvivesHostRestart() {
         continueAfterFailure = false
         let app = XCUIApplication()

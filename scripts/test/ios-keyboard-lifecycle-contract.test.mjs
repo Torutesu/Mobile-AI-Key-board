@@ -3,14 +3,18 @@ import fs from 'node:fs';
 import test from 'node:test';
 
 const controller = fs.readFileSync('apps/ios/MobileAIKeyboardExtension/KeyboardViewController.swift', 'utf8');
+const shortcutModels = fs.readFileSync('apps/ios/Sources/MobileAIKeyboardCore/ShortcutModels.swift', 'utf8');
+const generationGate = shortcutModels.slice(shortcutModels.indexOf('public struct ShortcutGenerationGate'), shortcutModels.indexOf('public final class AppGroupShortcutSnapshotStore'));
 
 test('missing Skill authority cannot erase an unrelated local command flow', () => {
   const applyStart = controller.indexOf('private func applyShortcutSnapshot');
   const applyEnd = controller.indexOf('private func updateBoundKeyPresentation', applyStart);
   const apply = controller.slice(applyStart, applyEnd);
   assert.match(apply, /pendingShortcutActivation != nil \|\| pendingShortcutSkill != nil \|\| paletteWasVisible/);
-  assert.match(apply, /snapshot\.generation < shortcutGenerationFloor/);
-  assert.match(apply, /shortcutGenerationFloor = max\(shortcutGenerationFloor, snapshot\.generation\)/);
+  assert.match(apply, /shortcutGenerationGate\.accepts\(generation: snapshot\.generation, boundary: boundary\)/);
+  assert.match(generationGate, /AuthorityScope\(boundary: boundary\)/);
+  assert.match(generationGate, /guard generation >= floor/);
+  assert.doesNotMatch(generationGate, /expiresAt|contentDigest/);
   assert.doesNotMatch(apply, /shortcutSkills = \[:\]\s*\n\s*clearEphemeralState/);
 });
 

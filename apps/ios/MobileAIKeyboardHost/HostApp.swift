@@ -26,6 +26,7 @@ struct MobileAIKeyboardHostApp: App {
                 NavigationStack { SkillBuilderView() }
                     .environmentObject(accountStore)
                     .environmentObject(shortcutRegistry)
+                    .environment(\.dynamicTypeSize, ProcessInfo.processInfo.arguments.contains("-accessibility-text-size-qa") ? .accessibility3 : .large)
                     .onAppear {
                         accountStore.bindShortcutRegistry(shortcutRegistry)
                         accountStore.send(.signInFixture(label: "UI Test"))

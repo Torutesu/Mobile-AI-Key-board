@@ -35,8 +35,7 @@ final class KeyboardViewController: UIInputViewController {
     private let settingsStore = AppGroupKeyboardSettingsStore()
     private var keyboardSettings = KeyboardSettingsState.defaultFixture
     private var shortcutSnapshot: ShortcutSnapshotV1?
-    private var shortcutGenerationFloor = -1
-    private var shortcutGenerationBoundary: ShortcutAccountBoundaryV1?
+    private var shortcutGenerationGate = ShortcutGenerationGate()
     private var shortcutBindings: [ShortcutKeyCode: ShortcutBindingV1] = [:]
     private var shortcutSkills: [String: ShortcutSkillProjectionV1] = [:]
     private var letterButtonsByKey: [ShortcutKeyCode: UIButton] = [:]
@@ -168,16 +167,12 @@ final class KeyboardViewController: UIInputViewController {
             updateBoundKeyPresentation()
             return
         }
-        if shortcutGenerationBoundary != boundary {
-            shortcutGenerationBoundary = boundary
-            shortcutGenerationFloor = -1
-        }
         // Async App Group reads can finish out of order. Never let a slower
         // older generation replace a newer validated view of authority. The
         // floor is independent of shortcutSnapshot so a transient nil read
-        // cannot reopen replay of an earlier generation.
-        if snapshot.generation < shortcutGenerationFloor { return }
-        shortcutGenerationFloor = max(shortcutGenerationFloor, snapshot.generation)
+        // cannot reopen replay of an earlier generation. A boundary lease
+        // renewal with the same owner/session also preserves this floor.
+        if !shortcutGenerationGate.accepts(generation: snapshot.generation, boundary: boundary) { return }
         shortcutSnapshot = snapshot
         // Host handoffs are intentionally not exposed to the extension until
         // their return path is implemented end-to-end. An old snapshot may

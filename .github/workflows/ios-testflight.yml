@@ -113,6 +113,10 @@ jobs:
             uuid="$(security cms -D -i "$profile" | plutil -extract UUID raw -)"
             cp "$profile" "$HOME/Library/MobileDevice/Provisioning Profiles/$uuid.mobileprovision"
           done
+          host_profile_uuid="$(security cms -D -i "$RUNNER_TEMP/host.mobileprovision" | plutil -extract UUID raw -)"
+          extension_profile_uuid="$(security cms -D -i "$RUNNER_TEMP/extension.mobileprovision" | plutil -extract UUID raw -)"
+          echo "IOS_EXPECTED_HOST_PROFILE_UUID=$host_profile_uuid" >> "$GITHUB_ENV"
+          echo "IOS_EXPECTED_EXTENSION_PROFILE_UUID=$extension_profile_uuid" >> "$GITHUB_ENV"
 
       - name: Install App Store Connect API key
         env:
@@ -139,6 +143,7 @@ jobs:
             ${{ runner.temp }}/MobileAIKeyboard-*/TestFlight/ExportOptions.plist
             ${{ runner.temp }}/MobileAIKeyboard-*/TestFlight/*.ipa
             ${{ runner.temp }}/MobileAIKeyboard-*/candidate-evidence.json
+            ${{ runner.temp }}/MobileAIKeyboard-*/archive-sha256-manifest.txt
             ${{ runner.temp }}/MobileAIKeyboard-*/TestFlight/processing-status.json
           if-no-files-found: error
           retention-days: 14

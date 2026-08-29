@@ -262,7 +262,7 @@ struct SkillBuilderView: View {
     private func installSkill() {
         guard !previewNeedsRefresh else { return }
         guard shortcutRegistry.canPublishToKeyboard else {
-            errorMessage = "キーボードとSkillを共有できません。設定でMobile AI Keyboardとフルアクセスを有効にしてから戻ってください。"
+            errorMessage = "キーボードとSkillを共有する準備ができていません。設定でMobile AI Keyboardを追加してから戻ってください。フルアクセスはSkill実行時に必要ですが、割り当ての保存とは別に確認します。"
             UINotificationFeedbackGenerator().notificationOccurred(.error)
             return
         }

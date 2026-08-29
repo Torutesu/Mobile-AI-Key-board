@@ -20,6 +20,36 @@ private final class MutableTestClock: @unchecked Sendable {
 }
 
 final class ShortcutModelsTests: XCTestCase {
+    func testGenerationGateDoesNotResetForLeaseOnlyBoundaryRenewal() {
+        let original = ShortcutAccountBoundaryV1(
+            ownerSubjectHash: "sha256:test-owner",
+            sessionEpoch: 7,
+            active: true,
+            expiresAt: Date(timeIntervalSince1970: 1_000)
+        ).withComputedDigest()
+        let renewed = ShortcutAccountBoundaryV1(
+            ownerSubjectHash: original.ownerSubjectHash,
+            sessionEpoch: original.sessionEpoch,
+            active: true,
+            expiresAt: Date(timeIntervalSince1970: 2_000)
+        ).withComputedDigest()
+        var gate = ShortcutGenerationGate()
+
+        XCTAssertTrue(gate.accepts(generation: 10, boundary: original))
+        XCTAssertFalse(gate.accepts(generation: 9, boundary: renewed))
+        XCTAssertEqual(gate.floor, 10)
+    }
+
+    func testGenerationGateResetsOnlyForNewAuthorityScope() {
+        let original = ShortcutAccountBoundaryV1(ownerSubjectHash: "owner-a", sessionEpoch: 7, active: true).withComputedDigest()
+        let nextEpoch = ShortcutAccountBoundaryV1(ownerSubjectHash: "owner-a", sessionEpoch: 8, active: true).withComputedDigest()
+        var gate = ShortcutGenerationGate()
+
+        XCTAssertTrue(gate.accepts(generation: 10, boundary: original))
+        XCTAssertTrue(gate.accepts(generation: 1, boundary: nextEpoch))
+        XCTAssertEqual(gate.floor, 1)
+    }
+
     func testCanonicalJSONUsesNormativeSnakeCaseIDsAndExcludesContent() throws {
         let snapshot = makeSnapshot().withComputedDigest()
         let encoder = JSONEncoder()
