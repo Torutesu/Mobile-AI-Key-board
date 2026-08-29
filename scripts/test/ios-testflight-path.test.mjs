@@ -7,6 +7,7 @@ const archiveScript = fs.readFileSync('apps/ios/scripts/archive-testflight.sh', 
 const project = fs.readFileSync('apps/ios/project.yml', 'utf8');
 const workflow = fs.readFileSync('.github/workflows/ios-testflight.yml', 'utf8');
 const profileValidator = fs.readFileSync('apps/ios/scripts/validate-provisioning-profile.sh', 'utf8');
+const hasZsh = spawnSync('zsh', ['--version'], { encoding: 'utf8' }).status === 0;
 
 test('TestFlight candidate binds source, signed products, and evidence artifact', () => {
   assert.match(project, /MIKSourceCommit: \$\(MIK_SOURCE_COMMIT\)/);
@@ -55,7 +56,7 @@ test('workflow uses unique build and candidate paths and validates both profiles
   assert.match(profileValidator, /length == 1 and \.\[0\] == \$group/);
 });
 
-test('archive script rejects a source SHA that is not the checked-out HEAD before building', () => {
+test('archive script rejects a source SHA that is not the checked-out HEAD before building', { skip: !hasZsh }, () => {
   const result = spawnSync('zsh', ['apps/ios/scripts/archive-testflight.sh'], {
     cwd: process.cwd(),
     encoding: 'utf8',
@@ -70,7 +71,7 @@ test('archive script rejects a source SHA that is not the checked-out HEAD befor
   assert.match(result.stderr, /does not match the checked-out HEAD/);
 });
 
-test('archive script refuses dirty overrides for a TestFlight upload', () => {
+test('archive script refuses dirty overrides for a TestFlight upload', { skip: !hasZsh }, () => {
   const head = spawnSync('git', ['rev-parse', 'HEAD'], {
     cwd: process.cwd(),
     encoding: 'utf8',
