@@ -41,6 +41,11 @@ final class KeyboardViewController: UIInputViewController {
     private var letterButtonsByKey: [ShortcutKeyCode: UIButton] = [:]
     private var consumedLongPressKey: ShortcutKeyCode?
     private var longPressBeganKey: ShortcutKeyCode?
+    // UIKit target-actions do not identify a touch sequence. Track letter keys
+    // explicitly so a two-finger chord can never commit stray characters or
+    // start a Skill while another key is still down.
+    private var activeLetterTouchKeys: Set<ShortcutKeyCode> = []
+    private var suppressedMultiTouchKeys: Set<ShortcutKeyCode> = []
     private let longPressFeedback = UIImpactFeedbackGenerator(style: .light)
     private var isFullAccessEnabled = false
     private var pendingShortcutSkill: ShortcutSkillProjectionV1?
@@ -74,6 +79,8 @@ final class KeyboardViewController: UIInputViewController {
         updateFullAccessState()
         consumedLongPressKey = nil
         longPressBeganKey = nil
+        activeLetterTouchKeys.removeAll()
+        suppressedMultiTouchKeys.removeAll()
         refreshShortcutSnapshot()
         boundaryRefreshTimer?.invalidate()
         boundaryRefreshTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
@@ -485,7 +492,13 @@ final class KeyboardViewController: UIInputViewController {
 
     @objc private func letterPressed(_ sender: UIButton) {
         guard let title = sender.currentTitle, title.count == 1 else { return }
-        if let key = ShortcutKeyCode(displayLabel: title), consumedLongPressKey == key {
+        guard let key = ShortcutKeyCode(displayLabel: title) else { return }
+        defer {
+            activeLetterTouchKeys.remove(key)
+            suppressedMultiTouchKeys.remove(key)
+        }
+        if suppressedMultiTouchKeys.contains(key) { return }
+        if consumedLongPressKey == key {
             consumedLongPressKey = nil
             if longPressBeganKey == key { longPressBeganKey = nil }
             return
@@ -499,6 +512,14 @@ final class KeyboardViewController: UIInputViewController {
 
     @objc private func letterTouchBegan(_ sender: UIButton) {
         guard let title = sender.currentTitle, let key = ShortcutKeyCode(displayLabel: title) else { return }
+        let otherKeys = activeLetterTouchKeys.subtracting([key])
+        if !otherKeys.isEmpty {
+            suppressedMultiTouchKeys.formUnion(otherKeys)
+            suppressedMultiTouchKeys.insert(key)
+            consumedLongPressKey = nil
+            longPressBeganKey = nil
+        }
+        activeLetterTouchKeys.insert(key)
         // A stale suppression marker can survive surface replacement without
         // a matching touch-up. A new touch-down is an unambiguous new pointer
         // sequence, so it must never inherit the previous hold's suppression.
@@ -508,6 +529,8 @@ final class KeyboardViewController: UIInputViewController {
 
     @objc private func letterTouchEnded(_ sender: UIButton) {
         guard let title = sender.currentTitle, let key = ShortcutKeyCode(displayLabel: title) else { return }
+        activeLetterTouchKeys.remove(key)
+        suppressedMultiTouchKeys.remove(key)
         if consumedLongPressKey == key { consumedLongPressKey = nil }
         if longPressBeganKey == key { longPressBeganKey = nil }
     }
@@ -599,6 +622,7 @@ final class KeyboardViewController: UIInputViewController {
         switch gesture.state {
         case .began:
             if case .locked = machine.screen { return }
+            guard activeLetterTouchKeys.count <= 1, !suppressedMultiTouchKeys.contains(key) else { return }
             guard let binding = shortcutBindings[key], let skill = shortcutSkills["\(binding.skillID)|\(binding.versionID)"] else { return }
             guard isFullAccessEnabled else {
                 presentRecoverableError(.unavailable)
@@ -1172,6 +1196,8 @@ final class KeyboardViewController: UIInputViewController {
         pendingShortcutActivation = nil
         consumedLongPressKey = nil
         longPressBeganKey = nil
+        activeLetterTouchKeys.removeAll()
+        suppressedMultiTouchKeys.removeAll()
         isSkillPaletteVisible = false
         wipeEditorBuffers()
         if showTypingView { showTyping() }
@@ -1245,6 +1271,8 @@ final class KeyboardViewController: UIInputViewController {
     func textDidChange(_ textInput: UITextInput) {
         consumedLongPressKey = nil
         longPressBeganKey = nil
+        activeLetterTouchKeys.removeAll()
+        suppressedMultiTouchKeys.removeAll()
         updateFullAccessState()
         updateReturnKeyPresentation()
         synchronizeAutocapitalization()

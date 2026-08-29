@@ -32,6 +32,19 @@ test('document mutations resynchronize autocapitalization and cancelled holds ca
   assert.match(controller, /Most hosts update proxy context synchronously[\s\S]*synchronizeAutocapitalization\(\)[\s\S]*DispatchQueue\.main\.async/);
 });
 
+test('two-finger letter chords are suppressed before tap commit or Skill invocation', () => {
+  assert.match(controller, /private var activeLetterTouchKeys: Set<ShortcutKeyCode>/);
+  assert.match(controller, /private var suppressedMultiTouchKeys: Set<ShortcutKeyCode>/);
+  const touchBegan = controller.slice(controller.indexOf('private func letterTouchBegan'), controller.indexOf('private func letterTouchEnded'));
+  assert.match(touchBegan, /otherKeys = activeLetterTouchKeys\.subtracting/);
+  assert.match(touchBegan, /suppressedMultiTouchKeys\.formUnion\(otherKeys\)/);
+  const pressed = controller.slice(controller.indexOf('private func letterPressed'), controller.indexOf('private func letterTouchBegan'));
+  assert.match(pressed, /if suppressedMultiTouchKeys\.contains\(key\) \{ return \}/);
+  const longPress = controller.slice(controller.indexOf('private func skillKeyLongPress'), controller.indexOf('private func invokeShortcut'));
+  assert.match(longPress, /activeLetterTouchKeys\.count <= 1/);
+  assert.match(longPress, /!suppressedMultiTouchKeys\.contains\(key\)/);
+});
+
 test('warm keyboard rechecks Full Access and numeric fields cannot expose QWERTY', () => {
   const refresh = controller.slice(controller.indexOf('private func refreshVisibleShortcutAuthority'), controller.indexOf('private func refreshShortcutSnapshot'));
   assert.match(refresh, /updateFullAccessState\(\)/);
