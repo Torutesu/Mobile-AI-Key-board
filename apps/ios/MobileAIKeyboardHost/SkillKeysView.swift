@@ -1,7 +1,9 @@
 import SwiftUI
+import UIKit
 import MobileAIKeyboardCore
 
 struct SkillKeysView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @EnvironmentObject private var registry: ShortcutRegistryStore
     @State private var selectedSkill: ShortcutSkillOption?
     @State private var editingBinding: ShortcutBindingV1?
@@ -29,11 +31,15 @@ struct SkillKeysView: View {
         .sheet(item: $selectedSkill) { skill in
             TriggerKeySheet(skill: skill, existingBinding: nil)
                 .environmentObject(registry)
+                .presentationDetents(triggerKeyDetents)
+                .presentationDragIndicator(.visible)
         }
         .sheet(item: $editingBinding) { binding in
             if let skill = registry.skill(for: binding) {
                 TriggerKeySheet(skill: skill, existingBinding: binding)
                     .environmentObject(registry)
+                    .presentationDetents(triggerKeyDetents)
+                    .presentationDragIndicator(.visible)
             }
         }
         .alert("保存できませんでした", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
@@ -50,6 +56,10 @@ struct SkillKeysView: View {
             }
 #endif
         }
+    }
+
+    private var triggerKeyDetents: Set<PresentationDetent> {
+        dynamicTypeSize.isAccessibilitySize ? [.large] : [.fraction(0.72), .large]
     }
 
     private var keyboardPreview: some View {
@@ -108,6 +118,7 @@ struct SkillKeysView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("assigned-skill-key-\(binding.keyCode.displayLabel.lowercased())")
                 .padding(14)
                 .background(.white, in: RoundedRectangle(cornerRadius: 16))
                 .accessibilityLabel("\(binding.keyCode.displayLabel)、\(skill?.name ?? binding.skillID)、\(isRunnable ? "長押しで実行" : (binding.enabled ? "準備中・割り当て不可" : "一時停止中"))")
@@ -215,6 +226,7 @@ struct TriggerKeySheet: View {
     @EnvironmentObject private var registry: ShortcutRegistryStore
     let skill: ShortcutSkillOption
     let existingBinding: ShortcutBindingV1?
+    let onSaved: (() -> Void)?
     @State private var selectedKey: ShortcutKeyCode?
     @State private var errorMessage: String?
     @State private var fixtureInput = "田中さんへ。よろしくお願いいたします。"
@@ -222,10 +234,12 @@ struct TriggerKeySheet: View {
     @State private var fixtureHasRun = false
     @State private var conflictDialogPresented = false
     @State private var successMessage: String?
+    @State private var showLocalTest = false
 
-    init(skill: ShortcutSkillOption, existingBinding: ShortcutBindingV1?) {
+    init(skill: ShortcutSkillOption, existingBinding: ShortcutBindingV1?, onSaved: (() -> Void)? = nil) {
         self.skill = skill
         self.existingBinding = existingBinding
+        self.onSaved = onSaved
         _selectedKey = State(initialValue: existingBinding?.keyCode)
     }
 
@@ -251,9 +265,18 @@ struct TriggerKeySheet: View {
                                 .foregroundStyle(.orange)
                         }
                     }
-                    fixturePreview
                     Text("通常のタップでは必ず \(selectedKey?.displayLabel ?? "文字") を入力します。長押しの実行前には内容を確認します。")
                         .font(.footnote).foregroundStyle(.secondary)
+                    DisclosureGroup(isExpanded: $showLocalTest) {
+                        fixturePreview.padding(.top, 8)
+                    } label: {
+                        Label("任意：保存前に端末内で試す", systemImage: "checkmark.shield")
+                            .font(.subheadline.weight(.semibold))
+                            .accessibilityIdentifier("toggle-local-fixture")
+                    }
+                    Text(saveGuidance)
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(canSave ? Color.green : Color.secondary)
                     if let errorMessage { Text(errorMessage).font(.footnote).foregroundStyle(.red) }
                     if existingBinding != nil {
                         Button(existingBinding!.enabled ? "このSkill Keyを一時停止" : "このSkill Keyを再開") {
@@ -269,18 +292,15 @@ struct TriggerKeySheet: View {
                     }
                 }
                 .padding()
+                // At accessibility sizes the optional fixture is taller than
+                // the sheet. Reserve the sticky footer height so its last
+                // controls can always be scrolled fully above Add/Cancel.
+                .padding(.bottom, 156)
             }
             .accessibilityIdentifier("trigger-key-scroll")
             .background(Color(red: 0.945, green: 0.961, blue: 0.984).ignoresSafeArea())
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 10) {
-                    Button(fixtureHasRun ? "もう一度テスト実行" : "端末内でテスト実行") {
-                        runFixture()
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .background(Color.cyan.opacity(0.16), in: Capsule())
-                    .accessibilityIdentifier("run-local-fixture")
                     Button(existingBinding == nil ? "Add" : "再割り当て") { saveSelection() }
                         .font(.headline)
                         .foregroundStyle(.white)
@@ -324,8 +344,14 @@ struct TriggerKeySheet: View {
     }
 
     private var canSave: Bool {
-        guard registry.canPublishToKeyboard, selectedKey != nil, fixtureHasRun else { return false }
-        return true
+        registry.canPublishToKeyboard && selectedKey != nil
+    }
+
+    private var saveGuidance: String {
+        if !registry.canPublishToKeyboard { return "フルアクセスを有効にすると保存できます" }
+        if selectedKey == nil { return "呼び出す文字キーを1つ選んでください" }
+        let action = existingBinding == nil ? "Add" : "再割り当て"
+        return fixtureHasRun ? "端末内テスト済み。\(action)で保存できます" : "\(action)ですぐ保存できます。テスト実行は任意です"
     }
 
     private func saveSelection() {
@@ -333,11 +359,20 @@ struct TriggerKeySheet: View {
         do {
             if let existingBinding { try registry.reassign(bindingID: existingBinding.id, to: selectedKey) }
             else { try registry.assign(skillID: skill.id, key: selectedKey) }
+            onSaved?()
             successMessage = "\(selectedKey.displayLabel)キーに「\(skill.name)」を割り当てました。"
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            UIAccessibility.post(notification: .announcement, argument: successMessage)
         } catch let error as ShortcutRegistryError {
             if case .keyOccupied = error { conflictDialogPresented = true }
-            else { errorMessage = error.localizedDescription }
-        } catch { errorMessage = error.localizedDescription }
+            else {
+                errorMessage = error.localizedDescription
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+        }
     }
 
     private enum ConflictResolution { case swap, replace }
@@ -353,8 +388,14 @@ struct TriggerKeySheet: View {
             } else {
                 try registry.replace(skillID: skill.id, key: selectedKey)
             }
+            onSaved?()
             successMessage = "\(selectedKey.displayLabel)キーの割り当てを更新しました。"
-        } catch { errorMessage = error.localizedDescription }
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            UIAccessibility.post(notification: .announcement, argument: successMessage)
+        } catch {
+            errorMessage = error.localizedDescription
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+        }
     }
 
     private var fixturePreview: some View {
@@ -371,6 +412,13 @@ struct TriggerKeySheet: View {
                 .background(Color.white, in: RoundedRectangle(cornerRadius: 10))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.black.opacity(0.08)))
                 .accessibilityLabel("fixture入力")
+            Button(fixtureHasRun ? "もう一度テスト実行" : "端末内でテスト実行") {
+                runFixture()
+            }
+            .font(.subheadline.weight(.semibold))
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(Color.cyan.opacity(0.16), in: Capsule())
+            .accessibilityIdentifier("run-local-fixture")
             if let fixtureOutput {
                 VStack(alignment: .leading, spacing: 4) {
                     Label("テスト成功", systemImage: "checkmark.circle.fill")
@@ -442,11 +490,16 @@ struct TriggerKeySheet: View {
         let key = ShortcutKeyCode(displayLabel: String(character))!
         let conflict = registry.binding(for: key)
         let isSelected = selectedKey == key
-        return Button { selectedKey = key } label: {
+        let occupiedByOtherSkill = conflict != nil && conflict?.id != existingBinding?.id
+        return Button {
+            selectedKey = key
+            UISelectionFeedbackGenerator().selectionChanged()
+        } label: {
             Text(key.displayLabel)
                 .font(.subheadline.weight(.semibold))
                 .frame(maxWidth: .infinity, minHeight: 52)
-                .background(isSelected ? Color.cyan.opacity(0.26) : Color.white, in: RoundedRectangle(cornerRadius: 9))
+                .foregroundStyle(occupiedByOtherSkill && !isSelected ? Color.secondary : Color.primary)
+                .background(isSelected ? Color.cyan.opacity(0.26) : (occupiedByOtherSkill ? Color.black.opacity(0.04) : Color.white), in: RoundedRectangle(cornerRadius: 9))
                 .overlay(RoundedRectangle(cornerRadius: 9).stroke(isSelected ? Color.cyan : Color.clear, lineWidth: 2))
         }
         .buttonStyle(.plain)

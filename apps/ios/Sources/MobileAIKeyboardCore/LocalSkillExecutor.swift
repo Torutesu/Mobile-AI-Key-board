@@ -7,20 +7,21 @@ import Foundation
 /// operation in the immutable Skill projection (and the projection's digest
 /// is rechecked by the snapshot validator before this type is reached).
 public enum LocalSkillExecutor {
-    public static let supportedOperations: Set<String> = [
-        "local.text.normalize",
-        "local.text.polite",
-        "local.text.punctuation"
-    ]
+    public static let supportedOperations = Set(SkillLocalOperation.allCases.map(\.rawValue))
 
     public static func execute(_ skill: ShortcutSkillProjectionV1, input: String) -> RewriteResult? {
         guard skill.executionRoute == .keyboardLocal,
-              let operation = skill.toolSummaries.first(where: { supportedOperations.contains($0.operation) })?.operation else { return nil }
+              let rawOperation = skill.toolSummaries.first(where: { supportedOperations.contains($0.operation) })?.operation,
+              let operation = SkillLocalOperation(rawValue: rawOperation) else { return nil }
+        return execute(operation: operation, input: input)
+    }
+
+    public static func execute(operation: SkillLocalOperation, input: String) -> RewriteResult? {
         let engine = LocalRewriteEngine()
         switch operation {
-        case "local.text.polite": return engine.politeRewrite(input)
-        case "local.text.punctuation", "local.text.normalize": return engine.punctuationRewrite(input)
-        default: return nil
+        case .polite: return engine.politeRewrite(input)
+        case .whitespace: return engine.whitespaceRewrite(input)
+        case .punctuation, .normalize: return engine.punctuationRewrite(input)
         }
     }
 }

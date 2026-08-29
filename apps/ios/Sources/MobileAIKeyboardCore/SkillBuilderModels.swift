@@ -85,6 +85,16 @@ public enum SkillAllowedTool: String, CaseIterable, Equatable, Sendable {
     case localTextTransform
 }
 
+/// Closed, typed operations that a private v1 Skill may execute inside the
+/// keyboard extension. The user's free-form description never selects code at
+/// runtime; creation resolves it to one of these immutable allowlisted values.
+public enum SkillLocalOperation: String, CaseIterable, Equatable, Sendable {
+    case normalize = "local.text.normalize"
+    case polite = "local.text.polite"
+    case whitespace = "local.text.whitespace"
+    case punctuation = "local.text.punctuation"
+}
+
 public enum SkillRiskCeiling: String, CaseIterable, Equatable, Sendable {
     case r1LocalTransform = "R1-local-transform"
 }
@@ -115,16 +125,18 @@ public struct SkillTypedManifest: Equatable, Sendable {
     public let input: SkillInputKind
     public let output: SkillOutputKind
     public let allowedTools: [SkillAllowedTool]
+    public let localOperation: SkillLocalOperation
     public let riskCeiling: SkillRiskCeiling
     public let confirmation: SkillConfirmationMode
     public let retention: SkillRetentionMode
     public let testExamples: [SkillTestExample]
 
-    public init(trigger: SkillTrigger = .manual, input: SkillInputKind = .typedText, output: SkillOutputKind = .rewrittenText, allowedTools: [SkillAllowedTool] = [.localTextTransform], riskCeiling: SkillRiskCeiling = .r1LocalTransform, confirmation: SkillConfirmationMode = .always, retention: SkillRetentionMode = .ephemeral, testExamples: [SkillTestExample] = [SkillTestExample(input: "fixture input", expectedOutput: "fixture expected output")]) {
+    public init(trigger: SkillTrigger = .manual, input: SkillInputKind = .typedText, output: SkillOutputKind = .rewrittenText, allowedTools: [SkillAllowedTool] = [.localTextTransform], localOperation: SkillLocalOperation = .normalize, riskCeiling: SkillRiskCeiling = .r1LocalTransform, confirmation: SkillConfirmationMode = .always, retention: SkillRetentionMode = .ephemeral, testExamples: [SkillTestExample] = [SkillTestExample(input: "fixture input", expectedOutput: "fixture expected output")]) {
         self.trigger = trigger
         self.input = input
         self.output = output
         self.allowedTools = allowedTools
+        self.localOperation = localOperation
         self.riskCeiling = riskCeiling
         self.confirmation = confirmation
         self.retention = retention
@@ -146,6 +158,7 @@ public struct SkillTypedManifest: Equatable, Sendable {
             "allowedTools": allowedTools.map(\.rawValue),
             "confirmation": confirmation.rawValue,
             "input": input.rawValue,
+            "localOperation": localOperation.rawValue,
             "output": output.rawValue,
             "retention": retention.rawValue,
             "riskCeiling": riskCeiling.rawValue,
@@ -436,7 +449,7 @@ public struct SkillBuilderReducer: Sendable {
             next.quotaReserved = max(0, next.quotaReserved - 1)
             next.quotaUsed += 1
             let actualOutputs = draft.manifest.testExamples.compactMap {
-                LocalRewriteEngine().punctuationRewrite($0.input)?.rewritten
+                LocalSkillExecutor.execute(operation: draft.manifest.localOperation, input: $0.input)?.rewritten
             }
             let executionPassed = actualOutputs.count == draft.manifest.testExamples.count
             next.dryRun = SkillDryRunResult(

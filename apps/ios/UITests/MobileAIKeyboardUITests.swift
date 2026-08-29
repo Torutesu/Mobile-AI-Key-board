@@ -50,8 +50,10 @@ final class MobileAIKeyboardUITests: XCTestCase {
         XCTAssertEqual(triggerKeys.count, 26)
         app.buttons["trigger-key-q"].tap()
 
+        app.buttons["toggle-local-fixture"].tap()
         let runFixture = app.buttons["run-local-fixture"]
         XCTAssertTrue(runFixture.waitForExistence(timeout: 3))
+        app.scrollViews["trigger-key-scroll"].swipeUp()
         XCTAssertTrue(runFixture.isHittable)
         runFixture.tap()
         XCTAssertTrue(app.descendants(matching: .any)["fixture-success"].waitForExistence(timeout: 3))
@@ -80,21 +82,19 @@ final class MobileAIKeyboardUITests: XCTestCase {
         let install = app.buttons["install-created-skill"]
         XCTAssertTrue(install.isHittable)
         install.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["skill-created-success"].waitForExistence(timeout: 3))
-
-        let assign = app.buttons["assign-created-skill"]
-        XCTAssertTrue(assign.isHittable)
-        assign.tap()
-
         XCTAssertTrue(app.staticTexts["キーを選ぶ"].waitForExistence(timeout: 3))
         app.buttons["trigger-key-h"].tap()
-        let runFixture = app.buttons["run-local-fixture"]
-        XCTAssertTrue(runFixture.waitForExistence(timeout: 3))
-        XCTAssertTrue(runFixture.isHittable)
-        runFixture.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["fixture-success"].waitForExistence(timeout: 3))
+        // A successful builder preview is authoritative, so assignment does
+        // not force a second duplicate fixture run.
+        XCTAssertTrue(app.buttons["save-skill-key"].isHittable)
         app.buttons["save-skill-key"].tap()
         XCTAssertTrue(app.alerts["割り当てを保存しました"].waitForExistence(timeout: 3))
+        app.alerts["割り当てを保存しました"].buttons["完了"].tap()
+
+        app.terminate()
+        app.launchArguments = ["-skill-keys-qa"]
+        app.launch()
+        XCTAssertTrue(app.buttons["assigned-skill-key-h"].waitForExistence(timeout: 5))
     }
 
     func testBuilderRejectsUnsupportedIntentInsteadOfPretendingToExecute() {
@@ -128,6 +128,8 @@ final class MobileAIKeyboardUITests: XCTestCase {
         app.buttons["create-skill-preview"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["skill-preview-result"].waitForExistence(timeout: 3))
         app.buttons["install-created-skill"].tap()
+        XCTAssertTrue(app.staticTexts["キーを選ぶ"].waitForExistence(timeout: 3))
+        app.buttons["キャンセル"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["skill-created-success"].waitForExistence(timeout: 3))
 
         app.terminate()

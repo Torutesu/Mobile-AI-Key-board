@@ -17,4 +17,20 @@ final class LocalSkillExecutorTests: XCTestCase {
         XCTAssertEqual(first, second)
         XCTAssertTrue(first.rewritten.contains("https://example.com"))
     }
+
+    func testEveryTypedLocalOperationUsesItsDistinctClosedExecutor() throws {
+        XCTAssertEqual(
+            try XCTUnwrap(LocalSkillExecutor.execute(operation: .polite, input: "よろしく")).rewritten,
+            "よろしくお願いいたします。"
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(LocalSkillExecutor.execute(operation: .whitespace, input: "hello   world")).rewritten,
+            "hello world"
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(LocalSkillExecutor.execute(operation: .punctuation, input: "hello   world")).rewritten,
+            "hello world。"
+        )
+        XCTAssertEqual(LocalSkillExecutor.supportedOperations, Set(SkillLocalOperation.allCases.map(\.rawValue)))
+    }
 }

@@ -31,6 +31,12 @@ if [[ ! "$source_commit" =~ ^[0-9a-f]{40}$ ]]; then
   exit 64
 fi
 
+head_commit=$(git -C "$ios_dir" rev-parse HEAD)
+if [[ "$source_commit" != "$head_commit" ]]; then
+  print -u2 "Candidate source commit does not match the checked-out HEAD."
+  exit 65
+fi
+
 if [[ -n "$build_number" && ! "$build_number" =~ ^[0-9]+$ ]]; then
   print -u2 "IOS_BUILD_NUMBER must contain decimal digits only."
   exit 64
@@ -41,9 +47,25 @@ if [[ -n ${GITHUB_SHA:-} && "$source_commit" != "$GITHUB_SHA" ]]; then
   exit 65
 fi
 
-if [[ ${ALLOW_DIRTY_ARCHIVE:-0} != 1 && -n "$(git -C "$ios_dir" status --porcelain --untracked-files=normal)" ]]; then
+if [[ ${UPLOAD_TO_TESTFLIGHT:-0} == 1 && ${ALLOW_DIRTY_ARCHIVE:-0} == 1 ]]; then
+  print -u2 "Refusing TestFlight upload with ALLOW_DIRTY_ARCHIVE=1. Dirty archives are diagnostics-only."
+  exit 65
+fi
+
+cd "$ios_dir"
+initial_dirty=$(git -C "$ios_dir" status --porcelain --untracked-files=normal)
+if [[ ${ALLOW_DIRTY_ARCHIVE:-0} != 1 && -n "$initial_dirty" ]]; then
   print -u2 "Refusing to archive a dirty worktree. Commit the exact candidate first or set ALLOW_DIRTY_ARCHIVE=1 for diagnostics only."
   exit 65
+fi
+if [[ -z "$initial_dirty" ]]; then
+  xcodegen generate --spec project.yml
+  if [[ -n "$(git -C "$ios_dir" status --porcelain --untracked-files=normal)" ]]; then
+    print -u2 "Generated Xcode project differs from the committed project. Commit the generated project before archiving."
+    exit 65
+  fi
+else
+  print -u2 "Dirty diagnostic archive: preserving the existing Xcode project without regeneration."
 fi
 
 if [[ ${UPLOAD_TO_TESTFLIGHT:-0} == 1 && (${#auth_args[@]} == 0 || -z ${ASC_APPLE_ID:-}) ]]; then
@@ -57,9 +79,6 @@ if [[ -n "$build_number" ]]; then
 fi
 
 mkdir -p "$candidate_root"
-
-cd "$ios_dir"
-xcodegen generate --spec project.yml
 
 xcodebuild archive \
   -project MobileAIKeyboard.xcodeproj \
@@ -84,12 +103,35 @@ for product in "$host_app" "$extension_app"; do
   /usr/bin/codesign -d --entitlements :- "$product" >"$entitlements_path" 2>/dev/null
   /usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' "$entitlements_path" \
     | /usr/bin/grep -qx 'group.com.torutesu.mobileaikeyboard'
+  /usr/bin/codesign --verify --deep --strict "$product"
+  product_bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$product/Info.plist")
+  if [[ "$product" == "$host_app" ]]; then
+    expected_bundle_id='com.torutesu.mobileaikeyboard'
+  else
+    expected_bundle_id='com.torutesu.mobileaikeyboard.keyboard'
+  fi
+  [[ "$product_bundle_id" == "$expected_bundle_id" ]]
+  application_identifier=$(/usr/libexec/PlistBuddy -c 'Print :application-identifier' "$entitlements_path")
+  [[ "$application_identifier" == "$team_id.$expected_bundle_id" ]]
   [[ -f "$product/PrivacyInfo.xcprivacy" ]]
   [[ "$(/usr/libexec/PlistBuddy -c 'Print :MIKSourceCommit' "$product/Info.plist")" == "$source_commit" ]]
 done
 
 host_bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$host_app/Info.plist")
 extension_bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$extension_app/Info.plist")
+[[ "$host_bundle_id" == 'com.torutesu.mobileaikeyboard' ]]
+[[ "$extension_bundle_id" == 'com.torutesu.mobileaikeyboard.keyboard' ]]
+host_profile="$host_app/embedded.mobileprovision"
+extension_profile="$extension_app/embedded.mobileprovision"
+[[ -f "$host_profile" && -f "$extension_profile" ]]
+"$script_dir/validate-provisioning-profile.sh" "$host_profile" "$host_bundle_id" "$team_id" group.com.torutesu.mobileaikeyboard
+"$script_dir/validate-provisioning-profile.sh" "$extension_profile" "$extension_bundle_id" "$team_id" group.com.torutesu.mobileaikeyboard
+host_profile_plist="${candidate_root}/host-embedded-profile.plist"
+extension_profile_plist="${candidate_root}/extension-embedded-profile.plist"
+security cms -D -i "$host_profile" >"$host_profile_plist"
+security cms -D -i "$extension_profile" >"$extension_profile_plist"
+host_profile_uuid=$(plutil -extract UUID raw "$host_profile_plist")
+extension_profile_uuid=$(plutil -extract UUID raw "$extension_profile_plist")
 marketing_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$host_app/Info.plist")
 build_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$host_app/Info.plist")
 host_executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$host_app/Info.plist")
@@ -121,9 +163,13 @@ plutil -create xml1 "$evidence_plist"
 /usr/libexec/PlistBuddy -c "Add :marketing_version string $marketing_version" "$evidence_plist"
 /usr/libexec/PlistBuddy -c "Add :build_version string $build_version" "$evidence_plist"
 /usr/libexec/PlistBuddy -c "Add :team_id string $team_id" "$evidence_plist"
+/usr/libexec/PlistBuddy -c "Add :host_profile_uuid string $host_profile_uuid" "$evidence_plist"
+/usr/libexec/PlistBuddy -c "Add :extension_profile_uuid string $extension_profile_uuid" "$evidence_plist"
 /usr/libexec/PlistBuddy -c 'Add :app_group string group.com.torutesu.mobileaikeyboard' "$evidence_plist"
-plutil -convert json -o "$evidence_path" "$evidence_plist"
-plutil -lint "$evidence_path" >/dev/null
+xcodegen_version=$(xcodegen --version | tr '\n' ' ')
+xcode_version=$(xcodebuild -version | tr '\n' ' ')
+/usr/libexec/PlistBuddy -c "Add :xcodegen_version string $xcodegen_version" "$evidence_plist"
+/usr/libexec/PlistBuddy -c "Add :xcode_version string $xcode_version" "$evidence_plist"
 
 export_options=$(mktemp "${candidate_root}/ExportOptions.XXXXXX.plist")
 cp TestFlightExportOptions.plist "$export_options"
@@ -136,6 +182,36 @@ if [[ ${UPLOAD_TO_TESTFLIGHT:-0} == 1 ]]; then
     -exportOptionsPlist "$export_options" \
     -allowProvisioningUpdates \
     "${auth_args[@]}"
+  cp "$export_options" "$export_dir/ExportOptions.plist"
+  ipa_path=$(find "$export_dir" -maxdepth 1 -type f -name '*.ipa' -print | head -1)
+  [[ -n "$ipa_path" ]]
+  ipa_digest=$(shasum -a 256 "$ipa_path" | awk '{print $1}')
+  /usr/libexec/PlistBuddy -c "Add :ipa_digest string sha256:$ipa_digest" "$evidence_plist"
+  exported_root=$(mktemp -d "${candidate_root}/ExportedIPA.XXXXXX")
+  ditto -x -k "$ipa_path" "$exported_root"
+  exported_host="$exported_root/Payload/MobileAIKeyboardHost.app"
+  exported_extension="$exported_host/PlugIns/MobileAIKeyboardExtension.appex"
+  for product in "$exported_host" "$exported_extension"; do
+    /usr/bin/codesign --verify --deep --strict "$product"
+    /usr/bin/codesign -d --verbose=4 "$product" 2>&1 | /usr/bin/grep -Eq '^Authority=(Apple Distribution|iPhone Distribution):'
+    /usr/bin/codesign -d --verbose=4 "$product" 2>&1 | /usr/bin/grep -qx "TeamIdentifier=$team_id"
+    exported_entitlements="${candidate_root}/exported-${product:t}.entitlements.plist"
+    /usr/bin/codesign -d --entitlements :- "$product" >"$exported_entitlements" 2>/dev/null
+    exported_bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$product/Info.plist")
+    if [[ "$product" == "$exported_host" ]]; then
+      expected_bundle_id='com.torutesu.mobileaikeyboard'
+    else
+      expected_bundle_id='com.torutesu.mobileaikeyboard.keyboard'
+    fi
+    [[ "$exported_bundle_id" == "$expected_bundle_id" ]]
+    [[ "$(/usr/libexec/PlistBuddy -c 'Print :application-identifier' "$exported_entitlements")" == "$team_id.$expected_bundle_id" ]]
+    [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' "$exported_entitlements")" == 'group.com.torutesu.mobileaikeyboard' ]]
+    [[ "$(/usr/libexec/PlistBuddy -c 'Print :MIKSourceCommit' "$product/Info.plist")" == "$source_commit" ]]
+    [[ -f "$product/PrivacyInfo.xcprivacy" ]]
+  done
+  [[ "$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionAttributes:RequestsOpenAccess' "$exported_extension/Info.plist")" == true ]]
+  "$script_dir/validate-provisioning-profile.sh" "$exported_host/embedded.mobileprovision" "$host_bundle_id" "$team_id" group.com.torutesu.mobileaikeyboard
+  "$script_dir/validate-provisioning-profile.sh" "$exported_extension/embedded.mobileprovision" "$extension_bundle_id" "$team_id" group.com.torutesu.mobileaikeyboard
   processing_status="$export_dir/processing-status.json"
   API_PRIVATE_KEYS_DIR="${ASC_KEY_PATH:h}" xcrun altool --build-status \
     --apple-id "$ASC_APPLE_ID" \
@@ -147,10 +223,14 @@ if [[ ${UPLOAD_TO_TESTFLIGHT:-0} == 1 ]]; then
     --wait \
     --output-format json >"$processing_status"
   plutil -lint "$processing_status" >/dev/null 2>&1 || jq -e . "$processing_status" >/dev/null
+  processing_status_digest=$(shasum -a 256 "$processing_status" | awk '{print $1}')
+  /usr/libexec/PlistBuddy -c "Add :processing_status_digest string sha256:$processing_status_digest" "$evidence_plist"
   print "Upload and App Store Connect processing passed for $marketing_version ($build_version)."
   print "Processing evidence: $processing_status"
 else
   print "Archive and signed entitlement inspection passed: $archive_path"
   print "Set UPLOAD_TO_TESTFLIGHT=1 to export and upload this exact archive."
 fi
+plutil -convert json -o "$evidence_path" "$evidence_plist"
+plutil -lint "$evidence_path" >/dev/null
 print "Candidate evidence: $evidence_path"

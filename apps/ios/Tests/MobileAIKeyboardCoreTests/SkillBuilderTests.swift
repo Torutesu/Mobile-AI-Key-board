@@ -51,6 +51,30 @@ final class SkillBuilderTests: XCTestCase {
         XCTAssertEqual(state.dryRun?.actualOutputs.first, "fixture input。")
     }
 
+    func testTypedOperationIsCanonicalAndDrivesDryRun() {
+        let manifest = SkillTypedManifest(
+            localOperation: .whitespace,
+            testExamples: [SkillTestExample(input: "hello   world", expectedOutput: "hello world")]
+        )
+        XCTAssertTrue(manifest.canonicalSchema.contains("\"localOperation\":\"local.text.whitespace\""))
+        var state = context()
+        state = reducer.reduce(state, .begin)
+        let whitespaceDraft = SkillBuilderDraft(
+            name: "Whitespace",
+            icon: "wand.and.stars",
+            desiredOutcome: "余分な空白を整える",
+            plainDescription: "端末内で空白を整える",
+            advancedSchema: manifest.canonicalSchema,
+            bindingIdentifier: "fixture.whitespace",
+            manifest: manifest
+        )
+        state = reducer.reduce(state, .editDraft(whitespaceDraft))
+        state = reducer.reduce(state, .validate)
+        state = reducer.reduce(state, .runDryRun(now: now))
+        XCTAssertEqual(state.status, .tested)
+        XCTAssertEqual(state.dryRun?.actualOutputs, ["hello world"])
+    }
+
     func testMissingSchemaPolicyAndStaticInjectionFailClosed() {
         var state = context()
         state = reducer.reduce(state, .begin)

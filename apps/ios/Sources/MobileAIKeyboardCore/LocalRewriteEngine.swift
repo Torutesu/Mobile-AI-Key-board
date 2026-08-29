@@ -39,4 +39,19 @@ public struct LocalRewriteEngine: Sendable {
         if !output.hasSuffix("。") && !output.hasSuffix("！") && !output.hasSuffix("!") && !output.hasSuffix("?") && !output.hasSuffix("？") { output += "。" }
         return RewriteResult(original: trimmed, rewritten: output, preservedEntities: entities, fieldFingerprint: locking.fingerprint(trimmed))
     }
+
+    /// Removes accidental horizontal whitespace and excess blank lines while
+    /// preserving deliberate paragraph boundaries and protected entities.
+    public func whitespaceRewrite(_ input: String) -> RewriteResult? {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let entities = locking.entities(in: trimmed)
+        let output = locking.maskAndRestore(trimmed) { value in
+            value
+                .replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
+                .replacingOccurrences(of: #" *\n *"#, with: "\n", options: .regularExpression)
+                .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
+        }
+        return RewriteResult(original: trimmed, rewritten: output, preservedEntities: entities, fieldFingerprint: locking.fingerprint(trimmed))
+    }
 }

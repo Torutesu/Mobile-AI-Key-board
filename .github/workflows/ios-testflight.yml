@@ -13,6 +13,7 @@ permissions:
 jobs:
   upload:
     runs-on: macos-15
+    environment: testflight-production
     timeout-minutes: 45
     env:
       IOS_DEVELOPMENT_TEAM: ${{ secrets.IOS_DEVELOPMENT_TEAM }}
@@ -23,6 +24,18 @@ jobs:
       UPLOAD_TO_TESTFLIGHT: "1"
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Restrict uploads to main
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "TestFlight uploads are restricted to main." >&2
+            exit 65
+          fi
+
+      - name: Pin Xcode toolchain
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_16.4.app/Contents/Developer
+          xcodebuild -version | grep -q '^Xcode 16.4$'
 
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
         with:
@@ -40,7 +53,9 @@ jobs:
         run: pnpm check
 
       - name: Install XcodeGen
-        run: brew install xcodegen
+        run: |
+          brew install xcodegen
+          xcodegen --version | grep -q '2.46.0'
 
       - name: Validate required release secrets and bind candidate paths
         env:
@@ -59,6 +74,10 @@ jobs:
           : "${ASC_ISSUER_ID:?missing ASC_ISSUER_ID}"
           : "${ASC_APPLE_ID:?missing ASC_APPLE_ID}"
           : "${ASC_PRIVATE_KEY_BASE64:?missing ASC_PRIVATE_KEY_BASE64}"
+          [[ "$IOS_DEVELOPMENT_TEAM" =~ ^[A-Z0-9]{10}$ ]]
+          [[ "$ASC_KEY_ID" =~ ^[A-Z0-9]{10}$ ]]
+          [[ "$ASC_ISSUER_ID" =~ ^[0-9a-fA-F-]{36}$ ]]
+          [[ "$ASC_APPLE_ID" =~ ^[0-9]+$ ]]
           candidate_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA::12}"
           candidate_root="$RUNNER_TEMP/MobileAIKeyboard-$candidate_id"
           echo "IOS_BUILD_NUMBER=${GITHUB_RUN_ID}${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
@@ -118,7 +137,8 @@ jobs:
             ${{ runner.temp }}/MobileAIKeyboard-*/MobileAIKeyboard.xcarchive/Info.plist
             ${{ runner.temp }}/MobileAIKeyboard-*/TestFlight/DistributionSummary.plist
             ${{ runner.temp }}/MobileAIKeyboard-*/TestFlight/ExportOptions.plist
+            ${{ runner.temp }}/MobileAIKeyboard-*/TestFlight/*.ipa
             ${{ runner.temp }}/MobileAIKeyboard-*/candidate-evidence.json
             ${{ runner.temp }}/MobileAIKeyboard-*/TestFlight/processing-status.json
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14

@@ -10,6 +10,10 @@ profile=$1
 bundle_id=$2
 team_id=$3
 app_group=$4
+[[ "$team_id" =~ ^[A-Z0-9]{10}$ ]] || {
+  print -u2 "Team ID must be exactly 10 uppercase alphanumeric characters."
+  exit 64
+}
 decoded=$(mktemp /tmp/MobileAIKeyboard-Profile.XXXXXX.plist)
 trap 'rm -f "$decoded"' EXIT
 
@@ -27,8 +31,8 @@ expiration=$(plutil -extract ExpirationDate raw "$decoded")
   exit 65
 }
 plutil -extract Entitlements.com.apple.security.application-groups json "$decoded" -o - \
-  | jq -e --arg group "$app_group" 'index($group) != null' >/dev/null || {
-    print -u2 "Profile does not authorize App Group $app_group"
+  | jq -e --arg group "$app_group" 'length == 1 and .[0] == $group' >/dev/null || {
+    print -u2 "Profile App Group entitlement must contain exactly $app_group"
     exit 65
   }
 

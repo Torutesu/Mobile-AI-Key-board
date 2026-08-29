@@ -44,7 +44,7 @@ const platformContracts = {
         // registry and Skill Keys screen own candidate admission and A-Z
         // assignment.  Keeping these as separate source requirements avoids
         // mistaking a Builder deploy/pin for keyboard installation.
-        ['apps/ios/MobileAIKeyboardHost/SkillBuilderView.swift', ['Button("Add To My Keyboard")', 'shortcutRegistry.addPrivateSkill(version)', 'store.send(.installBinding']],
+        ['apps/ios/MobileAIKeyboardHost/SkillBuilderView.swift', ['Button("Add To My Keyboard")', 'shortcutRegistry.addPrivateSkill(version)', 'selectedSkill = createdSkill']],
         ['apps/ios/MobileAIKeyboardHost/ShortcutRegistryStore.swift', ['func addPrivateSkill(_ version:', 'route: .keyboardLocal', 'A–Zキーを割り当ててください']],
         ['apps/ios/MobileAIKeyboardHost/SkillKeysView.swift', ['registry.assign(skillID: skill.id, key: selectedKey)', 'registry.reassign']],
       ],

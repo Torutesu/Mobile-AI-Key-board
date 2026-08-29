@@ -243,6 +243,7 @@ final class ShortcutRegistryStore: ObservableObject {
         guard version.versionNumber > 0,
               version.digest.hasPrefix("sha256:"),
               version.digest.count == 71,
+              LocalSkillExecutor.supportedOperations.contains(version.draft.manifest.localOperation.rawValue),
               !version.draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ShortcutRegistryError.skillUnavailable
         }
@@ -258,7 +259,7 @@ final class ShortcutRegistryStore: ObservableObject {
             // not advertise surrounding context until range replacement is
             // implemented and independently verified.
             inputSources: [.selection],
-            toolSummaries: [ShortcutToolSummary(operation: "local.text.normalize", sideEffect: "none")],
+            toolSummaries: [ShortcutToolSummary(operation: version.draft.manifest.localOperation.rawValue, sideEffect: "none")],
             route: .keyboardLocal
         )
         if let existing = skills.first(where: { $0.id == option.id }) {

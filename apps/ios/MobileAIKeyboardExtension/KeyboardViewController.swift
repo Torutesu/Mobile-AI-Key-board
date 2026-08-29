@@ -35,6 +35,8 @@ final class KeyboardViewController: UIInputViewController {
     private let settingsStore = AppGroupKeyboardSettingsStore()
     private var keyboardSettings = KeyboardSettingsState.defaultFixture
     private var shortcutSnapshot: ShortcutSnapshotV1?
+    private var shortcutGenerationFloor = -1
+    private var shortcutGenerationBoundary: ShortcutAccountBoundaryV1?
     private var shortcutBindings: [ShortcutKeyCode: ShortcutBindingV1] = [:]
     private var shortcutSkills: [String: ShortcutSkillProjectionV1] = [:]
     private var letterButtonsByKey: [ShortcutKeyCode: UIButton] = [:]
@@ -63,14 +65,12 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        let previousSettings = keyboardSettings
         reloadKeyboardSettings()
         synchronizeAutocapitalization()
-        if previousSettings != keyboardSettings {
-            buildTypingView()
-        } else {
-            updateShiftAppearance()
-        }
+        // viewWillDisappear deliberately wipes every private editor buffer.
+        // Reinstall a fresh typing hierarchy on every appearance so iOS does
+        // not revive an empty command/result surface after app or globe switch.
+        buildTypingView()
         refreshFieldSecurityFromProxy()
         updateFullAccessState()
         consumedLongPressKey = nil
@@ -115,6 +115,7 @@ final class KeyboardViewController: UIInputViewController {
     private func refreshVisibleShortcutAuthority() {
         // Re-read even when owner/epoch is unchanged: the host may publish a
         // newer generation, and an initial nil read must converge while warm.
+        updateFullAccessState()
         refreshShortcutSnapshot()
     }
 
@@ -158,10 +159,25 @@ final class KeyboardViewController: UIInputViewController {
             shortcutSnapshot = nil
             shortcutBindings = [:]
             shortcutSkills = [:]
-            clearEphemeralState(showTypingView: typingStack != nil)
+            // Losing the optional Skill projection must not erase an ordinary
+            // local command or its review screen. Only a flow that actually
+            // depends on Skill authority is invalidated.
+            if pendingShortcutActivation != nil || pendingShortcutSkill != nil || paletteWasVisible {
+                clearEphemeralState(showTypingView: typingStack != nil)
+            }
             updateBoundKeyPresentation()
             return
         }
+        if shortcutGenerationBoundary != boundary {
+            shortcutGenerationBoundary = boundary
+            shortcutGenerationFloor = -1
+        }
+        // Async App Group reads can finish out of order. Never let a slower
+        // older generation replace a newer validated view of authority. The
+        // floor is independent of shortcutSnapshot so a transient nil read
+        // cannot reopen replay of an earlier generation.
+        if snapshot.generation < shortcutGenerationFloor { return }
+        shortcutGenerationFloor = max(shortcutGenerationFloor, snapshot.generation)
         shortcutSnapshot = snapshot
         // Host handoffs are intentionally not exposed to the extension until
         // their return path is implemented end-to-end. An old snapshot may
@@ -259,17 +275,25 @@ final class KeyboardViewController: UIInputViewController {
         let first: UIStackView
         let second: UIStackView
         let third: UIStackView
-        switch inputState.layer {
-        case .letters:
-            first = makeLetterRow(OrdinaryKeyboardLayout.letterRows[0])
-            second = makeLetterRow(OrdinaryKeyboardLayout.letterRows[1])
-            third = makeLetterRow(OrdinaryKeyboardLayout.letterRows[2], leading: makeShiftButton(), trailing: makeDeleteButton())
-        case .numbersAndSymbols:
-            first = makeLetterRow(OrdinaryKeyboardLayout.numberRows[0])
-            second = makeLetterRow(OrdinaryKeyboardLayout.numberRows[1])
-            third = makeLetterRow(OrdinaryKeyboardLayout.numberRows[2], trailing: makeDeleteButton())
+        let bottom: UIStackView
+        if usesNumericOnlySurface {
+            first = makeLetterRow("123")
+            second = makeLetterRow("456")
+            third = makeLetterRow("789", trailing: makeDeleteButton())
+            bottom = makeNumericBottomRow()
+        } else {
+            switch inputState.layer {
+            case .letters:
+                first = makeLetterRow(OrdinaryKeyboardLayout.letterRows[0])
+                second = makeLetterRow(OrdinaryKeyboardLayout.letterRows[1])
+                third = makeLetterRow(OrdinaryKeyboardLayout.letterRows[2], leading: makeShiftButton(), trailing: makeDeleteButton())
+            case .numbersAndSymbols:
+                first = makeLetterRow(OrdinaryKeyboardLayout.numberRows[0])
+                second = makeLetterRow(OrdinaryKeyboardLayout.numberRows[1])
+                third = makeLetterRow(OrdinaryKeyboardLayout.numberRows[2], trailing: makeDeleteButton())
+            }
+            bottom = makeBottomRow()
         }
-        let bottom = makeBottomRow()
         let stack = UIStackView(arrangedSubviews: [header, first, second, third, bottom])
         stack.axis = .vertical
         stack.spacing = 4
@@ -379,6 +403,33 @@ final class KeyboardViewController: UIInputViewController {
         return row
     }
 
+    private func makeNumericBottomRow() -> UIStackView {
+        let globe = makeUtilityButton("globe", title: "🌐", label: "次のキーボード")
+        globe.addTarget(self, action: #selector(nextKeyboard), for: .touchUpInside)
+        let zero = makeKey("0")
+        let returnButton = makeUtilityButton("return", title: KeyboardReturnAction.newline.displayLabel, label: "改行")
+        returnButton.addTarget(self, action: #selector(returnKey), for: .touchUpInside)
+        self.returnButton = returnButton
+        let views: [UIView]
+        switch textDocumentProxy.keyboardType {
+        case .phonePad: views = [globe, makeKey("*"), zero, makeKey("#")]
+        case .decimalPad: views = [globe, zero, makeKey("."), returnButton]
+        default: views = [globe, zero, returnButton]
+        }
+        let row = UIStackView(arrangedSubviews: views)
+        row.axis = .horizontal
+        row.spacing = 3
+        row.distribution = .fillEqually
+        return row
+    }
+
+    private var usesNumericOnlySurface: Bool {
+        switch textDocumentProxy.keyboardType {
+        case .phonePad, .numberPad, .decimalPad, .asciiCapableNumberPad: return true
+        default: return false
+        }
+    }
+
     private func makeKey(_ letter: String) -> UIButton {
         let baseLetter = letter.first.map { String($0).lowercased() } ?? letter
         let displayLetter = inputState.displayLetter(Character(baseLetter))
@@ -393,6 +444,7 @@ final class KeyboardViewController: UIInputViewController {
             hold.cancelsTouchesInView = false
             button.addGestureRecognizer(hold)
         }
+        button.addTarget(self, action: #selector(letterTouchBegan(_:)), for: .touchDown)
         button.addTarget(self, action: #selector(letterPressed(_:)), for: .touchUpInside)
         button.addTarget(self, action: #selector(letterTouchEnded(_:)), for: [.touchUpOutside, .touchCancel])
         button.accessibilityHint = "入力欄に文字を入力"
@@ -440,18 +492,29 @@ final class KeyboardViewController: UIInputViewController {
         guard let title = sender.currentTitle, title.count == 1 else { return }
         if let key = ShortcutKeyCode(displayLabel: title), consumedLongPressKey == key {
             consumedLongPressKey = nil
+            if longPressBeganKey == key { longPressBeganKey = nil }
             return
         }
         textDocumentProxy.insertText(title)
         performKeyHaptic()
         inputState.commitLetter()
-        synchronizeAutocapitalization()
+        synchronizeAutocapitalizationAfterDocumentMutation()
         updateShiftAppearance()
+    }
+
+    @objc private func letterTouchBegan(_ sender: UIButton) {
+        guard let title = sender.currentTitle, let key = ShortcutKeyCode(displayLabel: title) else { return }
+        // A stale suppression marker can survive surface replacement without
+        // a matching touch-up. A new touch-down is an unambiguous new pointer
+        // sequence, so it must never inherit the previous hold's suppression.
+        if consumedLongPressKey == key { consumedLongPressKey = nil }
+        if longPressBeganKey == key { longPressBeganKey = nil }
     }
 
     @objc private func letterTouchEnded(_ sender: UIButton) {
         guard let title = sender.currentTitle, let key = ShortcutKeyCode(displayLabel: title) else { return }
         if consumedLongPressKey == key { consumedLongPressKey = nil }
+        if longPressBeganKey == key { longPressBeganKey = nil }
     }
 
     @objc private func toggleShift() {
@@ -500,12 +563,21 @@ final class KeyboardViewController: UIInputViewController {
         returnButton?.accessibilityLabel = "改行"
     }
 
-    @objc private func space() { textDocumentProxy.insertText(" "); performKeyHaptic() }
-    @objc private func returnKey() { textDocumentProxy.insertText("\n"); performKeyHaptic() }
+    @objc private func space() {
+        textDocumentProxy.insertText(" ")
+        performKeyHaptic()
+        synchronizeAutocapitalizationAfterDocumentMutation()
+    }
+    @objc private func returnKey() {
+        textDocumentProxy.insertText("\n")
+        performKeyHaptic()
+        synchronizeAutocapitalizationAfterDocumentMutation()
+    }
     @objc private func startDeleteRepeat() {
         stopDeleteRepeat()
         textDocumentProxy.deleteBackward()
         performKeyHaptic()
+        synchronizeAutocapitalizationAfterDocumentMutation()
         let timer = Timer(timeInterval: 0.08, target: self, selector: #selector(repeatDeleteBackward), userInfo: nil, repeats: true)
         deleteRepeatTimer = timer
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) { [weak self, weak timer] in
@@ -519,7 +591,10 @@ final class KeyboardViewController: UIInputViewController {
         deleteRepeatTimer = nil
     }
 
-    @objc private func repeatDeleteBackward() { textDocumentProxy.deleteBackward() }
+    @objc private func repeatDeleteBackward() {
+        textDocumentProxy.deleteBackward()
+        synchronizeAutocapitalizationAfterDocumentMutation()
+    }
     @objc private func nextKeyboard() { advanceToNextInputMode() }
 
     @objc private func skillKeyLongPress(_ gesture: UILongPressGestureRecognizer) {
@@ -547,21 +622,16 @@ final class KeyboardViewController: UIInputViewController {
             // UIControl may deliver touchUpInside before or after recognizer
             // cleanup depending on the host app. Keep the suppression scoped
             // to this pointer sequence, never to the next tap.
-            DispatchQueue.main.async { [weak self] in
-                if self?.consumedLongPressKey == key { self?.consumedLongPressKey = nil }
-                if self?.longPressBeganKey == key { self?.longPressBeganKey = nil }
-            }
+            if longPressBeganKey == key { longPressBeganKey = nil }
         case .cancelled, .failed:
             guard longPressBeganKey == key else { return }
             statusLabel.text = "長押しをキャンセルしました"
             statusLabel.accessibilityValue = "長押しをキャンセルしました。通常入力は利用できます"
             UIAccessibility.post(notification: .announcement, argument: statusLabel.text)
-            // Keep suppression armed until this touch ends so a cancelled
-            // gesture cannot accidentally commit a character from the same
-            // pointer sequence. A new sequence starts cleanly on touch-up.
-            DispatchQueue.main.async { [weak self] in
-                if self?.longPressBeganKey == key { self?.longPressBeganKey = nil }
-            }
+            // Keep suppression until this pointer's touch-up/cancel. If UIKit
+            // replaces the surface without delivering it, the next independent
+            // touch-down clears the stale marker before it can eat that tap.
+            if longPressBeganKey == key { longPressBeganKey = nil }
         default: break
         }
     }
@@ -1180,6 +1250,7 @@ final class KeyboardViewController: UIInputViewController {
     func textDidChange(_ textInput: UITextInput) {
         consumedLongPressKey = nil
         longPressBeganKey = nil
+        updateFullAccessState()
         updateReturnKeyPresentation()
         synchronizeAutocapitalization()
         refreshFieldSecurityFromProxy()
@@ -1240,7 +1311,9 @@ final class KeyboardViewController: UIInputViewController {
 
     private var keyboardHeight: CGFloat {
         let isPad = traitCollection.userInterfaceIdiom == .pad
-        let isLandscape = !isPad && (traitCollection.verticalSizeClass == .compact || view.bounds.width > view.bounds.height)
+        // The input view is wider than it is tall even in portrait. Device
+        // orientation must come from traits, never the keyboard's own bounds.
+        let isLandscape = !isPad && traitCollection.verticalSizeClass == .compact
         let environment = KeyboardSurfaceEnvironment(
             isPad: isPad,
             isLandscape: isLandscape,
@@ -1270,6 +1343,18 @@ final class KeyboardViewController: UIInputViewController {
                 contextBeforeInput: textDocumentProxy.documentContextBeforeInput
             )
         )
+    }
+
+    private func synchronizeAutocapitalizationAfterDocumentMutation() {
+        // Most hosts update proxy context synchronously. Apply that state now
+        // so a rapid next key cannot observe stale shift, then converge again
+        // after one run-loop turn for hosts that publish context asynchronously.
+        synchronizeAutocapitalization()
+        updateShiftAppearance()
+        DispatchQueue.main.async { [weak self] in
+            self?.synchronizeAutocapitalization()
+            self?.updateShiftAppearance()
+        }
     }
 
     private func reloadKeyboardSettings() {

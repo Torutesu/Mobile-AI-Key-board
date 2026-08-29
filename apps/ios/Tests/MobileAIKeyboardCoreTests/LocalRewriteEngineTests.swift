@@ -27,6 +27,14 @@ final class LocalRewriteEngineTests: XCTestCase {
     func testEmptyInputDoesNotProduceResult() {
         XCTAssertNil(LocalRewriteEngine().politeRewrite(" \n"))
     }
+
+    func testWhitespaceRewriteKeepsParagraphsAndProtectedEntities() throws {
+        let input = "https://example.com   を確認  \n \n \n田中さん   よろしく"
+        let result = try XCTUnwrap(LocalRewriteEngine().whitespaceRewrite(input))
+        XCTAssertEqual(result.rewritten, "https://example.com を確認\n\n田中さん よろしく")
+        XCTAssertTrue(result.preservedEntities.contains("https://example.com"))
+        XCTAssertTrue(result.preservedEntities.contains("田中さん"))
+    }
 }
 
 final class EntityLockingTests: XCTestCase {

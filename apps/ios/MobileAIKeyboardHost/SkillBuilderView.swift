@@ -6,6 +6,7 @@ import MobileAIKeyboardCore
 /// versioning remain enforced below this short consumer flow.
 struct SkillBuilderView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @EnvironmentObject private var store: AccountActivityStore
     @EnvironmentObject private var shortcutRegistry: ShortcutRegistryStore
     @State private var request = ""
@@ -13,14 +14,17 @@ struct SkillBuilderView: View {
     @State private var selectedIcon = "wand.and.stars"
     @State private var previewInput = "明日の会議  よろしくお願いします"
     @State private var previewOutput: String?
+    @State private var previewNeedsRefresh = false
     @State private var selectedSkill: ShortcutSkillOption?
     @State private var errorMessage: String?
     @State private var isWorking = false
     @State private var createdSkill: ShortcutSkillOption?
+    @State private var restoredDraft = false
     @FocusState private var requestFocused: Bool
 
     private let background = Color(red: 0.94, green: 0.96, blue: 0.98)
-    private let suggestions = ["選択した文章を読みやすく整える", "余分な空白と改行を整える", "句読点を自然に整える"]
+    private let suggestions = ["選択した文章を読みやすく整える", "丁寧な表現に整える", "余分な空白と改行を整える", "句読点を自然に整える"]
+    private let draftStore = SkillBuilderDraftStore()
 
     var body: some View {
         ZStack {
@@ -46,14 +50,16 @@ struct SkillBuilderView: View {
                         Label("最初は端末内だけで試します", systemImage: "lock.shield")
                             .font(.caption.weight(.medium)).foregroundStyle(.secondary)
                     } else {
-                        primaryButton(title: "キーボードに追加", icon: "keyboard.badge.ellipsis", enabled: !isWorking) { installSkill() }
+                        primaryButton(title: previewNeedsRefresh ? "もう一度試してから追加" : "キーボードに追加", icon: "keyboard.badge.ellipsis", enabled: !isWorking && !previewNeedsRefresh) { installSkill() }
                             .accessibilityIdentifier("install-created-skill")
                     }
                 }
                 .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 8)
                 .background(.ultraThinMaterial)
             } else if let createdSkill {
-                primaryButton(title: "キーを選ぶ", icon: "keyboard", enabled: true) { selectedSkill = createdSkill }
+                primaryButton(title: createdBinding == nil ? "キーを選ぶ" : "完了", icon: createdBinding == nil ? "keyboard" : "checkmark", enabled: true) {
+                    if createdBinding == nil { selectedSkill = createdSkill } else { dismiss() }
+                }
                     .accessibilityIdentifier("assign-created-skill")
                     .padding(.horizontal, 20).padding(.vertical, 12)
                     .background(.ultraThinMaterial)
@@ -62,9 +68,17 @@ struct SkillBuilderView: View {
         .preferredColorScheme(.light)
         .navigationBarBackButtonHidden(true)
         .sheet(item: $selectedSkill) { skill in
-            TriggerKeySheet(skill: skill, existingBinding: nil)
+            TriggerKeySheet(skill: skill, existingBinding: nil) {
+                guard let version = store.skillBuilder.versions.last(where: { $0.skillID == skill.id && $0.id == skill.versionID }) else { return }
+                store.send(.installBinding(
+                    versionID: version.id,
+                    digest: version.digest,
+                    bindingIdentifier: version.draft.bindingIdentifier,
+                    now: Date()
+                ))
+            }
                 .environmentObject(shortcutRegistry)
-                .presentationDetents([.large])
+                .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.large] : [.fraction(0.72), .large])
                 .presentationDragIndicator(.visible)
         }
         .alert("Skillを作成できませんでした", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
@@ -72,7 +86,14 @@ struct SkillBuilderView: View {
         } message: { Text(errorMessage ?? "もう一度お試しください。") }
         .onAppear {
             prepareBuilderIfNeeded()
+            restoreDraftIfNeeded()
             requestFocused = ProcessInfo.processInfo.arguments.contains("-skill-builder-focus-qa")
+        }
+        .onChange(of: request) { _ in persistDraft() }
+        .onChange(of: name) { _ in persistDraft() }
+        .onChange(of: selectedIcon) { _ in persistDraft() }
+        .onChange(of: previewInput) { _ in
+            if previewOutput != nil { previewNeedsRefresh = true }
         }
     }
 
@@ -94,7 +115,7 @@ struct SkillBuilderView: View {
     private var requestComposer: some View {
         VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("何をしたい？").font(.system(size: 38, weight: .bold, design: .rounded)).accessibilityAddTraits(.isHeader)
+                Text("何をしたい？").font(.system(.largeTitle, design: .rounded).weight(.bold)).accessibilityAddTraits(.isHeader)
                 Text("まずは、選択した文章の読みやすさを整えるSkillを作れます。").font(.body).foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 14) {
@@ -160,6 +181,10 @@ struct SkillBuilderView: View {
                 if let previewOutput {
                     Text(previewOutput).font(.title3.weight(.medium)).padding(16).frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color.green.opacity(0.09), in: RoundedRectangle(cornerRadius: 16)).accessibilityIdentifier("skill-preview-result")
+                    if previewNeedsRefresh {
+                        Label("入力を変更しました。もう一度試すと追加できます", systemImage: "arrow.clockwise")
+                            .font(.footnote.weight(.medium)).foregroundStyle(.orange)
+                    }
                 }
             }
             .padding(18).background(.white.opacity(0.94), in: RoundedRectangle(cornerRadius: 26)).shadow(color: .black.opacity(0.05), radius: 22, y: 12)
@@ -178,8 +203,8 @@ struct SkillBuilderView: View {
                 Image(systemName: "checkmark").font(.system(size: 44, weight: .bold)).foregroundStyle(.green)
             }
             VStack(spacing: 8) {
-                Text("できました").font(.system(size: 36, weight: .bold, design: .rounded))
-                Text("「\(name)」の準備ができました。\n次に、呼び出すキーを選びます。")
+                Text("できました").font(.system(.largeTitle, design: .rounded).weight(.bold))
+                Text(createdBinding.map { "「\(name)」を\($0.keyCode.displayLabel)キーに割り当てました。" } ?? "「\(name)」の準備ができました。\n次に、呼び出すキーを選びます。")
                     .multilineTextAlignment(.center).foregroundStyle(.secondary)
             }
             Button("完了") { dismiss() }.font(.headline).frame(minHeight: 48)
@@ -194,7 +219,7 @@ struct SkillBuilderView: View {
     private var draft: SkillBuilderDraft {
         let input = previewInput.trimmingCharacters(in: .whitespacesAndNewlines)
         let expected = normalizedPreview(for: input)
-        let manifest = SkillTypedManifest(trigger: .keyboardCommand, input: .selectedText, output: .rewrittenText, allowedTools: [.localTextTransform], riskCeiling: .r1LocalTransform, confirmation: .always, retention: .ephemeral, testExamples: [SkillTestExample(input: input, expectedOutput: expected)])
+        let manifest = SkillTypedManifest(trigger: .keyboardCommand, input: .selectedText, output: .rewrittenText, allowedTools: [.localTextTransform], localOperation: selectedOperation, riskCeiling: .r1LocalTransform, confirmation: .always, retention: .ephemeral, testExamples: [SkillTestExample(input: input, expectedOutput: expected)])
         let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let digestSeed = cleanName.unicodeScalars.map { String(format: "%02x", $0.value) }.joined().prefix(24)
         return SkillBuilderDraft(name: cleanName, icon: selectedIcon, desiredOutcome: request.trimmingCharacters(in: .whitespacesAndNewlines), plainDescription: request.trimmingCharacters(in: .whitespacesAndNewlines), advancedSchema: manifest.canonicalSchema, bindingIdentifier: "private.skill.\(digestSeed)", manifest: manifest)
@@ -219,6 +244,7 @@ struct SkillBuilderView: View {
         // Preview uses the same closed local executor as deployment without
         // reserving deployment quota. Add performs the one authoritative run.
         previewOutput = normalizedPreview(for: previewInput)
+        previewNeedsRefresh = false
         UIImpactFeedbackGenerator(style: .soft).impactOccurred(); isWorking = false
     }
 
@@ -229,10 +255,12 @@ struct SkillBuilderView: View {
             return
         }
         previewOutput = normalizedPreview(for: previewInput)
+        previewNeedsRefresh = false
         UISelectionFeedbackGenerator().selectionChanged()
     }
 
     private func installSkill() {
+        guard !previewNeedsRefresh else { return }
         guard shortcutRegistry.canPublishToKeyboard else {
             errorMessage = "キーボードとSkillを共有できません。設定でMobile AI Keyboardとフルアクセスを有効にしてから戻ってください。"
             UINotificationFeedbackGenerator().notificationOccurred(.error)
@@ -256,8 +284,9 @@ struct SkillBuilderView: View {
         guard let version = store.skillBuilder.versions.last else { errorMessage = "Skillを保存できませんでした。"; isWorking = false; return }
         do {
             try shortcutRegistry.addPrivateSkill(version)
-            store.send(.installBinding(versionID: version.id, digest: version.digest, bindingIdentifier: version.draft.bindingIdentifier, now: Date()))
             createdSkill = shortcutRegistry.skills.first { $0.id == version.skillID && $0.versionID == version.id }
+            draftStore.clear()
+            if let createdSkill { selectedSkill = createdSkill }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } catch { errorMessage = error.localizedDescription }
         isWorking = false
@@ -266,13 +295,50 @@ struct SkillBuilderView: View {
     private func normalizedPreview(for input: String) -> String {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "文章を入力してください。" }
-        return LocalRewriteEngine().punctuationRewrite(trimmed)?.rewritten ?? trimmed
+        return LocalSkillExecutor.execute(operation: selectedOperation, input: trimmed)?.rewritten ?? trimmed
     }
 
     private func applySuggestedName(for suggestion: String) {
-        if suggestion.contains("空白") { name = "空白を整える" }
+        if suggestion.contains("丁寧") { name = "丁寧に整える" }
+        else if suggestion.contains("空白") { name = "空白を整える" }
         else if suggestion.contains("句読点") { name = "句読点を整える" }
         else { name = "読みやすく整える" }
+    }
+
+    private var selectedOperation: SkillLocalOperation {
+        let value = request.lowercased()
+        if ["丁寧", "敬語", "ビジネス", "やわらか"].contains(where: value.contains) { return .polite }
+        if ["空白", "改行", "スペース"].contains(where: value.contains) { return .whitespace }
+        if ["句読点", "記号"].contains(where: value.contains) { return .punctuation }
+        return .normalize
+    }
+
+    private var createdBinding: ShortcutBindingV1? {
+        guard let createdSkill else { return nil }
+        return shortcutRegistry.allBindings.first { $0.skillID == createdSkill.id && $0.versionID == createdSkill.versionID }
+    }
+
+    private func restoreDraftIfNeeded() {
+        guard !restoredDraft else { return }
+        restoredDraft = true
+        if ProcessInfo.processInfo.arguments.contains("-ui-test-reset") {
+            draftStore.clear()
+            return
+        }
+        guard let owner = store.skillBuilder.ownerSubject,
+              let epoch = store.skillBuilder.accountEpoch,
+              let saved = draftStore.load(ownerSubject: owner, accountEpoch: epoch) else { return }
+        request = saved.request
+        name = saved.name
+        selectedIcon = saved.icon
+    }
+
+    private func persistDraft() {
+        guard restoredDraft,
+              createdSkill == nil,
+              let owner = store.skillBuilder.ownerSubject,
+              let epoch = store.skillBuilder.accountEpoch else { return }
+        draftStore.save(ownerSubject: owner, accountEpoch: epoch, request: request, name: name, icon: selectedIcon)
     }
 
     private var intentIsSupported: Bool {
@@ -293,4 +359,40 @@ struct SkillBuilderView: View {
             .buttonStyle(.plain).foregroundStyle(.white).background(enabled ? Color.primary : Color.gray, in: Capsule())
             .contentShape(Capsule()).disabled(!enabled)
     }
+}
+
+private struct PersistedSkillBuilderDraft: Codable {
+    let ownerSubject: String
+    let accountEpoch: Int
+    let request: String
+    let name: String
+    let icon: String
+}
+
+private struct SkillBuilderDraftStore {
+    private let key = "mobile-ai-keyboard.skill-builder-draft.v1"
+
+    func load(ownerSubject: String, accountEpoch: Int) -> PersistedSkillBuilderDraft? {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let value = try? JSONDecoder().decode(PersistedSkillBuilderDraft.self, from: data),
+              value.ownerSubject == ownerSubject,
+              value.accountEpoch == accountEpoch else { return nil }
+        return value
+    }
+
+    func save(ownerSubject: String, accountEpoch: Int, request: String, name: String, icon: String) {
+        // Preview input may contain user text and is intentionally never
+        // retained. Draft metadata is bounded before local persistence.
+        let value = PersistedSkillBuilderDraft(
+            ownerSubject: String(ownerSubject.prefix(256)),
+            accountEpoch: accountEpoch,
+            request: String(request.prefix(2_000)),
+            name: String(name.prefix(120)),
+            icon: String(icon.prefix(80))
+        )
+        guard let data = try? JSONEncoder().encode(value) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+
+    func clear() { UserDefaults.standard.removeObject(forKey: key) }
 }

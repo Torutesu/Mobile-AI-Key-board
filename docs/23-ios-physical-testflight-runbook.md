@@ -15,10 +15,18 @@ This runbook qualifies one exact commit and archive. Simulator results are usefu
 ```sh
 cd apps/ios
 IOS_DEVELOPMENT_TEAM=<team-id> ./scripts/archive-testflight.sh
-IOS_DEVELOPMENT_TEAM=<team-id> UPLOAD_TO_TESTFLIGHT=1 ./scripts/archive-testflight.sh
+IOS_DEVELOPMENT_TEAM=<team-id> \
+ASC_KEY_PATH=<absolute-path-to-AuthKey.p8> \
+ASC_KEY_ID=<10-char-key-id> \
+ASC_ISSUER_ID=<issuer-uuid> \
+ASC_APPLE_ID=<numeric-app-id> \
+IOS_BUILD_NUMBER=<unique-monotonic-integer> \
+UPLOAD_TO_TESTFLIGHT=1 ./scripts/archive-testflight.sh
 ```
 
-The archive script embeds the exact 40-character source commit in both the host and extension, rejects a dirty worktree, validates signed App Group entitlements and privacy manifests, and writes a candidate-scoped `candidate-evidence.json` beside the archive/export directories with executable and aggregate candidate digests. CI derives a unique numeric build number and candidate directory from the GitHub run. Before signing, it verifies that both supplied profiles match the exact bundle ID, team, non-expired lifetime, and App Group. Upload mode then waits for App Store Connect to finish processing that exact version/build and stores `TestFlight/processing-status.json`. Preserve both files with the archive evidence. These are signed-archive and App Store processing evidence, not physical-device qualification.
+Do not paste these credentials into chat, commit them, or place them inside the repository. Keep the API key in a private local directory or use the protected `testflight-production` GitHub environment. Every repeated upload requires a new numeric `IOS_BUILD_NUMBER`.
+
+The archive script embeds the exact checked-out 40-character source commit in both the host and extension, rejects a dirty worktree (dirty override is never accepted for upload), validates strict signatures, exact App Group entitlements and privacy manifests, and writes a candidate-scoped `candidate-evidence.json` beside the archive/export directories with executable, archive, exported IPA, and aggregate candidate digests. CI derives a unique numeric build number and candidate directory from the GitHub run. Before signing, it verifies that both supplied profiles match the exact bundle ID, team, non-expired lifetime, and sole App Group. Upload mode then re-verifies the exported distribution-signed host and extension, waits for App Store Connect to finish processing that exact version/build, and stores `TestFlight/processing-status.json`. Preserve both files with the archive evidence. These are signed-archive and App Store processing evidence, not physical-device qualification.
 
 The workflow additionally requires the numeric App Store Connect application ID in `ASC_APPLE_ID`; this is distinct from the bundle ID and API key ID.
 
